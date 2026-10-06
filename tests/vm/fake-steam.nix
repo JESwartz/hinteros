@@ -23,8 +23,8 @@
     machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
     machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
 
-    # Fake library: manifests installed for the session user.
-    machine.wait_until_succeeds("ls ~hinteros/.local/share/Steam/steamapps/appmanifest_*.acf | wc -l | grep -qx 3")
+    # Fake Steam home (3 games, 3 tools) installed for the session user.
+    machine.wait_until_succeeds("ls ~hinteros/.local/share/Steam/steamapps/appmanifest_*.acf | wc -l | grep -qx 6")
     machine.succeed("grep -q Fake ~hinteros/.local/share/Steam/steamapps/appmanifest_1000002.acf")
 
     # Run the stub as the session user, inside the compositor's environment.
