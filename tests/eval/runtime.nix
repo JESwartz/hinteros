@@ -79,9 +79,9 @@ let
       expr = has "NetworkManager.settings.modify.own" polkit;
       expected = true;
     };
-    testPolkitNoSystemConnections = {
+    testPolkitSystemConnectionsAccepted = {
       expr = has "settings.modify.system" polkit;
-      expected = false;
+      expected = true;
     };
     testSecurityHardening = {
       expr = [

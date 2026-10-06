@@ -50,13 +50,13 @@
         "org.freedesktop.login1.power-off",
         "org.freedesktop.NetworkManager.settings.modify.own",
         "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.settings.modify.system",  # accepted: Wi-Fi PSKs readable
         "org.freedesktop.NetworkManager.enable-disable-wifi",
     ):
         assert check(action) == 0, f"session user should be allowed {action}"
 
     for action in (
         "org.freedesktop.systemd1.manage-units",
-        "org.freedesktop.NetworkManager.settings.modify.system",
         "org.freedesktop.systemd1.manage-unit-files",
         "org.freedesktop.hostname1.set-static-hostname",
         "org.freedesktop.timedate1.set-time",
@@ -71,6 +71,7 @@
     for action in (
         "org.freedesktop.login1.reboot",
         "org.freedesktop.login1.power-off",
+        "org.freedesktop.NetworkManager.settings.modify.system",
         "org.freedesktop.NetworkManager.settings.modify.own",
     ):
         assert check(action, other) != 0, f"other users must not be allowed {action}"

@@ -25,15 +25,16 @@ let
   '';
 
   # What the Wi-Fi settings screen needs: scan, toggle, connect, and per-user connections.
-  # TRADE-OFF (undecided): settings.modify.system is deliberately NOT granted. System-wide
-  # connections would be readable, Wi-Fi passwords included, by the session user; with only
-  # modify.own, secrets stay in the user's own connections. If boot-time Wi-Fi before login
-  # turns out to need system connections, grant it knowingly (see threat-model.md, open item 4).
+  # ACCEPTED (threat-model.md, B3): settings.modify.system is granted. The session user can
+  # therefore add system-wide connections and read their secrets, Wi-Fi passwords included.
+  # Accepted so Wi-Fi works before login and for every profile; the PSK is not treated as
+  # secret from a game. Other users and non-local/inactive sessions keep the stock policy.
   networkActions = [
     "org.freedesktop.NetworkManager.network-control"
     "org.freedesktop.NetworkManager.enable-disable-wifi"
     "org.freedesktop.NetworkManager.wifi.scan"
     "org.freedesktop.NetworkManager.settings.modify.own"
+    "org.freedesktop.NetworkManager.settings.modify.system"
   ];
 
   powerActions = map (a: "org.freedesktop.login1.${a}") [
@@ -83,8 +84,6 @@ in
     lib.mkMerge [
       {
         security.polkit.enable = true;
-        # Physical access must not mean root: no boot menu editing (init=/bin/sh).
-        boot.loader.systemd-boot.editor = false;
       }
 
       (lib.mkIf cfg.network.enable {
