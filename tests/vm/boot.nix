@@ -61,6 +61,19 @@
     machine.wait_for_text("HinterOS", timeout=timedelta(seconds=120))
     machine.screenshot("launcher")
 
+    # The real launcher reached the real daemon: the home screen shows the built-in Steam tile
+    # and the Games row (not the connecting, unreachable or version-mismatch notices), and the
+    # daemon logged a successful 0.3 handshake from the launcher.
+    machine.wait_for_text("Steam", timeout=timedelta(seconds=120))
+    machine.wait_for_text("Games", timeout=timedelta(seconds=60))
+    screen = machine.get_screen_text()
+    for bad in ("Can't reach", "versions don't match", "Connecting to the"):
+        assert bad.lower() not in screen.lower(), f"launcher shows a connection notice ({bad}): {screen}"
+    machine.wait_until_succeeds(
+        "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
+        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.3'"
+    )
+
     # System service: socket in /run/hinteros, root:hinteros 0660, answers the API.
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
