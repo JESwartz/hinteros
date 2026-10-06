@@ -5,5 +5,6 @@
     ./input.nix
     ./session.nix
     ./state.nix
+    ./fake-steam.nix
   ];
 }

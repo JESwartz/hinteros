@@ -74,6 +74,7 @@
         daemon = ./nixos/modules/daemon.nix;
         input = ./nixos/modules/input.nix;
         state = ./nixos/modules/state.nix;
+        fake-steam = ./nixos/modules/fake-steam.nix;
       };
 
       nixosConfigurations = {
@@ -110,6 +111,7 @@
         boot = import ./tests/vm/boot.nix { inherit self pkgs; };
         gamescope = import ./tests/vm/gamescope.nix { inherit self pkgs; };
         input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
+        fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
       };
 

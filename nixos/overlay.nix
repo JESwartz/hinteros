@@ -3,4 +3,5 @@
 # flake.nix's `overlays.default`.
 final: _prev: {
   hinteros-placeholder-home = final.callPackage ./pkgs/placeholder-home.nix { };
+  hinteros-fake-steam = final.callPackage ./pkgs/fake-steam { };
 }

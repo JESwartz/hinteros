@@ -13,8 +13,11 @@
     `.system.package`, `.logLevel`. A systemd user service `hinteros-session` for the session user
     (socket `$XDG_RUNTIME_DIR/hinteros/session.sock`) and a root system service `hinteros-system`
     (`/run/hinteros/system.sock`, 0660, group `hinteros`, which the session user joins).
+  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `apps` and the first profile's user (TODO M7: one user per profile).
+  - `fake-steam.nix`: `hinteros.fakeSteam.enable` (tests only) installs the stub `steam` and the fake library manifests for the session user.
   - `overlay.nix`: adds `overlays.default` to nixpkgs.
-- `overlay.nix`, `pkgs/`: the overlay and its packages. `hinteros-placeholder-home` is an xterm
+- `lib/mk-device.nix`: `lib.mkDevice` (TODO: stable nixpkgs base as a second input).
+- `overlay.nix`, `pkgs/`: the overlay and its packages. `hinteros-fake-steam` is a stub `steam` (logs argv to `$XDG_RUNTIME_DIR/fake-steam.log`, opens an xterm "Fake game <id>" on `steam://rungameid/<id>`) plus `appmanifest_*.acf` files. `hinteros-placeholder-home` is an xterm
   showing text.
 - `vm/`: the test system (`default.nix`, shared with the VM tests) and the interactive QEMU
   hardware (`qemu.nix`).

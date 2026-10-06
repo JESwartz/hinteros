@@ -1,0 +1,50 @@
+# Fake Steam under the cage session: the stub `steam` records a steam://rungameid launch in
+# its log and opens a visible "Fake game <id>" window that OCR can see. Daemon and launcher
+# tests use this in place of the real (unfree) Steam.
+{ self, pkgs }:
+(pkgs.extend self.overlays.default).testers.runNixOSTest {
+  name = "hinteros-fake-steam";
+  enableOCR = true;
+
+  nodes.machine = {
+    imports = [
+      self.nixosModules.session
+      self.nixosModules.daemon
+      self.nixosModules.fake-steam
+      ../../nixos/vm
+    ];
+    hinteros.fakeSteam.enable = true;
+  };
+
+  testScript = ''
+    from datetime import timedelta
+
+    machine.wait_for_unit("multi-user.target")
+    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
+    machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
+
+    # Fake library: manifests installed for the session user.
+    machine.wait_until_succeeds("ls ~hinteros/.local/share/Steam/steamapps/appmanifest_*.acf | wc -l | grep -qx 3")
+    machine.succeed("grep -q Fake ~hinteros/.local/share/Steam/steamapps/appmanifest_1000002.acf")
+
+    # Run the stub as the session user, inside the compositor's environment.
+    pid = machine.succeed("pgrep -u hinteros -f hinteros-launcher | head -1").strip()
+    machine.succeed(
+        f"tr '\\0' '\\n' < /proc/{pid}/environ "
+        "| grep -E '^(XDG_RUNTIME_DIR|WAYLAND_DISPLAY|DISPLAY)=' | sed 's/^/export /' > /tmp/session-env"
+    )
+    run = "runuser -u hinteros -- sh -c '. /tmp/session-env; steam %s'"
+    machine.succeed(run % "-silent")
+    machine.succeed(run % "steam://rungameid/1000002")
+
+    uid = machine.succeed("id -u hinteros").strip()
+    steam_log = f"/run/user/{uid}/fake-steam.log"
+    machine.succeed(f"grep -q 'argv: steam://rungameid/1000002' {steam_log}")
+    machine.succeed(f"grep -q 'launch: 1000002' {steam_log}")
+    machine.succeed(f"grep -q 'argv: -silent' {steam_log}")
+
+    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/xterm '", timeout=60)
+    machine.wait_for_text("Fake game", timeout=timedelta(seconds=120))
+    machine.screenshot("fake-game")
+  '';
+}
