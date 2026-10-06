@@ -6,6 +6,9 @@
   state,
   # Path to a nixos-facter report, or null before one exists.
   facterReport ? null,
+  # The device config dir (flake.nix, flake.lock, state.json) this system is built from; embedded
+  # in the toplevel as the generation snapshot. null: the snapshot is just state.json.
+  configDir ? null,
   # Extra NixOS modules (hardware profiles, the dev box's extras).
   extraModules ? [ ],
   # nixpkgs base: "unstable" or "stable".
@@ -26,6 +29,7 @@ nixpkgsFor.${base}.lib.nixosSystem {
   modules = [
     self.nixosModules.default
     { hinteros.state = state; }
+    (nixpkgs.lib.optionalAttrs (configDir != null) { hinteros.deviceConfig.configDir = configDir; })
     {
       hinteros.session.enable = true;
       hinteros.daemon.enable = true;

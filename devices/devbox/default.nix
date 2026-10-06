@@ -9,5 +9,7 @@ self.lib.mkDevice {
   # TODO(M1): generate on the box with `nixos-facter` and check it in as facter.json,
   # then pass `facterReport = ./facter.json;`.
   facterReport = null;
+  # The snapshot embedded in every generation (state.json; there is no flake.nix here).
+  configDir = ./.;
   extraModules = [ ./hardware.nix ];
 }
