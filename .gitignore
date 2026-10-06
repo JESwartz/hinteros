@@ -1,0 +1,7 @@
+# Nix
+result
+result-*
+.direnv/
+
+# VM disk images from `nix run .#vm`
+*.qcow2
