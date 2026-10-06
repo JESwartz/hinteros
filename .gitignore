@@ -5,3 +5,4 @@ result-*
 
 # VM disk images from `nix run .#vm`
 *.qcow2
+.pre-commit-config.yaml
