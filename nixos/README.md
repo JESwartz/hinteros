@@ -5,6 +5,10 @@
     Options: `hinteros.session.enable`, `.user` (default `hinteros`), `.compositor`
     (`gamescope` or `cage`), `.environment`, `.homeApp`
     (package, default `pkgs.hinteros-launcher`; `pkgs.hinteros-placeholder-home` is kept for debugging), `.gamescope.package`, `.gamescope.extraArgs`.
+    `.gamescope.backend` (`drm`, `headless`, `wayland`, `sdl`; default: gamescope chooses).
+  - `input.nix`: `hinteros.input.enable` (default: the session is enabled). InputPlumber with polkit,
+    the session user in group `inputplumber`, its udev rules, and a oneshot that sets
+    `ManageAllDevices` (temporary; the session daemon will own it).
   - `daemon.nix`: `hinteros.daemon.enable`, `.group` (default `hinteros`), `.session.package`,
     `.system.package`, `.logLevel`. A systemd user service `hinteros-session` for the session user
     (socket `$XDG_RUNTIME_DIR/hinteros/session.sock`) and a root system service `hinteros-system`
@@ -19,7 +23,11 @@
 
 ## VM and gamescope
 
-gamescope does not start on the VM's software Vulkan (llvmpipe lacks DRM format modifiers and
-dma-buf export), so the VM and the `boot` test use `hinteros.session.compositor = "cage"`
-(software rendering). `nixosConfigurations.vm-gamescope` is the same VM with gamescope, for
-a Vulkan-capable setup. Whether gamescope can be tested in a VM is M0 spike 2.
+gamescope cannot present on the VM's software Vulkan with the DRM backend (llvmpipe lacks DRM
+format modifiers and dma-buf export), so the VM and the `boot` test use
+`hinteros.session.compositor = "cage"` (software rendering). gamescope's `headless` backend
+(`hinteros.session.gamescope.backend = "headless"`) does run on lavapipe, but only simple
+clients render: the `gamescope` test runs it with the xterm placeholder home app and checks a
+`gamescopectl screenshot` by OCR. The Flutter launcher stays on cage in VM tests (spike 2).
+`nixosConfigurations.vm-gamescope` is the interactive VM with gamescope for a Vulkan-capable setup.
+On gamescope the launcher runs on native Wayland (`GDK_BACKEND=wayland`, `--expose-wayland`).

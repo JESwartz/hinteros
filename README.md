@@ -23,11 +23,11 @@ one consistent system.
 
 | Output | Contents |
 |---|---|
-| `nixosModules.default` | All HinterOS modules plus the overlay; individual modules are `session`, `daemon` and `overlay` |
+| `nixosModules.default` | All HinterOS modules plus the overlay; individual modules are `session`, `input`, `daemon` and `overlay` |
 | `overlays.default` | HinterOS packages: `hinteros-launcher`, `hinteros-session`, `hinteros-system` (from the component flakes) and the placeholder home app |
 | `nixosConfigurations.vm` | Test VM that autologs in and starts the console session (cage in the VM, see `nixos/README.md`); `vm-gamescope` uses gamescope |
 | `packages.x86_64-linux.vm`, `apps.x86_64-linux.vm` | `nix run .#vm` opens the VM in a window (software rendering) |
-| `checks.x86_64-linux` | `pre-commit` (nixfmt, statix, deadnix) and the `boot` VM test (autologin, cage and the launcher up, OCR finds "HinterOS", both daemon sockets answer hello and ping) |
+| `checks.x86_64-linux` | `pre-commit` (nixfmt, statix, deadnix) and VM tests: `boot` (autologin, cage and the launcher up, OCR finds "HinterOS", both daemon sockets answer hello and ping), `gamescope` (headless gamescope with the placeholder app, screenshot OCR) and `input-layer` (InputPlumber with a fake pad: virtual target, intercept modes, DBus events) |
 | `devShells.default`, `formatter` | Dev shell with the lint tools and git hooks; `nix fmt` |
 
 `nix flake check` runs everything above, including the VM test (needs `/dev/kvm`).
@@ -48,7 +48,7 @@ scripts/dev-override build .#vm
 
 | Path | Contents |
 |---|---|
-| `nixos/modules/` | HinterOS NixOS modules (session, apps, server, settings) |
+| `nixos/modules/` | HinterOS NixOS modules (session, input, daemon) |
 | `nixos/overlay.nix`, `nixos/pkgs/` | The overlay and the packages it adds |
 | `nixos/vm/` | Test VM configuration (shared by `nix run .#vm` and the VM tests) |
 | `scripts/` | Dev scripts (`dev-override`) |

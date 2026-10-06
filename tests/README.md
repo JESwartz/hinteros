@@ -1,6 +1,6 @@
 # Tests
 
-- `vm/`: NixOS VM tests, run by `nix flake check` and CI.
+- `vm/`: NixOS VM tests (`boot`, `gamescope`, `input-layer`), run by `nix flake check` and CI.
 - `couch/`: manual checklists for each milestone's exit criterion, run on real hardware
   with no keyboard attached.
 
