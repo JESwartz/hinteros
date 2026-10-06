@@ -82,6 +82,8 @@
         runtime = ./nixos/modules/runtime.nix;
         maintenance = ./nixos/modules/maintenance.nix;
         hardening = ./nixos/modules/hardening.nix;
+        # The installer environment (hinteros-install, the offline closure); the ISO adds iso.nix.
+        installer = import ./nixos/installer { inherit self; };
       };
 
       nixosConfigurations = {
@@ -90,10 +92,20 @@
         vm-gamescope = mkVm [ { hinteros.session.compositor = "gamescope"; } ];
         # Dev box (mini PC #1), deployed with nixos-rebuild --target-host. See devices/devbox.
         devbox = import ./devices/devbox { inherit self; };
+        # The installer ISO: `nix build .#iso`. See nixos/installer.
+        installer = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules = [
+            self.nixosModules.default
+            self.nixosModules.installer
+            ./nixos/installer/iso.nix
+          ];
+        };
       };
 
       packages.${system} = {
         vm = self.nixosConfigurations.vm.config.system.build.vm;
+        iso = self.nixosConfigurations.installer.config.system.build.isoImage;
         default = self.packages.${system}.vm;
       };
 
@@ -124,6 +136,7 @@
         hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
+        install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
