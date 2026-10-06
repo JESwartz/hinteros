@@ -5,13 +5,16 @@ controller. Deploy the dev box (`nixos-rebuild switch --flake .#devbox --target-
 keyboard attached. Needs network, a Jellyfin server and accounts for Plex, YouTube (optional) and
 Crunchyroll.
 
-Before: the daemon must be on session API 0.4 for controller-to-key translation
-(`hinteros.daemon.session.emitInputKeys = true`; see `nixos/modules/apps.nix`).
+The daemon is on session API 0.4: controller-to-key translation (`input = "keyboard"` in `nixos/modules/apps.nix`) and the on-screen keyboard (OSK, `hinteros.daemon.osk`) are on by default.
 
 ## Home screen
 
 - [ ] The launcher lists Jellyfin, Plex (dev box only), YouTube, Crunchyroll and Firefox, each with its generated letter icon.
 - [ ] `/dev/uinput` is usable by the session user (`id` shows `uinput`; the daemon logs no uinput error).
+- [ ] Guide+Y (hold Guide, press Y) summons the OSK over any app without taking focus; it shows over Firefox and Jellyfin, d-pad/A/B drive it, Guide or Home hides it. Record: its size and position at 4K and 1080p, and any flicker.
+- [ ] Home now fires on Guide *release* (so a Guide+Y chord does not go Home): a plain tap of Guide still goes Home promptly; holding Guide and pressing Y does not. Record: any lag felt.
+- [ ] Typing through the OSK reaches the focused field: a URL and a password with symbols (`@ ! ? : = -`), plus one non-US character (goes through gamescope's input method).
+- [ ] gamescope version: `hinteros.session.gamescope.reviewedVersion` matches the running one (evaluation fails otherwise).
 
 ## Jellyfin (`jellyfin-desktop`)
 
@@ -30,7 +33,7 @@ Before: the daemon must be on session API 0.4 for controller-to-key translation
 
 - [ ] Opens `youtube.com/tv` (the leanback TV UI, not the desktop site). Record: if Google served the desktop UI, the User-Agent in `apps.nix` needs changing.
 - [ ] Sign in with the TV code flow (youtube.com/activate on a phone) or the OSK.
-- [ ] D-pad navigates, A selects, B goes back (Escape); play a video, seek, pause, quit back to the launcher.
+- [ ] D-pad navigates, A selects, B goes back (Escape; if YouTube TV ignores it, set `hinteros.apps.youtube.backKey = "backspace"` and re-test); play a video, seek, pause, quit back to the launcher.
 - [ ] Fallback: `hinteros.apps.youtube.backend = "vacuumtube"` starts VacuumTube instead and works the same way.
 
 ## Crunchyroll (Firefox kiosk)
