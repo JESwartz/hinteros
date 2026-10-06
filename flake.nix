@@ -9,19 +9,22 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Component repos. Not inputs yet: their flakes are not pushed.
-    # Once they are, uncomment, run `nix flake lock`, add `hinteros-launcher` and
-    # `hinteros-daemon` to the outputs arguments, and use their packages in
-    # nixos/overlay.nix. scripts/dev-override picks these up by input name.
-    #
-    # hinteros-launcher = {
-    #   url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git";
-    #   inputs.nixpkgs.follows = "nixpkgs";
-    # };
-    # hinteros-daemon = {
-    #   url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git";
-    #   inputs.nixpkgs.follows = "nixpkgs";
-    # };
+    # Component repos. Their packages come in through their overlays (see overlays.default).
+    # scripts/dev-override picks these up by input name.
+    hinteros-launcher = {
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        git-hooks.follows = "git-hooks";
+      };
+    };
+    hinteros-daemon = {
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        git-hooks.follows = "git-hooks";
+      };
+    };
   };
 
   outputs =
@@ -29,6 +32,8 @@
       self,
       nixpkgs,
       git-hooks,
+      hinteros-launcher,
+      hinteros-daemon,
     }:
     let
       system = "x86_64-linux";
@@ -49,7 +54,12 @@
         };
     in
     {
-      overlays.default = import ./nixos/overlay.nix;
+      # Component packages (launcher, session and system daemons) plus our own.
+      overlays.default = nixpkgs.lib.composeManyExtensions [
+        hinteros-launcher.overlays.default
+        hinteros-daemon.overlays.default
+        (import ./nixos/overlay.nix)
+      ];
 
       nixosModules = {
         default.imports = [
@@ -58,6 +68,7 @@
         ];
         overlay = overlayModule;
         session = ./nixos/modules/session.nix;
+        daemon = ./nixos/modules/daemon.nix;
       };
 
       nixosConfigurations = {
