@@ -1,6 +1,6 @@
 # M4 TV apps under cage (no network in the sandbox): the Firefox kiosk wrapper with a
 # per-app profile, the User-Agent override that only the YouTube profile gets, the app
-# registry as the daemon reports it (apps.list over the session socket, API 0.3) and launching
+# registry as the daemon reports it (apps.list over the session socket, API 0.4) and launching
 # apps through apps.launch. The YouTube and Crunchyroll URLs point at local pages. Firefox runs
 # on Xwayland (MOZ_ENABLE_WAYLAND=0), as under gamescope.
 { self, pkgs }:
@@ -38,11 +38,6 @@ in
         "hinteros-test/firefox.html".text = page "PLAIN FIREFOX PAGE";
       };
 
-      # cage, not gamescope: the daemon hands its Wayland socket to launched apps; Xwayland
-      # (Firefox) is cage's first X display.
-      hinteros.daemon.session.settings.gamescope.wayland_display = "wayland-0";
-      systemd.user.services.hinteros-session.environment.DISPLAY = ":0";
-
       environment.systemPackages = [ pkgs.socat ];
       virtualisation.memorySize = lib.mkForce 4096;
     };
@@ -68,7 +63,7 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.3", "client": {"name": "tv-apps-test", "version": "0"}}}
+                 "params": {"api_version": "0.4", "client": {"name": "tv-apps-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
         out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")

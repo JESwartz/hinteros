@@ -115,16 +115,15 @@ let
           description = ''
             How the app takes controller input: `gamepad` (passed through) or `keyboard` (the
             daemon turns controller actions into key presses for it). `null` leaves the
-            daemon's default. Only written to session.toml when `hinteros.daemon.session.emitInputKeys`
-            is set (daemon API 0.4).
+            daemon's default (`gamepad`). Written to session.toml as `input` (daemon API 0.4).
           '';
         };
 
         backKey = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
-          example = "Escape";
-          description = "Key the daemon presses for \"back\" (keyboard input). Same gating as `input`.";
+          example = "backspace";
+          description = "Key the daemon presses for \"back\" (keyboard input): a name from the API's key list, e.g. `backspace` or `alt+left`.";
         };
 
         # youtube only: which implementation runs.
@@ -170,10 +169,8 @@ let
       inherit (value) kind command name;
     }
     // lib.optionalAttrs (value.icon != null) { icon = toString value.icon; }
-    // lib.optionalAttrs config.hinteros.daemon.session.emitInputKeys (
-      lib.optionalAttrs (value.input != null) { inherit (value) input; }
-      // lib.optionalAttrs (value.backKey != null) { back_key = value.backKey; }
-    );
+    // lib.optionalAttrs (value.input != null) { inherit (value) input; }
+    // lib.optionalAttrs (value.backKey != null) { back_key = value.backKey; };
 in
 {
   imports = [
@@ -186,16 +183,6 @@ in
     type = lib.types.attrsOf (lib.types.submodule appModule);
     default = { };
     description = "Apps shown in the launcher; see the module header.";
-  };
-
-  options.hinteros.daemon.session.emitInputKeys = lib.mkOption {
-    type = lib.types.bool;
-    default = false;
-    description = ''
-      Write `input` and `back_key` of the apps into session.toml. The daemon locked in
-      flake.lock (session API 0.3) rejects unknown keys in `[[apps]]`, so this stays off
-      until the daemon input is bumped to API 0.4.
-    '';
   };
 
   config = lib.mkMerge [
@@ -225,7 +212,7 @@ in
           package = lib.mkIf (cfg.youtube.backend == "vacuumtube") (lib.mkDefault pkgs.vacuum-tube);
           # The TV UI is keyboard driven: arrows, Enter, Escape.
           input = lib.mkDefault "keyboard";
-          backKey = lib.mkDefault "Escape";
+          backKey = lib.mkDefault "escape";
           icon = lib.mkDefault (mkIcon {
             letter = "Y";
             color = "#b3261e";
@@ -237,7 +224,7 @@ in
           order = lib.mkDefault 30;
           kiosk.url = lib.mkDefault "https://www.crunchyroll.com";
           input = lib.mkDefault "keyboard";
-          backKey = lib.mkDefault "Escape";
+          backKey = lib.mkDefault "escape";
           icon = lib.mkDefault (mkIcon {
             letter = "C";
             color = "#d9731a";
@@ -253,7 +240,7 @@ in
             fullscreenOnly = lib.mkDefault true;
           };
           input = lib.mkDefault "keyboard";
-          backKey = lib.mkDefault "Escape";
+          backKey = lib.mkDefault "escape";
           icon = lib.mkDefault (mkIcon {
             letter = "F";
             color = "#2f6fb5";

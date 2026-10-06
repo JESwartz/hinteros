@@ -51,10 +51,36 @@ in
       description = ''
         Contents of the session daemon's `session.toml` (see the hinteros-daemon README), as a
         Nix attribute set. The file is generated into the store and passed with `--config`.
-        The module already sets `launcher.app_id`, `gamescope.*`, `steam.path`, `steam.tag_windows`,
+        The module already sets `launcher.app_id`, `gamescope.*`, `osk.*`, `steam.path`, `steam.tag_windows`,
         `steam.library_poll_s`, `steam.library_debounce_ms` and `close.timeout_ms` (all with
         `mkDefault`; `steam.dir` is left to the daemon's default unless a test sets it).
       '';
+    };
+
+    # The on-screen keyboard: a second entrypoint of the launcher (`hinteros-osk`), started and
+    # restarted by the session daemon and shown as a gamescope overlay (spike 5).
+    osk = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Run the on-screen keyboard (`[osk] enable`); Guide+Y or `osk.show` summons it.";
+      };
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = pkgs.hinteros-launcher;
+        defaultText = lib.literalExpression "pkgs.hinteros-launcher";
+        description = "Package providing `bin/hinteros-osk` (the launcher ships it).";
+      };
+      summon = lib.mkOption {
+        type = lib.types.str;
+        default = "guide+context";
+        example = "none";
+        description = ''
+          Controller chord that toggles the keyboard: `guide+<button>` (hold Guide, press the
+          button; `context` is Y) or `none`. With a chord, Home fires on Guide release; `none`
+          puts it back on the press.
+        '';
+      };
     };
 
     logLevel = lib.mkOption {
@@ -73,7 +99,13 @@ in
         enable = lib.mkDefault (config.hinteros.session.compositor == "gamescope");
         # gamescope's Xwayland and Wayland socket; a user service does not inherit them.
         display = lib.mkDefault ":0";
-        wayland_display = lib.mkDefault "gamescope-0";
+        wayland_display = lib.mkDefault (
+          if config.hinteros.session.compositor == "gamescope" then "gamescope-0" else "wayland-0"
+        );
+      };
+      osk = {
+        inherit (cfg.osk) enable summon;
+        command = lib.mkDefault [ "${cfg.osk.package}/bin/hinteros-osk" ];
       };
       steam = {
         # Steam's own windows get STEAM_GAME=769 so gamescope can show them (needs gamescope).
@@ -126,7 +158,15 @@ in
       description = "HinterOS session daemon";
       wantedBy = [ "default.target" ];
       unitConfig.ConditionUser = sessionUser;
-      environment.RUST_LOG = cfg.logLevel;
+      environment = {
+        RUST_LOG = cfg.logLevel;
+      }
+      # Under cage the daemon sees no gamescope (so no child_env) and apps it launches inherit
+      # its environment: point them at cage's Xwayland (its first X display) and socket.
+      // lib.optionalAttrs (config.hinteros.session.compositor == "cage") {
+        DISPLAY = ":0";
+        WAYLAND_DISPLAY = "wayland-0";
+      };
       serviceConfig = {
         ExecStart = "${lib.getExe cfg.session.package} --config ${sessionConfig}";
         Restart = "on-failure";

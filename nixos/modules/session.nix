@@ -118,6 +118,15 @@ in
 
     gamescope = {
       package = lib.mkPackageOption pkgs "gamescope" { };
+      reviewedVersion = lib.mkOption {
+        type = lib.types.str;
+        default = "3.16.31";
+        description = ''
+          gamescope version the session daemon's vendored private protocol was checked
+          against. The session fails to evaluate with any other version; bump it only after
+          diffing `protocol/gamescope-input-method.xml` in hinteros-daemon.
+        '';
+      };
       backend = lib.mkOption {
         type = lib.types.nullOr (
           lib.types.enum [
@@ -154,9 +163,25 @@ in
 
     # Spike 1: the Flutter launcher runs better on native Wayland than on Xwayland under
     # gamescope (correct 2x scale at 4K, steadier frame times). The cage VM config sets the same.
-    hinteros.session.environment = lib.mkIf (cfg.compositor == "gamescope") {
-      GDK_BACKEND = lib.mkDefault "wayland";
-    };
+    hinteros.session.environment = lib.mkMerge [
+      (lib.mkIf (cfg.compositor == "gamescope") { GDK_BACKEND = lib.mkDefault "wayland"; })
+      # The daemon's virtual keyboard sends US key codes, so the compositor's layout must be US
+      # (gamescope reads XKB_DEFAULT_LAYOUT in wlserver.cpp; cage/wlroots too). Non-US text goes
+      # through gamescope's input method instead.
+      { XKB_DEFAULT_LAYOUT = lib.mkDefault "us"; }
+    ];
+
+    # The daemon vendors gamescope's private `gamescope_input_method` protocol
+    # (crates/hinteros-session/protocol/gamescope-input-method.xml, from 3.16.31) and the
+    # overlay/focus atoms; neither is a stable interface. A nixpkgs bump that changes the
+    # version must fail here until someone diffs those files and updates reviewedVersion.
+    assertions = [
+      {
+        assertion =
+          cfg.compositor != "gamescope" || cfg.gamescope.package.version == cfg.gamescope.reviewedVersion;
+        message = "hinteros.session: gamescope is ${cfg.gamescope.package.version} but the daemon was reviewed against ${cfg.gamescope.reviewedVersion} (private gamescope_input_method protocol). Re-check the daemon's protocol XML against the new version, then update hinteros.session.gamescope.reviewedVersion.";
+      }
+    ];
 
     users.users.${cfg.user} = {
       isNormalUser = true;

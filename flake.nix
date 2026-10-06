@@ -116,6 +116,7 @@
         input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
         fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
+        typing = import ./tests/vm/typing.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
       };

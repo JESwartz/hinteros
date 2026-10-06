@@ -24,7 +24,12 @@ let
 
   appsOf = c: map (a: a.id) c.config.hinteros.daemon.session.settings.apps;
   base = mk { };
-  withInput = mk { hinteros.daemon.session.emitInputKeys = true; };
+  noOsk = mk {
+    hinteros.daemon.osk.enable = false;
+    hinteros.daemon.osk.summon = "none";
+  };
+  cage = mk { hinteros.session.compositor = "cage"; };
+  settings = c: c.config.hinteros.daemon.session.settings;
   vacuum = mk { hinteros.apps.youtube.backend = "vacuumtube"; };
   plex = mk { hinteros.apps.plex.enable = true; };
   forbidden = mk {
@@ -48,22 +53,72 @@ let
       expr = base.config.hinteros.unfreeAllowlist;
       expected = [ ];
     };
-    # The daemon locked at API 0.3 rejects unknown [[apps]] keys.
-    testInputKeysOffByDefault = {
-      expr = lib.any (a: a ? input || a ? back_key) base.config.hinteros.daemon.session.settings.apps;
-      expected = false;
-    };
-    testInputKeysWhenEnabled = {
+    testInputKeysEmitted = {
       expr = [
-        (entry withInput "youtube").input
-        (entry withInput "youtube").back_key
-        (entry withInput "jellyfin" ? input)
+        (entry base "youtube").input
+        (entry base "youtube").back_key
+        (entry base "jellyfin" ? input)
       ];
       expected = [
         "keyboard"
-        "Escape"
+        "escape"
         false
       ];
+    };
+    testOskDefaults = {
+      expr = [
+        (settings base).osk.enable
+        (settings base).osk.summon
+        (lib.hasSuffix "/bin/hinteros-osk" (lib.head (settings base).osk.command))
+      ];
+      expected = [
+        true
+        "guide+context"
+        true
+      ];
+    };
+    testOskOff = {
+      expr = [
+        (settings noOsk).osk.enable
+        (settings noOsk).osk.summon
+      ];
+      expected = [
+        false
+        "none"
+      ];
+    };
+    testUsKeyboardLayout = {
+      expr = base.config.hinteros.session.environment.XKB_DEFAULT_LAYOUT;
+      expected = "us";
+    };
+    # cage: apps and the daemon find cage's sockets without per-test overrides.
+    testCageSockets = {
+      expr = [
+        (settings cage).gamescope.wayland_display
+        cage.config.systemd.user.services.hinteros-session.environment.DISPLAY
+      ];
+      expected = [
+        "wayland-0"
+        ":0"
+      ];
+    };
+    # A gamescope version the daemon's vendored protocol was not reviewed against must not evaluate.
+    testGamescopePinFails = {
+      expr = lib.any (lib.hasInfix "gamescope is") (
+        failedAssertions (mk {
+          hinteros.session.compositor = "gamescope";
+          hinteros.session.gamescope.reviewedVersion = "0.0.0";
+        })
+      );
+      expected = true;
+    };
+    testGamescopePinOk = {
+      expr = lib.any (lib.hasInfix "gamescope is") (
+        failedAssertions (mk {
+          hinteros.session.compositor = "gamescope";
+        })
+      );
+      expected = false;
     };
     testYoutubeKioskUserAgent = {
       expr = lib.elem "--user-agent" (entry base "youtube").command;
