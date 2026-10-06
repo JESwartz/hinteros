@@ -27,7 +27,9 @@ one consistent system.
 | `overlays.default` | HinterOS packages: `hinteros-launcher`, `hinteros-session`, `hinteros-system` (from the component flakes) and the placeholder home app |
 | `nixosConfigurations.vm` | Test VM that autologs in and starts the console session (cage in the VM, see `nixos/README.md`); `vm-gamescope` uses gamescope |
 | `packages.x86_64-linux.vm`, `apps.x86_64-linux.vm` | `nix run .#vm` opens the VM in a window (software rendering) |
-| `checks.x86_64-linux` | `pre-commit` (nixfmt, statix, deadnix) and VM tests: `boot` (autologin, cage and the launcher up, OCR finds "HinterOS", both daemon sockets answer hello and ping), `gamescope` (headless gamescope with the placeholder app, screenshot OCR) and `input-layer` (InputPlumber with a fake pad: virtual target, intercept modes, DBus events) |
+| `lib.mkDevice` | `mkDevice { state; facterReport ? null; extraModules ? []; base ? "unstable" }` builds a device's `nixosSystem` from its state.json (design: `device-config.md` in the docs). `state` is checked by `nixos/modules/state.nix`: `schemaVersion` must be 1, unknown fields and unknown app ids fail evaluation. Today it maps `settings.ssh` (key-only, opt-in), `apps` (`steam`) and the first profile's user. Only the `unstable` base exists for now |
+| `nixosConfigurations.devbox` | Mini PC #1, from `devices/devbox/` (checked-in `state.json`, Intel iGPU, PipeWire, gamescope on DRM, Steam). Deploy: `nixos-rebuild switch --flake .#devbox --target-host <user>@<box> --sudo`; see `tests/couch/m0-spikes.md`. Steam is unfree and allowed only by name; never put a Steam or Plex closure in a binary cache or ISO |
+| `checks.x86_64-linux` | `pre-commit` (nixfmt, statix, deadnix), `mk-device` (eval tests for mkDevice and the state translation), `fake-steam` (the stub `steam` logs a `steam://rungameid` launch and a "Fake game" window shows) and VM tests: `boot` (autologin, cage and the launcher up, OCR finds "HinterOS", both daemon sockets answer hello and ping), `gamescope` (headless gamescope with the placeholder app, screenshot OCR) and `input-layer` (InputPlumber with a fake pad: virtual target, intercept modes, DBus events) |
 | `devShells.default`, `formatter` | Dev shell with the lint tools and git hooks; `nix fmt` |
 
 `nix flake check` runs everything above, including the VM test (needs `/dev/kvm`).
@@ -48,7 +50,9 @@ scripts/dev-override build .#vm
 
 | Path | Contents |
 |---|---|
-| `nixos/modules/` | HinterOS NixOS modules (session, input, daemon) |
+| `nixos/modules/` | HinterOS NixOS modules (session, input, daemon, state, fake-steam) |
+| `nixos/lib/` | `mkDevice` |
+| `devices/` | Checked-in devices (`devbox`) |
 | `nixos/overlay.nix`, `nixos/pkgs/` | The overlay and the packages it adds |
 | `nixos/vm/` | Test VM configuration (shared by `nix run .#vm` and the VM tests) |
 | `scripts/` | Dev scripts (`dev-override`) |
