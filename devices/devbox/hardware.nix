@@ -14,11 +14,8 @@
     maintenance.bootCounting.enable = true;
   };
 
-  # Dev box only: the deploy user (the session user) can sudo without a password, and
-  # nixos-rebuild may copy unsigned closures to it. Boxes #2 and #3 do not get this.
-  security.sudo.wheelNeedsPassword = false;
-  users.users.hinteros.extraGroups = [ "wheel" ];
-  nix.settings.trusted-users = [ "@wheel" ];
+  # The session user is unprivileged here too (no wheel, no sudo, not a nix trusted user); deploys
+  # go through the `deploy` user from hinteros.dev (see default.nix).
 
   # Intel graphics: Mesa plus VA-API (iHD) and QSV runtime.
   hardware.graphics = {

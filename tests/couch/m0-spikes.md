@@ -7,16 +7,17 @@ spike 4 (InputPlumber) and spike 5 (on-screen keyboard). Background: `hinteros-d
 
 ## 0. Deploy to the dev box
 
-1. Put your SSH public key in `devices/devbox/state.json` (`settings.ssh.authorizedKeys`).
-   Never commit keys that are not yours.
+1. Put your SSH public key in `hinteros.dev.deployKeys` in `devices/devbox/default.nix` (the `deploy`
+   user; empty by default). The session user `hinteros` has no SSH login and no sudo. Never commit keys that are not yours.
 2. First install: NixOS from any ISO on the box, then copy its
    `hardware-configuration.nix` ideas into `devices/devbox/hardware.nix`
    (the `fileSystems` entries there are placeholders). Generate the facter report on the box
    with `nixos-facter -o facter.json` and pass it as `facterReport` in `devices/devbox/default.nix` (M1).
-3. Deploy from the desktop (the session user `hinteros` is the deploy user on the dev box):
-   `nixos-rebuild switch --flake .#devbox --target-host hinteros@<box> --sudo`
+3. Deploy from the desktop as the separate `deploy` user (key-only SSH, wheel, passwordless sudo, nix
+   trusted; the session user `hinteros` has no sudo, not even here):
+   `nixos-rebuild switch --flake .#devbox --target-host deploy@<box> --sudo`
    (older nixos-rebuild: `--use-remote-sudo`). Undo a bad deploy with
-   `ssh hinteros@<box> sudo nixos-rebuild switch --rollback` or pick the previous generation at boot.
+   `ssh deploy@<box> sudo nixos-rebuild switch --rollback` or pick the previous generation at boot.
 4. Debug env for the launcher: `hinteros.session.environment.HINTEROS_FPS = "1";` in
    `devices/devbox/hardware.nix` (frame-rate overlay) and redeploy, or for one run
    `ssh` in and start the session by hand. `GDK_BACKEND=wayland` is already the default on gamescope.

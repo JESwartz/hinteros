@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "base": "unstable",
   "settings": {
-    "ssh": { "enable": true, "authorizedKeys": [] }
+    "ssh": { "enable": false }
   },
   "apps": ["steam"],
   "profiles": [{ "id": "p1", "name": "Dev", "user": "hinteros" }]

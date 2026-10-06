@@ -1,7 +1,7 @@
 # M4 couch checklist: TV apps
 
 Exit criterion: log in to and watch Jellyfin, Plex, YouTube and Crunchyroll using only a
-controller. Deploy the dev box (`nixos-rebuild switch --flake .#devbox --target-host ...`), no
+controller. Deploy the dev box (`nixos-rebuild switch --flake .#devbox --target-host deploy@<box> --sudo`), no
 keyboard attached. Needs network, a Jellyfin server and accounts for Plex, YouTube (optional) and
 Crunchyroll.
 
