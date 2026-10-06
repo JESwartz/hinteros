@@ -81,6 +81,7 @@
         device-config = ./nixos/modules/device-config.nix;
         runtime = ./nixos/modules/runtime.nix;
         maintenance = ./nixos/modules/maintenance.nix;
+        hardening = ./nixos/modules/hardening.nix;
       };
 
       nixosConfigurations = {
@@ -120,11 +121,13 @@
         fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
         config-sync = import ./tests/vm/config-sync.nix { inherit self pkgs; };
         runtime = import ./tests/vm/runtime.nix { inherit self pkgs; };
+        hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
+        hardening-eval = import ./tests/eval/hardening.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {

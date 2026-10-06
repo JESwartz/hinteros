@@ -12,5 +12,6 @@
     ./device-config.nix
     ./runtime.nix
     ./maintenance.nix
+    ./hardening.nix
   ];
 }

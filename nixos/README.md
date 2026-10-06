@@ -60,8 +60,9 @@ the OSK connected at 0.4 and that `osk.show`/`osk.hide` answer.
   NetworkManager (no VPN plugins), BlueZ (`Experimental`, `UserspaceHID`, `ClassicBondedOnly`
   stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules
   scoped to the session user's active local session: suspend/reboot/power-off and the Wi-Fi
-  actions. `settings.modify.system` is deliberately not granted (see the comment in the module).
-  Also sets `systemd-boot.editor = false`.
+  actions. `settings.modify.system` is granted (accepted: the session user can read Wi-Fi PSKs; see the module comment and threat-model.md).
+
+- `hardening.nix`: on with the session (threat-model.md). Session user never in `wheel`, `trusted-users = ["root"]`, `allowed-users = ["root"]`, no sudo (`security.sudo.enable` only with `hinteros.admin` or dev), polkit admin identities = root + the admin, persistent capped journal, `systemd-boot.editor = false` (set only here). `hinteros.admin.{enable,user,hashedPasswordFile}`: optional admin account (wheel, sudo always asks its password, password file required, never committed; the M9 wizard sets it). `hinteros.ssh.enable` (from state.json `settings.ssh.enable`, off by default) runs sshd with username + password, `PermitRootLogin no`, `AllowUsers` = the admin only (never the session user), and requires `hinteros.admin`; the polkit action `org.hinteros.system.ssh` (`auth_admin`) is what the privileged service checks before flipping it. Key-only SSH, key import, a LAN-only firewall and rate limiting are backlog. `hinteros.dev.enable` (default off, set by the devbox) adds a separate key-based `deploy` user (wheel, passwordless sudo, nix trusted, keys from `hinteros.dev.deployKeys`) and a build warning; with it off, evaluation fails on any wheel member besides the admin, NOPASSWD rule or extra trusted user. The session user is unprivileged in dev too.
 - `maintenance.nix`: `hinteros.maintenance.*`. Boot counting uses NixOS' native
   `boot.loader.systemd-boot.bootCounting`; `hinteros-boot-health` gates `boot-complete.target`
   on the daemon and launcher, so a broken generation falls back by itself. Off by default

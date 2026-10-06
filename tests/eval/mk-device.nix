@@ -6,10 +6,7 @@ let
 
   good = {
     schemaVersion = 1;
-    settings.ssh = {
-      enable = true;
-      authorizedKeys = [ "ssh-ed25519 AAAATESTKEY test" ];
-    };
+    settings.ssh.enable = true;
     apps = [ "steam" ];
     profiles = [
       {
@@ -57,16 +54,16 @@ let
       expr = c.hinteros.session.user;
       expected = "tester";
     };
-    testSshEnabledKeyOnly = {
+    testSshEnabled = {
       expr = [
+        c.hinteros.ssh.enable
         c.services.openssh.enable
-        c.services.openssh.settings.PasswordAuthentication
-        c.users.users.tester.openssh.authorizedKeys.keys
+        c.services.openssh.settings.PermitRootLogin
       ];
       expected = [
         true
-        false
-        [ "ssh-ed25519 AAAATESTKEY test" ]
+        true
+        "no"
       ];
     };
     testMinimalSshOff = {

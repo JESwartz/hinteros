@@ -54,7 +54,7 @@ let
       "profiles"
     ] state
     ++ checkKeys "settings" [ "ssh" ] settings
-    ++ checkKeys "settings.ssh" [ "enable" "authorizedKeys" ] ssh
+    ++ checkKeys "settings.ssh" [ "enable" ] ssh
     ++
       lib.optional (unknownApps != [ ])
         "unknown app id(s): ${lib.concatStringsSep ", " unknownApps} (known: ${lib.concatStringsSep ", " (builtins.attrNames knownApps)})"
@@ -91,19 +91,9 @@ in
           # owns the session.
           hinteros.session.user = lib.mkIf (profiles != [ ]) (lib.mkDefault (builtins.head profiles).user);
 
-          services.openssh = lib.mkIf sshEnable {
-            enable = true;
-            openFirewall = true;
-            # Key-only; opt-in. The firewall stays closed while this is off.
-            settings = {
-              PasswordAuthentication = false;
-              KbdInteractiveAuthentication = false;
-              PermitRootLogin = "no";
-            };
-          };
-          users.users.${cfg.session.user}.openssh.authorizedKeys.keys = lib.mkIf sshEnable (
-            ssh.authorizedKeys or [ ]
-          );
+          # sshd on/off. Opt-in; the admin account is the only login (see hardening.nix).
+          hinteros.ssh.enable = sshEnable;
+
         }
       ]
       # One mkIf per known app keeps the list itself independent of the state.
