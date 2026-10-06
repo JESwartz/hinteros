@@ -25,6 +25,5 @@ for name in "${components[@]}"; do
   fi
 done
 
-cmd=$1
-shift
-exec nix "$cmd" "${overrides[@]}" "$@"
+# Overrides go last: `flake check` is a subcommand pair and the flag must follow both words.
+exec nix "$@" "${overrides[@]}"
