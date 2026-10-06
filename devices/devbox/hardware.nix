@@ -10,6 +10,8 @@
     apps.plex.enable = true;
     # Start Steam (-silent, never under a reaper) with the session daemon.
     daemon.session.settings.steam.autostart = true;
+    # A broken deploy falls back to the previous generation by itself.
+    maintenance.bootCounting.enable = true;
   };
 
   # Dev box only: the deploy user (the session user) can sudo without a password, and
@@ -29,14 +31,8 @@
   };
   environment.sessionVariables.LIBVA_DRIVER_NAME = "iHD";
 
-  # HDMI audio through PipeWire.
-  security.rtkit.enable = true;
-  services.pipewire = {
-    enable = true;
-    alsa.enable = true;
-    alsa.support32Bit = true;
-    pulse.enable = true;
-  };
+  # HDMI audio through PipeWire (enabled by hinteros.runtime).
+  services.pipewire.alsa.support32Bit = true;
 
   boot.loader = {
     systemd-boot.enable = true;
