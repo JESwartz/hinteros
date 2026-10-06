@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Run a nix command against local checkouts of the sibling component repos.
+#   scripts/dev-override flake check
+#   scripts/dev-override build .#vm
+# An override is added only for inputs declared in flake.nix whose sibling
+# directory (../<input name>) exists.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: ${0##*/} <nix subcommand and args...>" >&2
+  exit 2
+fi
+
+components=(hinteros-launcher hinteros-daemon)
+overrides=()
+for name in "${components[@]}"; do
+  dir="$root/../$name"
+  # Match an uncommented input declaration, e.g. `hinteros-launcher = {` or `.url =`.
+  if grep -Eq "^[[:space:]]*${name}(\.url)?[[:space:]]*=" "$root/flake.nix" && [ -d "$dir" ]; then
+    dir=$(cd "$dir" && pwd)
+    overrides+=(--override-input "$name" "git+file:$dir")
+    echo "dev-override: $name -> git+file:$dir" >&2
+  fi
+done
+
+cmd=$1
+shift
+exec nix "$cmd" "${overrides[@]}" "$@"
