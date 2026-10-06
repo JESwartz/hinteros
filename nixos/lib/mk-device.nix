@@ -29,6 +29,12 @@ nixpkgsFor.${base}.lib.nixosSystem {
   modules = [
     self.nixosModules.default
     { hinteros.state = state; }
+    {
+      # A console appliance: no man pages or NixOS manual (no builds of them on every rebuild,
+      # nothing to carry on the installer ISO). A device can switch them back on.
+      documentation.enable = nixpkgs.lib.mkDefault false;
+      system.tools.nixos-generate-config.enable = nixpkgs.lib.mkDefault false;
+    }
     (nixpkgs.lib.optionalAttrs (configDir != null) { hinteros.deviceConfig.configDir = configDir; })
     {
       hinteros.session.enable = true;

@@ -64,7 +64,7 @@ run() {
   local what=$1
   shift
   echo "+ $*" >>"$LOG"
-  if ! "$@" >>"$LOG" 2>&1; then
+  if ! "$@" >>"$LOG" 2>&1 </dev/null; then
     echo "--- last lines of $LOG" >&2
     tail -n 30 "$LOG" >&2 || true
     fail 1 step-failed "$what failed; see $LOG"
@@ -307,7 +307,7 @@ if mountpoint -q "$MNT"; then
 fi
 # The disko layout names the disk /dev/hinteros-target; this link points it at the real one.
 ln -sfn "$disk_real" "$TARGET_LINK"
-run "Partitioning" "$DISKO_SCRIPT"
+run "Partitioning" "$DISKO_SCRIPT" --yes-wipe-all-disks
 rm -f "$TARGET_LINK"
 udevadm settle >>"$LOG" 2>&1 || true
 if ! { mountpoint -q "$MNT" && mountpoint -q "$MNT/boot"; }; then
@@ -386,35 +386,40 @@ progress install 36 "Building and installing the system"
 install_flags=(--root "$MNT" --no-root-passwd --no-channel-copy
   --flake "path:$cfg#hinteros" --no-update-lock-file --log-format internal-json -v)
 if [ "$online" -eq 0 ]; then
-  # Offline: only this installer's store (nixos-install adds it as a substituter itself).
-  install_flags+=(--option substituters "")
+  # Offline: this installer's store is the only substituter. (nixos-install passes its own
+  # --extra-substituters before these flags, so the list has to be set, not cleared.)
+  install_flags+=(--option substituters "auto?trusted=1")
 fi
 
-# nix's internal-json log -> progress lines (copied/built paths of the build).
-set +e
-nixos-install "${install_flags[@]}" 2>&1 </dev/null \
-  | tee -a "$LOG" \
-  | jq -cnR --unbuffered '
-      foreach (inputs | select(startswith("@nix ")) | .[5:] | fromjson? | select(. != null)) as $e (
-        {kinds: {}, prog: {}, last: -1, emit: null};
-        .emit = null
-        | if $e.action == "start" and ($e.type == 103 or $e.type == 104) then
-            .kinds[($e.id | tostring)] = $e.type
-          elif $e.action == "result" and $e.type == 105 and (.kinds[($e.id | tostring)] != null) then
-            .prog[($e.id | tostring)] = $e.fields
-            | ([.prog[] | .[0]] | add) as $done | ([.prog[] | .[1]] | add) as $exp
-            | (if $exp > 0 then (36 + (($done / $exp) * 54 | floor)) else 36 end) as $pct
-            | if $pct > .last then .last = $pct | .emit = {percent: $pct, message: "Installing: \($done) of \($exp) steps"} else . end
-          else . end;
-        select(.emit != null) | .emit)' \
-  | while IFS= read -r p; do
-    progress install "$(printf '%s' "$p" | jq -r .percent)" "$(printf '%s' "$p" | jq -r .message)"
-  done
-install_rc=${PIPESTATUS[0]}
-set -e
-if [ "$install_rc" -ne 0 ]; then
-  echo "--- last lines of $LOG" >&2
-  tail -n 40 "$LOG" >&2 || true
+# nix's internal-json log -> progress lines (copied/built paths of the build). The pipeline runs
+# in a process substitution so `progress` updates this shell's stage and percent; nixos-install's
+# exit status comes back through a file.
+rc_file=$(mktemp)
+# shellcheck disable=SC2016
+progress_filter='
+  foreach (inputs | select(startswith("@nix ")) | .[5:] | fromjson? | select(. != null)) as $e (
+    {kinds: {}, prog: {}, last: -1, emit: null};
+    .emit = null
+    | if $e.action == "start" and ($e.type == 103 or $e.type == 104) then
+        .kinds[($e.id | tostring)] = $e.type
+      elif $e.action == "result" and $e.type == 105 and (.kinds[($e.id | tostring)] != null) then
+        .prog[($e.id | tostring)] = $e.fields
+        | ([.prog[] | .[0]] | add) as $done | ([.prog[] | .[1]] | add) as $exp
+        | (if $exp > 0 then (36 + (($done / $exp) * 50 | floor)) else 36 end) as $pct
+        | if $pct > .last then .last = $pct | .emit = {percent: $pct, message: "Installing: \($done) of \($exp) steps"} else . end
+      else . end;
+    select(.emit != null) | .emit)'
+while IFS= read -r p; do
+  progress install "$(printf '%s' "$p" | jq -r .percent)" "$(printf '%s' "$p" | jq -r .message)"
+done < <( { nixos-install "${install_flags[@]}" 2>&1 </dev/null; echo "$?" >"$rc_file"; } \
+  | tee -a "$LOG" | jq -cnR --unbuffered "$progress_filter" )
+install_rc=$(cat "$rc_file")
+rm -f "$rc_file"
+if [ "$install_rc" != 0 ]; then
+  echo "--- nix errors from $LOG" >&2
+  { grep -a '^@nix ' "$LOG" | sed 's/^@nix //' \
+      | jq -r 'select(.action == "msg" and .level <= 1) | .msg' 2>/dev/null | tail -n 40 \
+      || tail -n 40 "$LOG"; } >&2 || true
   fail 1 install-failed "nixos-install failed (exit $install_rc); see $LOG"
 fi
 progress install 90 "System installed, boot loader written"

@@ -81,6 +81,66 @@ let
     };
   };
 
+  # The store paths a derivation is built from, as one file that references them (so they travel
+  # with the closure that includes it). Installing a device builds a few small derivations that
+  # differ from the default system's (config files, /etc, the system path, the initrd, the
+  # toplevel); their builders need these inputs, which the system itself does not reference.
+  buildInputsOf =
+    d:
+    pkgs.writeText "${d.name}-build-inputs" (
+      builtins.toJSON (
+        d.drvAttrs or (removeAttrs d [
+          "all"
+          "out"
+          "drvPath"
+          "outPath"
+          "outputs"
+          "drvAttrs"
+          "override"
+          "overrideAttrs"
+        ])
+      )
+    );
+  sysBuild = defaultDevice.config.system.build;
+  buildInputs = map buildInputsOf [
+    sysBuild.toplevel
+    sysBuild.etc
+    defaultDevice.config.system.path
+    sysBuild.initialRamdisk
+  ];
+
+  # Leaf inputs of those builders (the files /etc and the unit directories are assembled from, and
+  # the tools their builders run) that nothing at runtime references.
+  defaultConfig = defaultDevice.config;
+  inStore = p: lib.hasPrefix builtins.storeDir (toString p);
+  builderInputs =
+    lib.filter inStore (
+      lib.mapAttrsToList (_: e: e.source) (lib.filterAttrs (_: e: e.enable) defaultConfig.environment.etc)
+      ++ lib.mapAttrsToList (_: u: u.unit) defaultConfig.systemd.units
+    )
+    ++ [
+      pkgs.lndir
+      pkgs.jq.dev
+      pkgs.nukeReferences
+      pkgs.libxslt.bin
+      pkgs.kmod.dev
+      pkgs.findXMLCatalogs
+      pkgs.mypy # the systemd-boot builder is type-checked when it is built
+      pkgs.perl
+      pkgs.libcap-text-verifier
+    ]
+    ++ map buildInputsOf (
+      lib.filter (d: d ? drvAttrs) (
+        lib.mapAttrsToList (_: e: e.source) (lib.filterAttrs (_: e: e.enable) defaultConfig.environment.etc)
+        ++ lib.mapAttrsToList (_: u: u.unit) defaultConfig.systemd.units
+        ++ defaultConfig.services.udev.packages
+      )
+    )
+    ++ map buildInputsOf [
+      # What generating a TOML file (the daemon and greetd configs) runs.
+      ((pkgs.formats.toml { }).generate "x" { })
+    ];
+
   # The disk layout. The device is a placeholder that hinteros-install points at the chosen disk
   # (a symlink), so the whole partitioning script is built with the ISO and needs no evaluation
   # or build at install time.
@@ -103,7 +163,7 @@ let
               mountOptions = [ "umask=0077" ];
               extraArgs = [
                 "-n"
-                "HINTEROS-ESP"
+                "HINTEROSESP"
               ];
             };
           };
@@ -123,10 +183,21 @@ let
   };
   diskoScript = diskoLib._cliDestroyFormatMount diskoConfig pkgs;
 
+  # The launcher is built with `autoPubspecLock`, i.e. import-from-derivation: evaluating a device
+  # builds this tiny derivation (pubspec.lock to JSON). It is not in the system's closure, so an
+  # offline evaluation needs its output in the store. Same derivation as nixpkgs'
+  # buildDartApplication makes (same name, inputs and script), so same output path.
+  launcherPubspecLock = pkgs.runCommand "hinteros-launcher-pubspec-lock-json" {
+    nativeBuildInputs = [ pkgs.yq ];
+  } ''yq . '${pkgs.hinteros-launcher.src + "/pubspec.lock"}' > "$out"'';
+
   hinteros-install = pkgs.callPackage ../pkgs/hinteros-install {
     diskoScript = lib.getExe diskoScript;
     offlineLock = pkgs.writeText "offline-flake.lock" (builtins.toJSON offlineLock);
-    sourcesFile = pkgs.writeText "hinteros-install-sources" (lib.concatLines sources);
+    # Everything evaluation needs from the store: the flake sources and the IFD output above.
+    sourcesFile = pkgs.writeText "hinteros-install-sources" (
+      lib.concatLines (sources ++ [ "${launcherPubspecLock}" ])
+    );
     appsJson = pkgs.writeText "hinteros-install-apps.json" (builtins.toJSON appIds);
     stateVersion = config.system.nixos.release;
     inherit repoUrl isoRev;
@@ -208,7 +279,10 @@ in
     system.extraDependencies = [
       config.hinteros.installer.defaultSystem
       pkgs.stdenvNoCC
+      launcherPubspecLock
     ]
+    ++ buildInputs
+    ++ builderInputs
     ++ sources;
 
     environment.etc = {
