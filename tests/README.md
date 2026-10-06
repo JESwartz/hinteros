@@ -1,7 +1,7 @@
 # Tests
 
-- `vm/`: NixOS VM tests (`boot`, `gamescope`, `input-layer`, `fake-steam`)
-- `eval/`: eval-only tests (`mk-device`: mkDevice and state.json translation, good and bad input), run by `nix flake check` and CI.
+- `vm/`: NixOS VM tests (`boot`, `gamescope`, `input-layer`, `fake-steam`, `tv-apps`)
+- `eval/`: eval-only tests (`mk-device`: mkDevice and state.json translation; `apps`: app registry, input keys gating, unfree allowlist), run by `nix flake check` and CI.
 - `couch/`: manual checklists for each milestone's exit criterion, run on real hardware
   with no keyboard attached.
 
