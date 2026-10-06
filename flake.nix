@@ -75,6 +75,9 @@
         input = ./nixos/modules/input.nix;
         state = ./nixos/modules/state.nix;
         fake-steam = ./nixos/modules/fake-steam.nix;
+        unfree = ./nixos/modules/unfree.nix;
+        firefox-kiosk = ./nixos/modules/firefox-kiosk.nix;
+        apps = ./nixos/modules/apps.nix;
       };
 
       nixosConfigurations = {
@@ -112,6 +115,8 @@
         gamescope = import ./tests/vm/gamescope.nix { inherit self pkgs; };
         input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
         fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
+        tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
+        apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
       };
 
