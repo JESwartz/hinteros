@@ -8,6 +8,9 @@
   runCommand,
   xterm,
   coreutils,
+  util-linux,
+  bash,
+  hinteros-session,
 }:
 let
   # (appid, name) pairs for the fake library.
@@ -40,8 +43,11 @@ let
   stub = writeShellApplication {
     name = "steam";
     runtimeInputs = [
+      hinteros-session
       xterm
       coreutils
+      util-linux
+      bash
     ];
     text = ''
       log="''${XDG_RUNTIME_DIR:-/tmp}/fake-steam.log"
@@ -51,10 +57,12 @@ let
           steam://rungameid/*)
             id="''${arg#steam://rungameid/}"
             echo "launch: $id" >> "$log"
-            # Detached, like a game started by the running Steam client.
-            setsid xterm -fullscreen -bg black -fg white -fa Monospace -fs 40 -title "Fake game $id" \
+            # Detached, like a game started by the running Steam client, and under the reaper
+            # as Steam does, so gamescope gives the window the Steam app id (needed to focus it).
+            setsid hinteros-session reaper SteamLaunch "AppId=$id" -- \
+              xterm -fullscreen -bg black -fg white -fa Monospace -fs 40 -title "Fake game $id" \
               -e sh -c "echo; echo '  Fake game $id'; echo; exec sleep infinity" \
-              >/dev/null 2>&1 &
+              >>"$log" 2>&1 &
             ;;
         esac
       done

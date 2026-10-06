@@ -17,6 +17,8 @@ in
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ pkgs.hinteros-fake-steam ];
+    # The daemon launches games through this stub instead of the real Steam.
+    hinteros.daemon.session.settings.steam.path = lib.getExe pkgs.hinteros-fake-steam;
     systemd.tmpfiles.rules = [
       "d ${home}/.local 0755 ${user} users -"
       "d ${home}/.local/share 0755 ${user} users -"

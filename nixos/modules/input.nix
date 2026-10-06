@@ -4,12 +4,10 @@
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 let
   cfg = config.hinteros.input;
-  ip = "org.shadowblip.InputPlumber";
 in
 {
   options.hinteros.input = {
@@ -34,25 +32,7 @@ in
     users.groups.inputplumber = { };
     users.users.${config.hinteros.session.user}.extraGroups = [ "inputplumber" ];
 
-    # InputPlumber ignores pads until ManageAllDevices is set, and the property is not
-    # persistent (it resets whenever InputPlumber restarts). Temporary: the session daemon
-    # will own this (set it at start and on NameOwnerChanged). bindsTo + wantedBy re-runs it
-    # on every InputPlumber restart.
-    systemd.services.hinteros-inputplumber-manage = {
-      description = "Make InputPlumber manage all input devices";
-      wantedBy = [ "inputplumber.service" ];
-      bindsTo = [ "inputplumber.service" ];
-      after = [ "inputplumber.service" ];
-      path = [ pkgs.systemd ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        until busctl --system tree ${ip} >/dev/null 2>&1; do sleep 0.5; done
-        busctl --system set-property ${ip} /org/shadowblip/InputPlumber/Manager \
-          org.shadowblip.InputManager ManageAllDevices b true
-      '';
-    };
+    # ManageAllDevices (off by default, reset on every InputPlumber restart) is set by the
+    # session daemon (hinteros.daemon), which also re-applies it after restarts.
   };
 }

@@ -12,6 +12,8 @@
 let
   cfg = config.hinteros.daemon;
   sessionUser = config.hinteros.session.user;
+  toml = pkgs.formats.toml { };
+  sessionConfig = toml.generate "hinteros-session.toml" cfg.session.settings;
 in
 {
   options.hinteros.daemon = {
@@ -37,6 +39,23 @@ in
       description = "Package providing the `hinteros-system` binary.";
     };
 
+    session.settings = lib.mkOption {
+      inherit (toml) type;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          steam.autostart = true;
+          apps = [ { id = "jellyfin"; name = "Jellyfin"; command = [ "jellyfin-desktop" ]; } ];
+        }
+      '';
+      description = ''
+        Contents of the session daemon's `session.toml` (see the hinteros-daemon README), as a
+        Nix attribute set. The file is generated into the store and passed with `--config`.
+        The module already sets `launcher.app_id`, `gamescope.*` and `steam.path` (all with
+        `mkDefault`).
+      '';
+    };
+
     logLevel = lib.mkOption {
       type = lib.types.str;
       default = "info";
@@ -46,6 +65,20 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    hinteros.daemon.session.settings = {
+      launcher.app_id = lib.mkDefault config.hinteros.session.launcherAppId;
+      # The cage fallback (VM) has no gamescope to drive.
+      gamescope = {
+        enable = lib.mkDefault (config.hinteros.session.compositor == "gamescope");
+        # gamescope's Xwayland and Wayland socket; a user service does not inherit them.
+        display = lib.mkDefault ":0";
+        wayland_display = lib.mkDefault "gamescope-0";
+      };
+      steam.path = lib.mkIf config.programs.steam.enable (
+        lib.mkDefault (lib.getExe config.programs.steam.package)
+      );
+    };
+
     users.groups.${cfg.group} = { };
     users.users.${sessionUser}.extraGroups = [ cfg.group ];
 
@@ -87,7 +120,7 @@ in
       unitConfig.ConditionUser = sessionUser;
       environment.RUST_LOG = cfg.logLevel;
       serviceConfig = {
-        ExecStart = lib.getExe cfg.session.package;
+        ExecStart = "${lib.getExe cfg.session.package} --config ${sessionConfig}";
         Restart = "on-failure";
         RestartSec = 1;
         NoNewPrivileges = true;

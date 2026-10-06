@@ -16,9 +16,13 @@ let
       "--backend"
       cfg.gamescope.backend
     ]
-    # Native Wayland clients (the launcher, see GDK_BACKEND below) need gamescope's
-    # Wayland socket; Xwayland is always there.
-    ++ [ "--expose-wayland" ]
+    # -e: Steam mode. Only then does gamescope take app ids from reapers and publish the
+    # focus state, which the session daemon drives (spike 3). Native Wayland clients (the
+    # launcher, see GDK_BACKEND below) need gamescope's Wayland socket; Xwayland is always there.
+    ++ [
+      "-e"
+      "--expose-wayland"
+    ]
     ++ cfg.gamescope.extraArgs
     ++ [ "--" ];
     # Fallback for machines without a usable Vulkan GPU (e.g. the test VM).
@@ -29,11 +33,28 @@ let
     ];
   };
 
+  # Under gamescope the home app runs under the reaper, which is how gamescope (Steam mode)
+  # learns the app id of its windows. Started here rather than by the daemon's
+  # launcher.command: gamescope needs a child to run anyway, and the home app then comes up
+  # (and lives and dies with the session) whether or not the daemon is alive.
+  homeCommand =
+    if cfg.compositor == "gamescope" then
+      [
+        (lib.getExe cfg.reaperPackage)
+        "reaper"
+        "SteamLaunch"
+        "AppId=${toString cfg.launcherAppId}"
+        "--"
+        (lib.getExe cfg.homeApp)
+      ]
+    else
+      [ (lib.getExe cfg.homeApp) ];
+
   sessionCommand = lib.escapeShellArgs (
     [ (lib.getExe' pkgs.coreutils "env") ]
     ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment
     ++ compositorCommand.${cfg.compositor}
-    ++ [ (lib.getExe cfg.homeApp) ]
+    ++ homeCommand
   );
 in
 {
@@ -68,6 +89,22 @@ in
         when nothing else is running. Must have `meta.mainProgram` set. Defaults to the Flutter
         launcher; `pkgs.hinteros-placeholder-home` (an xterm) is kept for debugging.
       '';
+    };
+
+    launcherAppId = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 4100000000;
+      description = ''
+        gamescope app id of the home app's windows (given through the reaper). The session
+        daemon uses the same id (`launcher.app_id`) to bring the home app to the front.
+      '';
+    };
+
+    reaperPackage = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.hinteros-session;
+      defaultText = lib.literalExpression "pkgs.hinteros-session";
+      description = "Package providing `hinteros-session reaper`, which wraps the home app under gamescope.";
     };
 
     environment = lib.mkOption {
