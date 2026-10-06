@@ -51,8 +51,9 @@ in
       description = ''
         Contents of the session daemon's `session.toml` (see the hinteros-daemon README), as a
         Nix attribute set. The file is generated into the store and passed with `--config`.
-        The module already sets `launcher.app_id`, `gamescope.*` and `steam.path` (all with
-        `mkDefault`).
+        The module already sets `launcher.app_id`, `gamescope.*`, `steam.path`, `steam.tag_windows`,
+        `steam.library_poll_s`, `steam.library_debounce_ms` and `close.timeout_ms` (all with
+        `mkDefault`; `steam.dir` is left to the daemon's default unless a test sets it).
       '';
     };
 
@@ -74,9 +75,16 @@ in
         display = lib.mkDefault ":0";
         wayland_display = lib.mkDefault "gamescope-0";
       };
-      steam.path = lib.mkIf config.programs.steam.enable (
-        lib.mkDefault (lib.getExe config.programs.steam.package)
-      );
+      steam = {
+        # Steam's own windows get STEAM_GAME=769 so gamescope can show them (needs gamescope).
+        tag_windows = lib.mkDefault true;
+        library_poll_s = lib.mkDefault 60;
+        library_debounce_ms = lib.mkDefault 500;
+        path = lib.mkIf config.programs.steam.enable (
+          lib.mkDefault (lib.getExe config.programs.steam.package)
+        );
+      };
+      close.timeout_ms = lib.mkDefault 5000;
     };
 
     users.groups.${cfg.group} = { };
