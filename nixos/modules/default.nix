@@ -4,5 +4,6 @@
     ./daemon.nix
     ./input.nix
     ./session.nix
+    ./state.nix
   ];
 }

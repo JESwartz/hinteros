@@ -61,6 +61,9 @@
         (import ./nixos/overlay.nix)
       ];
 
+      # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
+      lib.mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
+
       nixosModules = {
         default.imports = [
           overlayModule
@@ -70,12 +73,15 @@
         session = ./nixos/modules/session.nix;
         daemon = ./nixos/modules/daemon.nix;
         input = ./nixos/modules/input.nix;
+        state = ./nixos/modules/state.nix;
       };
 
       nixosConfigurations = {
         vm = mkVm [ ];
         # Same VM with the real compositor; needs a Vulkan GPU (e.g. virtio-gpu venus).
         vm-gamescope = mkVm [ { hinteros.session.compositor = "gamescope"; } ];
+        # Dev box (mini PC #1), deployed with nixos-rebuild --target-host. See devices/devbox.
+        devbox = import ./devices/devbox { inherit self; };
       };
 
       packages.${system} = {
@@ -104,6 +110,7 @@
         boot = import ./tests/vm/boot.nix { inherit self pkgs; };
         gamescope = import ./tests/vm/gamescope.nix { inherit self pkgs; };
         input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
+        mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {
