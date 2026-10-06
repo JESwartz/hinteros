@@ -9,7 +9,18 @@ let
   cfg = config.hinteros.session;
 
   compositorCommand = {
-    gamescope = [ (lib.getExe cfg.gamescope.package) ] ++ cfg.gamescope.extraArgs ++ [ "--" ];
+    gamescope = [
+      (lib.getExe cfg.gamescope.package)
+    ]
+    ++ lib.optionals (cfg.gamescope.backend != null) [
+      "--backend"
+      cfg.gamescope.backend
+    ]
+    # Native Wayland clients (the launcher, see GDK_BACKEND below) need gamescope's
+    # Wayland socket; Xwayland is always there.
+    ++ [ "--expose-wayland" ]
+    ++ cfg.gamescope.extraArgs
+    ++ [ "--" ];
     # Fallback for machines without a usable Vulkan GPU (e.g. the test VM).
     cage = [
       (lib.getExe pkgs.cage)
@@ -70,6 +81,22 @@ in
 
     gamescope = {
       package = lib.mkPackageOption pkgs "gamescope" { };
+      backend = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.enum [
+            "drm"
+            "headless"
+            "wayland"
+            "sdl"
+          ]
+        );
+        default = null;
+        example = "headless";
+        description = ''
+          gamescope `--backend`. `null` lets gamescope choose (DRM on a bare TTY). `headless`
+          renders without a display and is what the `gamescope` VM test uses.
+        '';
+      };
       extraArgs = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [ ];
@@ -86,6 +113,12 @@ in
 
   config = lib.mkIf cfg.enable {
     hardware.graphics.enable = true;
+
+    # Spike 1: the Flutter launcher runs better on native Wayland than on Xwayland under
+    # gamescope (correct 2x scale at 4K, steadier frame times). The cage VM config sets the same.
+    hinteros.session.environment = lib.mkIf (cfg.compositor == "gamescope") {
+      GDK_BACKEND = lib.mkDefault "wayland";
+    };
 
     users.users.${cfg.user} = {
       isNormalUser = true;
