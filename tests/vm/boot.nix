@@ -86,6 +86,6 @@
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros"
-    assert rpc(sock, "0.3", as_user="hinteros") == "hinteros-session"
+    assert rpc(sock, "0.4", as_user="hinteros") == "hinteros-session"
   '';
 }

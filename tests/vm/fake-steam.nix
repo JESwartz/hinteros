@@ -28,7 +28,7 @@
     machine.succeed("grep -q Fake ~hinteros/.local/share/Steam/steamapps/appmanifest_1000002.acf")
 
     # Run the stub as the session user, inside the compositor's environment.
-    pid = machine.succeed("pgrep -u hinteros -f hinteros-launcher | head -1").strip()
+    pid = machine.succeed("pgrep -u hinteros -f 'hinteros-launcher$' | head -1").strip()
     machine.succeed(
         f"tr '\\0' '\\n' < /proc/{pid}/environ "
         "| grep -E '^(XDG_RUNTIME_DIR|WAYLAND_DISPLAY|DISPLAY)=' | sed 's/^/export /' > /tmp/session-env"
