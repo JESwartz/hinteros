@@ -12,7 +12,9 @@ let
 
   supportedSchemaVersion = 1;
 
-  # Catalog app id -> NixOS config. Only Steam exists so far; the App Store (M8) replaces this.
+  appIds = import ../lib/app-ids.nix;
+
+  # Catalog app id -> NixOS config. The App Store (M8) replaces this.
   knownApps = {
     steam = {
       programs.steam.enable = true;
@@ -25,7 +27,13 @@ let
         "steam-run"
       ];
     };
-  };
+    # Plex HTPC and Moonlight are registry apps (apps.nix); the id only switches them on.
+    plex-htpc.hinteros.apps.plex.enable = true;
+    moonlight.hinteros.apps.moonlight.enable = true;
+  }
+  // lib.genAttrs appIds.onIso (_: { });
+  # The default apps (appIds.onIso) are enabled by apps.nix whenever the session is; a device
+  # with a state selects them: only the listed ones are on (see the mkOverride below).
 
   # Fail on keys outside `known`, naming the path.
   checkKeys =
@@ -35,8 +43,15 @@ let
     in
     lib.optional (unknown != [ ]) "unknown field(s) in ${path}: ${lib.concatStringsSep ", " unknown}";
 
+  # The one disk layout there is: GPT, 1 GiB ESP + ext4 root, found by partition label (disk.nix).
+  # The installer creates it (nixos/pkgs/hinteros-install); the field names it so another layout
+  # can be added without breaking old states.
+  diskLayout = "gpt-esp-ext4";
+
   settings = state.settings or { };
   ssh = settings.ssh or { };
+  admin = settings.admin or null;
+  disk = state.disk or null;
   apps = state.apps or [ ];
   profiles = state.profiles or [ ];
   unknownApps = lib.filter (a: !(knownApps ? ${a})) apps;
@@ -49,12 +64,31 @@ let
     ++ checkKeys "state" [
       "schemaVersion"
       "base"
+      "stateVersion"
       "settings"
+      "disk"
       "apps"
       "profiles"
     ] state
-    ++ checkKeys "settings" [ "ssh" ] settings
+    ++ checkKeys "settings" [
+      "ssh"
+      "hostname"
+      "admin"
+    ] settings
     ++ checkKeys "settings.ssh" [ "enable" ] ssh
+    ++ lib.optionals (admin != null) (
+      checkKeys "settings.admin" [ "user" ] admin
+      ++ lib.optional (!(admin ? user)) "settings.admin needs a user"
+    )
+    ++ lib.optionals (disk != null) (
+      checkKeys "disk" [ "layout" ] disk
+      ++
+        lib.optional ((disk.layout or null) != diskLayout)
+          "unsupported disk.layout ${builtins.toJSON (disk.layout or null)} (supported: ${diskLayout})"
+    )
+    ++ lib.optional (
+      lib.sort lib.lessThan appIds.all != builtins.attrNames knownApps
+    ) "internal: nixos/lib/app-ids.nix and knownApps disagree"
     ++
       lib.optional (unknownApps != [ ])
         "unknown app id(s): ${lib.concatStringsSep ", " unknownApps} (known: ${lib.concatStringsSep ", " (builtins.attrNames knownApps)})"
@@ -93,8 +127,30 @@ in
 
           # sshd on/off. Opt-in; the admin account is the only login (see hardening.nix).
           hinteros.ssh.enable = sshEnable;
-
         }
+
+        # The default apps are exactly the selected ones. mkOverride 900 beats apps.nix's
+        # mkDefault and loses to a device's own `enable = true`.
+        {
+          hinteros.apps = lib.genAttrs appIds.onIso (id: {
+            enable = lib.mkOverride 900 (builtins.elem id apps);
+          });
+        }
+
+        (lib.mkIf (state ? stateVersion) { system.stateVersion = state.stateVersion; })
+        (lib.mkIf (settings ? hostname) { networking.hostName = lib.mkDefault settings.hostname; })
+
+        # The admin account (hardening.nix). Its password hash is a root-only file written by the
+        # installer (and later the first-boot wizard); it is never part of state.json or the store.
+        (lib.mkIf (admin != null) {
+          hinteros.admin = {
+            enable = true;
+            inherit (admin) user;
+            hashedPasswordFile = lib.mkDefault "/var/lib/hinteros/admin-password-hash";
+          };
+        })
+
+        (lib.mkIf (disk != null) { hinteros.disk.enable = true; })
       ]
       # One mkIf per known app keeps the list itself independent of the state.
       ++ lib.mapAttrsToList (id: appConfig: lib.mkIf (builtins.elem id apps) appConfig) knownApps

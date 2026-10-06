@@ -12,6 +12,7 @@
     ./device-config.nix
     ./runtime.nix
     ./maintenance.nix
+    ./disk.nix
     ./hardening.nix
   ];
 }

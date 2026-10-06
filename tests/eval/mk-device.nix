@@ -106,7 +106,7 @@ let
       expected = true;
     };
     testUnknownApp = {
-      expr = lib.hasInfix "unknown app id(s): plex-htpc" (failures (good // { apps = [ "plex-htpc" ]; }));
+      expr = lib.hasInfix "unknown app id(s): bogus" (failures (good // { apps = [ "bogus" ]; }));
       expected = true;
     };
     testUnavailableBase = {
@@ -120,6 +120,115 @@ let
             true
         )).success;
       expected = false;
+    };
+    # Default apps are exactly the selected ones once a state exists; the rest stay off.
+    testDefaultAppsFollowState = {
+      expr =
+        let
+          a =
+            (mk (
+              good
+              // {
+                apps = [
+                  "youtube"
+                  "firefox"
+                ];
+              }
+            )).config.hinteros.apps;
+        in
+        lib.mapAttrs (_: x: x.enable) (
+          lib.getAttrs [ "jellyfin" "youtube" "crunchyroll" "firefox" "plex" "moonlight" ] a
+        );
+      expected = {
+        jellyfin = false;
+        youtube = true;
+        crunchyroll = false;
+        firefox = true;
+        plex = false;
+        moonlight = false;
+      };
+    };
+    testOnlineOnlyApps = {
+      expr =
+        let
+          a =
+            (mk (
+              good
+              // {
+                apps = [
+                  "plex-htpc"
+                  "moonlight"
+                ];
+              }
+            )).config;
+        in
+        [
+          a.hinteros.apps.plex.enable
+          a.hinteros.apps.moonlight.enable
+          a.hinteros.unfreeAllowlist
+        ];
+      expected = [
+        true
+        true
+        [ "plex-htpc" ]
+      ];
+    };
+    testInstallerFields =
+      let
+        c2 =
+          (mk (
+            good
+            // {
+              stateVersion = "25.11";
+              settings = good.settings // {
+                hostname = "livingroom";
+                admin.user = "james";
+              };
+              disk.layout = "gpt-esp-ext4";
+            }
+          )).config;
+      in
+      {
+        expr = [
+          c2.system.stateVersion
+          c2.networking.hostName
+          c2.hinteros.admin.enable
+          c2.hinteros.admin.user
+          c2.hinteros.admin.hashedPasswordFile
+          c2.users.users.james.isNormalUser
+          c2.fileSystems."/".device
+          c2.boot.loader.systemd-boot.enable
+        ];
+        expected = [
+          "25.11"
+          "livingroom"
+          true
+          "james"
+          "/var/lib/hinteros/admin-password-hash"
+          true
+          "/dev/disk/by-partlabel/hinteros-root"
+          true
+        ];
+      };
+    testUnknownDiskLayout = {
+      expr = lib.hasInfix "unsupported disk.layout" (failures (good // { disk.layout = "zfs"; }));
+      expected = true;
+    };
+    testUnknownAdminField = {
+      expr = lib.hasInfix "unknown field(s) in settings.admin: password" (
+        failures (
+          good
+          // {
+            settings = good.settings // {
+              admin = {
+                user = "a";
+                password = "x";
+              };
+            };
+          }
+        )
+      );
+      expected = true;
     };
     testFacterReportPath = {
       expr =

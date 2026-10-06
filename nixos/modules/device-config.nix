@@ -130,6 +130,12 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # The device flake is built with `nixos-rebuild --flake path:...` by the privileged service.
+    nix.settings.experimental-features = [
+      "nix-command"
+      "flakes"
+    ];
+
     system.systemBuilderCommands = lib.mkIf (snapshot != null) ''
       cp -r ${snapshot} $out/hinteros
     '';

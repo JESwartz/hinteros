@@ -257,6 +257,17 @@ in
             color = "#3c3c3c";
           });
         };
+        # Not a default app either: online installs only (nixos/lib/app-ids.nix).
+        moonlight = {
+          name = lib.mkDefault "Moonlight";
+          order = lib.mkDefault 25;
+          package = lib.mkDefault pkgs.moonlight-qt;
+          input = lib.mkDefault "gamepad";
+          icon = lib.mkDefault (mkIcon {
+            letter = "M";
+            color = "#2e7d4f";
+          });
+        };
       };
     }
 

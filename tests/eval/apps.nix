@@ -8,6 +8,13 @@ let
     self.lib.mkDevice {
       state = {
         schemaVersion = 1;
+        # A state selects its default apps; this test wants all four.
+        apps = [
+          "jellyfin"
+          "youtube"
+          "crunchyroll"
+          "firefox"
+        ];
         profiles = [
           {
             id = "p1";
