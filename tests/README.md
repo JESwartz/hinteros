@@ -4,4 +4,4 @@
 - `couch/`: manual checklists for each milestone's exit criterion, run on real hardware
   with no keyboard attached.
 
-See TESTING.md in the `hinteros-docs` repo for the full workflow.
+The full testing workflow is in the project docs (TESTING.md, kept locally).

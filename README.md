@@ -10,10 +10,10 @@ hardware profiles and system tests.
 
 | Repo | Contents |
 |---|---|
-| `hinteros` (this one) | System flake, NixOS modules, hardware profiles, VM tests |
-| `hinteros-docs` | Project-wide docs: roadmap, testing workflow, decisions |
-| `hinteros-launcher` | Flutter launcher (the TV/console UI) |
-| `hinteros-daemon` | Rust system daemon (controller input, Home button, app launching, settings, rebuilds) |
+| [`hinteros`](https://justsomeshed.com/JSwartz/HinterOS/hinteros) (this one) | System flake, NixOS modules, hardware profiles, VM tests |
+| `hinteros-docs` | Project-wide docs: roadmap, testing workflow, decisions (kept locally, not published) |
+| [`hinteros-launcher`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher) | Flutter launcher (the TV/console UI) |
+| [`hinteros-daemon`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon) | Rust system daemon (controller input, Home button, app launching, settings, rebuilds) |
 
 The system flake takes the launcher and daemon as flake inputs. Its `flake.lock` pins the
 exact component revisions, so each branch of this repo (`main`, `beta`, `stable`) describes
