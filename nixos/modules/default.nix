@@ -9,5 +9,8 @@
     ./unfree.nix
     ./firefox-kiosk.nix
     ./apps.nix
+    ./device-config.nix
+    ./runtime.nix
+    ./maintenance.nix
   ];
 }

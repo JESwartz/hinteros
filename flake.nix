@@ -78,6 +78,9 @@
         unfree = ./nixos/modules/unfree.nix;
         firefox-kiosk = ./nixos/modules/firefox-kiosk.nix;
         apps = ./nixos/modules/apps.nix;
+        device-config = ./nixos/modules/device-config.nix;
+        runtime = ./nixos/modules/runtime.nix;
+        maintenance = ./nixos/modules/maintenance.nix;
       };
 
       nixosConfigurations = {
@@ -115,9 +118,12 @@
         gamescope = import ./tests/vm/gamescope.nix { inherit self pkgs; };
         input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
         fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
+        config-sync = import ./tests/vm/config-sync.nix { inherit self pkgs; };
+        runtime = import ./tests/vm/runtime.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
+        runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
       };
 

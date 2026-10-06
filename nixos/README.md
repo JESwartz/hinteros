@@ -46,3 +46,25 @@ over the session socket (API 0.4) it calls `keys.type` with a URL, `keys.action 
 with `P@ss-w0rd!` and `keys.action enter`, and checks that the page received exactly those values
 through the daemon's uinput keyboard. It also checks that the daemon started `hinteros-osk`, that
 the OSK connected at 0.4 and that `osk.show`/`osk.hide` answer.
+
+## Device config, runtime settings and maintenance (M5/M6 groundwork)
+
+- `device-config.nix`: `hinteros.deviceConfig.{enable,dir,configDir}`. Each toplevel embeds
+  `flake.nix`, `flake.lock`, `state.json` at `$out/hinteros/` (`mkDevice { configDir; }`; without
+  it, `state.json` generated from the state). `hinteros-config-sync` (oneshot before the
+  daemon and greetd) restores `/etc/hinteros` from `/run/current-system/hinteros` by building a
+  sibling temp dir and swapping with `mv --exchange`; `facter.json` and other files are kept.
+  Skips when `/etc/hinteros` or the snapshot is missing. `configDir` must be a plain path (a flake
+  source), not a derivation output, because the module reads it at eval time.
+- `runtime.nix`: `hinteros.runtime.{enable,network,bluetooth,audio,power}`, on with the session.
+  NetworkManager (no VPN plugins), BlueZ (`Experimental`, `UserspaceHID`, `ClassicBondedOnly`
+  stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules
+  scoped to the session user's active local session: suspend/reboot/power-off and the Wi-Fi
+  actions. `settings.modify.system` is deliberately not granted (see the comment in the module).
+  Also sets `systemd-boot.editor = false`.
+- `maintenance.nix`: `hinteros.maintenance.*`. Boot counting uses NixOS' native
+  `boot.loader.systemd-boot.bootCounting`; `hinteros-boot-health` gates `boot-complete.target`
+  on the daemon and launcher, so a broken generation falls back by itself. Off by default
+  (needs systemd-boot); on for the devbox. GC keeps the last `keepGenerations` (5) system
+  generations (and boot entries), `nix.optimise`, and `hinteros-disk-check` logs a warning
+  (identifier `hinteros-disk-check`, priority 4) below `diskCheck.minFreeGiB`.
