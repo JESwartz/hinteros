@@ -68,11 +68,15 @@
         return evdev_out, signals
 
     machine.wait_for_unit("inputplumber.service")
-    machine.wait_for_unit("hinteros-inputplumber-manage.service")
     machine.wait_until_succeeds(f"busctl tree {IP}")
 
-    # The module enabled management at startup.
-    assert "true" in bc(f"get-property {IP} {MGR} {MGRI} ManageAllDevices")
+    # InputPlumber ignores pads until ManageAllDevices is set; the session daemon owns that in
+    # the real system (hinteros.daemon), so this test does it itself, as the session user.
+    def manage():
+        bc(f"set-property {IP} {MGR} {MGRI} ManageAllDevices b true")
+        assert "true" in bc(f"get-property {IP} {MGR} {MGRI} ManageAllDevices")
+
+    manage()
 
     # A hotplugged pad becomes a composite device without any manual step.
     machine.execute("systemd-run --unit=fakepad python3 /etc/fakepad.py")
@@ -100,10 +104,10 @@
     assert "ui_guide" in sig and "ui_back" in sig, sig
     assert bc(f"get-property {IP} {CD} {CDI} InterceptMode").split()[-1] == "2"
 
-    # InputPlumber restarts reset ManageAllDevices; the module re-applies it.
+    # InputPlumber restarts reset ManageAllDevices (the daemon re-applies it; see its tests).
     machine.succeed("systemctl restart inputplumber.service")
-    machine.wait_for_unit("hinteros-inputplumber-manage.service")
     machine.wait_until_succeeds(f"busctl tree {IP}")
-    assert "true" in bc(f"get-property {IP} {MGR} {MGRI} ManageAllDevices")
+    assert "false" in bc(f"get-property {IP} {MGR} {MGRI} ManageAllDevices")
+    manage()
   '';
 }

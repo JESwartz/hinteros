@@ -21,13 +21,14 @@
     import shlex
     from datetime import timedelta
 
-    HELLO = {"jsonrpc": "2.0", "id": 1, "method": "hello",
-             "params": {"api_version": "0.1", "client": {"name": "boot-test", "version": "0"}}}
+    def hello_msg(version):
+        return {"jsonrpc": "2.0", "id": 1, "method": "hello",
+                "params": {"api_version": version, "client": {"name": "boot-test", "version": "0"}}}
     PING = {"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {"nonce": "boot"}}
 
-    def rpc(sock, as_user=None):
+    def rpc(sock, version, as_user=None):
         """Send hello + ping on a unix socket, return the two decoded responses."""
-        payload = "".join(json.dumps(m) + "\n" for m in (HELLO, PING))
+        payload = "".join(json.dumps(m) + "\n" for m in (hello_msg(version), PING))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 1) | socat -t2 - UNIX-CONNECT:{sock}"
         if as_user:
             cmd = f"runuser -u {as_user} -- sh -c {shlex.quote(cmd)}"
@@ -35,7 +36,7 @@
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
         assert len(replies) == 2, f"expected 2 replies, got {out!r}"
         hello, ping = replies
-        assert "error" not in hello and hello["result"]["api_version"] == "0.1", hello
+        assert "error" not in hello and hello["result"]["api_version"] == version, hello
         assert ping.get("result") == {"nonce": "boot"}, ping
         return hello["result"]["server"]["name"]
 
@@ -65,13 +66,13 @@
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
     assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
     machine.succeed("id -nG hinteros | tr ' ' '\\n' | grep -qx hinteros")
-    assert rpc("/run/hinteros/system.sock", as_user="hinteros") == "hinteros-system"
+    assert rpc("/run/hinteros/system.sock", "0.1", as_user="hinteros") == "hinteros-system"
 
     # Session daemon: user service of the session user, socket in its runtime dir, mode 0600.
     uid = machine.succeed("id -u hinteros").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros"
-    assert rpc(sock, as_user="hinteros") == "hinteros-session"
+    assert rpc(sock, "0.2", as_user="hinteros") == "hinteros-session"
   '';
 }
