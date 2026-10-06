@@ -46,9 +46,9 @@ will drive the same backend; `hinteros.installer.ui.command` is the hook that st
 
 ```
 nix build .#iso
-ls -lh result/iso/*.iso
+ls -lh result/iso/*.iso (about 3.8 GB)
 # Check the device with lsblk first; this erases the stick.
-sudo dd if=result/iso/hinteros-installer-*.iso of=/dev/sdX bs=4M conv=fsync status=progress
+sudo dd if=result/iso/hinteros-installer.iso of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 `cp` onto the raw device works as well as `dd`. Build from a clean, committed checkout: the ISO

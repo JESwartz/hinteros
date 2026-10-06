@@ -11,7 +11,7 @@ second machine to build the ISO. An Ethernet cable for the online part; a Wi-Fi 
 ## Build and boot
 
 - [ ] `nix build .#iso` from a clean commit of the system repo succeeds. Record: ISO size (`ls -lh result/iso/`), build time.
-- [ ] `sudo dd if=result/iso/hinteros-installer-*.iso of=/dev/sdX bs=4M conv=fsync status=progress` (check the device with `lsblk`).
+- [ ] `sudo dd if=result/iso/hinteros-installer.iso of=/dev/sdX bs=4M conv=fsync status=progress` (check the device with `lsblk`).
 - [ ] The mini PC boots the stick in UEFI mode (boot menu key, pick the UEFI entry). Record: time to the console, any boot menu or Secure Boot complaint, whether the display and the keyboard work.
 - [ ] The console shows the HinterOS installer notice (not an installer UI: none is wired yet) and `hinteros-install` is on the PATH.
 - [ ] `lsblk` shows the internal disk; note its by-id path (`ls -l /dev/disk/by-id/`) for the plan.

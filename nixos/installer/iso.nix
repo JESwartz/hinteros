@@ -10,7 +10,7 @@
     "${modulesPath}/installer/cd-dvd/installation-cd-base.nix"
   ];
 
-  image.baseName = "hinteros-installer";
+  image.baseName = lib.mkForce "hinteros-installer";
   isoImage = {
     volumeID = "HINTEROS";
     edition = "hinteros";
