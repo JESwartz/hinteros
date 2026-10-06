@@ -4,4 +4,5 @@
 final: _prev: {
   hinteros-placeholder-home = final.callPackage ./pkgs/placeholder-home.nix { };
   hinteros-fake-steam = final.callPackage ./pkgs/fake-steam { };
+  hinteros-firefox-kiosk = final.callPackage ./pkgs/firefox-kiosk.nix { };
 }

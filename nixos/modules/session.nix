@@ -150,6 +150,7 @@ in
 
   config = lib.mkIf cfg.enable {
     hardware.graphics.enable = true;
+    hardware.uinput.enable = true;
 
     # Spike 1: the Flutter launcher runs better on native Wayland than on Xwayland under
     # gamescope (correct 2x scale at 4K, steadier frame times). The cage VM config sets the same.
@@ -162,6 +163,7 @@ in
       extraGroups = [
         "video"
         "input"
+        "uinput" # the daemon injects key presses for keyboard-driven apps
       ];
     };
 

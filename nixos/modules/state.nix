@@ -18,14 +18,12 @@ let
       programs.steam.enable = true;
       # Steam is unfree: allow exactly the Steam packages. Never put the result in a binary
       # cache or an ISO (Steam and Plex licences forbid redistribution).
-      nixpkgs.config.allowUnfreePredicate =
-        pkg:
-        builtins.elem (lib.getName pkg) [
-          "steam"
-          "steam-unwrapped"
-          "steam-original"
-          "steam-run"
-        ];
+      hinteros.unfreeAllowlist = [
+        "steam"
+        "steam-unwrapped"
+        "steam-original"
+        "steam-run"
+      ];
     };
   };
 
@@ -72,6 +70,8 @@ let
   sshEnable = ssh.enable or false;
 in
 {
+  imports = [ ./unfree.nix ];
+
   options.hinteros.state = lib.mkOption {
     type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
     default = null;

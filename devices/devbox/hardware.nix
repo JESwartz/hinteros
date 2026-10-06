@@ -4,10 +4,13 @@
   networking.hostName = "hinteros-devbox";
   system.stateVersion = "25.11";
 
-  hinteros.session.gamescope.backend = "drm";
-
-  # Start Steam (-silent, never under a reaper) with the session daemon.
-  hinteros.daemon.session.settings.steam.autostart = true;
+  hinteros = {
+    session.gamescope.backend = "drm";
+    # Plex HTPC (unfree, never cached or on the ISO): enabled here until the App Store (M8).
+    apps.plex.enable = true;
+    # Start Steam (-silent, never under a reaper) with the session daemon.
+    daemon.session.settings.steam.autostart = true;
+  };
 
   # Dev box only: the deploy user (the session user) can sudo without a password, and
   # nixos-rebuild may copy unsigned closures to it. Boxes #2 and #3 do not get this.

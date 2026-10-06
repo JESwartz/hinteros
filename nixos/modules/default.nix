@@ -6,5 +6,8 @@
     ./session.nix
     ./state.nix
     ./fake-steam.nix
+    ./unfree.nix
+    ./firefox-kiosk.nix
+    ./apps.nix
   ];
 }
