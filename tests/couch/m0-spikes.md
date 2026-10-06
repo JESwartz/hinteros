@@ -47,6 +47,8 @@ Needs `steam -silent` running, and the launcher as the home app.
 - [ ] In the game, input arrives exactly once; a Steam Input remap for that game applies once, not twice.
 - [ ] Press Home in the game: the launcher appears, the game and Steam see no Guide press. Return to the game and repeat 10 times: focus returns every time. Record: failures.
 - [ ] No double input in either direction: the launcher does not move while in a game, the game does not react while the launcher is focused.
+- [ ] Home screen: choose Steam (Big Picture): `apps.launch {id: steam}` shows Big Picture as gamescope app 769, with the pad working in it; Home returns to the launcher; closing it from the launcher (`apps.close steam`) ends Big Picture, not Steam. Record: which Steam command worked (`steam://open/bigpicture` or `-gamepadui`).
+- [ ] Steam attention: trigger a Steam Guard prompt or an update dialog while the launcher has focus. The launcher shows its "Steam needs your attention" banner (`steam_attention`); accepting it (`steam.focus`) shows the dialog, usable with the pad; closing the dialog returns to the launcher. Record: window titles the daemon reported.
 - [ ] Steam pop-ups (a notification, an update dialog, the Steam keyboard) can be surfaced and dismissed with the pad. Record: which ones tried.
 - [ ] Quit the game from inside it: back in the launcher, Steam still running.
 
