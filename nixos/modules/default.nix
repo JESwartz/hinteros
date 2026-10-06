@@ -2,6 +2,7 @@
 {
   imports = [
     ./daemon.nix
+    ./input.nix
     ./session.nix
   ];
 }

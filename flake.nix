@@ -69,6 +69,7 @@
         overlay = overlayModule;
         session = ./nixos/modules/session.nix;
         daemon = ./nixos/modules/daemon.nix;
+        input = ./nixos/modules/input.nix;
       };
 
       nixosConfigurations = {
@@ -101,6 +102,8 @@
           };
         };
         boot = import ./tests/vm/boot.nix { inherit self pkgs; };
+        gamescope = import ./tests/vm/gamescope.nix { inherit self pkgs; };
+        input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {
