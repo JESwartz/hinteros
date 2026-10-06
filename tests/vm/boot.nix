@@ -1,4 +1,5 @@
-# Boots the HinterOS test system and checks that the console session is up.
+# Boots the HinterOS test system and checks that the console session is up: the launcher
+# is on screen and both daemons answer the socket API handshake.
 # The test pkgs are read-only, so the overlay is applied to them here rather than
 # through the overlay module.
 { self, pkgs }:
@@ -9,12 +10,34 @@
   nodes.machine = {
     imports = [
       self.nixosModules.session
+      self.nixosModules.daemon
       ../../nixos/vm
     ];
+    environment.systemPackages = [ pkgs.socat ];
   };
 
   testScript = ''
+    import json
+    import shlex
     from datetime import timedelta
+
+    HELLO = {"jsonrpc": "2.0", "id": 1, "method": "hello",
+             "params": {"api_version": "0.1", "client": {"name": "boot-test", "version": "0"}}}
+    PING = {"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {"nonce": "boot"}}
+
+    def rpc(sock, as_user=None):
+        """Send hello + ping on a unix socket, return the two decoded responses."""
+        payload = "".join(json.dumps(m) + "\n" for m in (HELLO, PING))
+        cmd = f"(printf %s {shlex.quote(payload)}; sleep 1) | socat -t2 - UNIX-CONNECT:{sock}"
+        if as_user:
+            cmd = f"runuser -u {as_user} -- sh -c {shlex.quote(cmd)}"
+        out = machine.succeed(cmd)
+        replies = [json.loads(line) for line in out.splitlines() if line.strip()]
+        assert len(replies) == 2, f"expected 2 replies, got {out!r}"
+        hello, ping = replies
+        assert "error" not in hello and hello["result"]["api_version"] == "0.1", hello
+        assert ping.get("result") == {"nonce": "boot"}, ping
+        return hello["result"]["server"]["name"]
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("greetd.service")
@@ -23,22 +46,32 @@
     machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
 
     # The compositor (cage in the VM, see nixos/vm/default.nix) runs as that user
-    # and the home app (an xterm, via Xwayland) is up inside it.
+    # and the launcher is up inside it.
     machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/xterm '")
+    machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
 
     # Still up a few seconds later, i.e. not crash-looping.
     machine.sleep(duration=timedelta(seconds=5))
     machine.succeed("pgrep -u hinteros -f '/bin/cage '")
-    machine.succeed("pgrep -u hinteros -f '/bin/xterm '")
+    machine.succeed("pgrep -u hinteros -f hinteros-launcher")
 
-    # Screenshot: informational only until spike 2 decides the policy.
+    # The launcher draws its title; OCR must see it (retried until the timeout).
     machine.screenshot("session")
-    try:
-        text = machine.get_screen_text()
-        print("OCR text:", repr(text))
-        print("OCR found 'placeholder':", "placeholder" in text.lower())
-    except Exception as e:
-        print("OCR unavailable:", e)
+    machine.wait_for_text("HinterOS", timeout=timedelta(seconds=120))
+    machine.screenshot("launcher")
+
+    # System service: socket in /run/hinteros, root:hinteros 0660, answers the API.
+    machine.wait_for_unit("hinteros-system.service")
+    machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
+    assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
+    machine.succeed("id -nG hinteros | tr ' ' '\\n' | grep -qx hinteros")
+    assert rpc("/run/hinteros/system.sock", as_user="hinteros") == "hinteros-system"
+
+    # Session daemon: user service of the session user, socket in its runtime dir, mode 0600.
+    uid = machine.succeed("id -u hinteros").strip()
+    sock = f"/run/user/{uid}/hinteros/session.sock"
+    machine.wait_until_succeeds(f"test -S {sock}")
+    assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros"
+    assert rpc(sock, as_user="hinteros") == "hinteros-session"
   '';
 }

@@ -4,12 +4,18 @@
 # modifiers, no dma-buf export), so the VM uses the cage fallback by default.
 { lib, ... }:
 {
+  hinteros.daemon.enable = true;
+
   hinteros.session = {
     enable = true;
     compositor = lib.mkDefault "cage";
     environment = {
       WLR_RENDERER = "pixman";
       WLR_NO_HARDWARE_CURSORS = "1";
+      # Flutter GTK app on cage: Wayland, software GL (no GPU in the VM).
+      GDK_BACKEND = "wayland";
+      LIBGL_ALWAYS_SOFTWARE = "1";
+      GALLIUM_DRIVER = "llvmpipe";
     };
   };
 

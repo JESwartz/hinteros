@@ -4,10 +4,14 @@
   - `session.nix`: greetd autologin into gamescope running the home app.
     Options: `hinteros.session.enable`, `.user` (default `hinteros`), `.compositor`
     (`gamescope` or `cage`), `.environment`, `.homeApp`
-    (package, default `pkgs.hinteros-placeholder-home`), `.gamescope.package`, `.gamescope.extraArgs`.
+    (package, default `pkgs.hinteros-launcher`; `pkgs.hinteros-placeholder-home` is kept for debugging), `.gamescope.package`, `.gamescope.extraArgs`.
+  - `daemon.nix`: `hinteros.daemon.enable`, `.group` (default `hinteros`), `.session.package`,
+    `.system.package`, `.logLevel`. A systemd user service `hinteros-session` for the session user
+    (socket `$XDG_RUNTIME_DIR/hinteros/session.sock`) and a root system service `hinteros-system`
+    (`/run/hinteros/system.sock`, 0660, group `hinteros`, which the session user joins).
   - `overlay.nix`: adds `overlays.default` to nixpkgs.
 - `overlay.nix`, `pkgs/`: the overlay and its packages. `hinteros-placeholder-home` is an xterm
-  showing text; the Flutter launcher replaces it.
+  showing text.
 - `vm/`: the test system (`default.nix`, shared with the VM tests) and the interactive QEMU
   hardware (`qemu.nix`).
 - `hardware/`: per-model profiles. The `hardware.facter` report is always the baseline

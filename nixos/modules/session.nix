@@ -50,12 +50,12 @@ in
 
     homeApp = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.hinteros-placeholder-home;
-      defaultText = lib.literalExpression "pkgs.hinteros-placeholder-home";
+      default = pkgs.hinteros-launcher;
+      defaultText = lib.literalExpression "pkgs.hinteros-launcher";
       description = ''
         The home app: the program the compositor runs and that stays in the foreground
-        when nothing else is running. Must have `meta.mainProgram` set. The Flutter
-        launcher replaces the placeholder.
+        when nothing else is running. Must have `meta.mainProgram` set. Defaults to the Flutter
+        launcher; `pkgs.hinteros-placeholder-home` (an xterm) is kept for debugging.
       '';
     };
 
