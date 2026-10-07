@@ -16,7 +16,7 @@ in
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
   name = "hinteros-system-authz";
 
-  nodes.machine = import ./system/node.nix { inherit pkgs; };
+  nodes.machine = import ./system/node.nix { inherit self pkgs; };
 
   testScript = ''
     import json

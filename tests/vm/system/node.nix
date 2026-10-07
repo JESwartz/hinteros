@@ -3,6 +3,7 @@
 # Python clients in /etc/hinteros-test, a second HinterOS user in the hinteros group that does
 # not own the seat (`guest`) and one that is not in the group (`stranger`).
 {
+  self,
   pkgs,
   rateLimits ? false,
 }:
@@ -14,6 +15,7 @@ in
 {
   imports = [
     ../../../nixos/modules # everything but the overlay (the test pkgs already have it)
+    self.nixosModules.catalog
     ../../../nixos/vm
   ];
 

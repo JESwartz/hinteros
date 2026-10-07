@@ -67,6 +67,29 @@
         "type": "github"
       }
     },
+    "hinteros-catalog": {
+      "inputs": {
+        "git-hooks": [
+          "git-hooks"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1791325471,
+        "narHash": "sha256-u/hjXGa5B3cr7V+9q7BLI663F5WSe87OoF8rOfvxVlg=",
+        "ref": "refs/heads/main",
+        "rev": "3a5b200ed6681451b37b49f1f2f6e1bff96ef700",
+        "revCount": 12,
+        "type": "git",
+        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git"
+      }
+    },
     "hinteros-daemon": {
       "inputs": {
         "crane": "crane",
@@ -128,11 +151,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791332992,
-        "narHash": "sha256-prwnNpO+oDUItQc7e3zptS/wjVFHVMKX5uA2Po74FPI=",
+        "lastModified": 1791333672,
+        "narHash": "sha256-Y+lgPDsARQpifsT5kcFo18gKTxVtHglH3LCzW/KH4+0=",
         "ref": "refs/heads/main",
-        "rev": "355da763d1e5a2e50bdfd153926924bac9da84e0",
-        "revCount": 61,
+        "rev": "96d5420f9a9e0072224ad8a376814cfcec42d2fb",
+        "revCount": 63,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git"
       },
@@ -160,6 +183,7 @@
     "root": {
       "inputs": {
         "git-hooks": "git-hooks",
+        "hinteros-catalog": "hinteros-catalog",
         "hinteros-daemon": "hinteros-daemon",
         "hinteros-launcher": "hinteros-launcher",
         "nixpkgs": "nixpkgs"

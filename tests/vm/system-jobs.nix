@@ -39,7 +39,7 @@ in
   nodes.machine =
     { config, lib, ... }:
     {
-      imports = [ (import ./system/node.nix { inherit pkgs; }) ];
+      imports = [ (import ./system/node.nix { inherit self pkgs; }) ];
 
       systemd.services."hinteros-job@".path = lib.mkBefore [ (stubNix config.nix.package) ];
 

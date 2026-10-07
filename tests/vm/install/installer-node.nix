@@ -7,6 +7,7 @@
 {
   imports = [
     ../../../nixos/modules # everything but the overlay (the test pkgs already have it)
+    self.nixosModules.catalog
     (import ../../../nixos/installer { inherit self; })
   ];
 

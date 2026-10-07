@@ -9,7 +9,7 @@
   name = "hinteros-system-escalation";
 
   nodes.machine = import ./system/node.nix {
-    inherit pkgs;
+    inherit self pkgs;
     rateLimits = true;
   };
 

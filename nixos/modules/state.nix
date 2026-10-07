@@ -12,28 +12,10 @@ let
 
   supportedSchemaVersion = 1;
 
-  appIds = import ../lib/app-ids.nix;
-
-  # Catalog app id -> NixOS config. The App Store (M8) replaces this.
-  knownApps = {
-    steam = {
-      programs.steam.enable = true;
-      # Steam is unfree: allow exactly the Steam packages. Never put the result in a binary
-      # cache or an ISO (Steam and Plex licences forbid redistribution).
-      hinteros.unfreeAllowlist = [
-        "steam"
-        "steam-unwrapped"
-        "steam-original"
-        "steam-run"
-      ];
-    };
-    # Plex HTPC and Moonlight are registry apps (apps.nix); the id only switches them on.
-    plex-htpc.hinteros.apps.plex.enable = true;
-    moonlight.hinteros.apps.moonlight.enable = true;
-  }
-  // lib.genAttrs appIds.onIso (_: { });
-  # The default apps (appIds.onIso) are enabled by apps.nix whenever the session is; a device
-  # with a state selects them: only the listed ones are on (see the mkOverride below).
+  # Catalog ids (hinteros-catalog), tombstoned ones included: a state may still list them, and
+  # they do nothing.
+  catalog = cfg.catalog.entries;
+  liveIds = builtins.attrNames (lib.filterAttrs (_: e: e.status != "removed") catalog);
 
   # Fail on keys outside `known`, naming the path.
   checkKeys =
@@ -54,7 +36,7 @@ let
   disk = state.disk or null;
   apps = state.apps or [ ];
   profiles = state.profiles or [ ];
-  unknownApps = lib.filter (a: !(knownApps ? ${a})) apps;
+  unknownApps = lib.filter (a: !(catalog ? ${a})) apps;
 
   problems =
     lib.optional ((state.schemaVersion or null) != supportedSchemaVersion)
@@ -86,12 +68,9 @@ let
         lib.optional ((disk.layout or null) != diskLayout)
           "unsupported disk.layout ${builtins.toJSON (disk.layout or null)} (supported: ${diskLayout})"
     )
-    ++ lib.optional (
-      lib.sort lib.lessThan appIds.all != builtins.attrNames knownApps
-    ) "internal: nixos/lib/app-ids.nix and knownApps disagree"
     ++
       lib.optional (unknownApps != [ ])
-        "unknown app id(s): ${lib.concatStringsSep ", " unknownApps} (known: ${lib.concatStringsSep ", " (builtins.attrNames knownApps)})"
+        "unknown app id(s): ${lib.concatStringsSep ", " unknownApps} (known: ${lib.concatStringsSep ", " (builtins.attrNames catalog)})"
     ++ lib.concatMap (
       p:
       checkKeys "profiles[]" [
@@ -113,47 +92,43 @@ in
   };
 
   config = lib.mkIf (state != null) (
-    lib.mkMerge (
-      [
-        {
-          assertions = map (message: {
-            assertion = false;
-            inherit message;
-          }) (map (m: "hinteros state: ${m}") problems);
+    lib.mkMerge [
+      {
+        assertions = map (message: {
+          assertion = false;
+          inherit message;
+        }) (map (m: "hinteros state: ${m}") problems);
 
-          # TODO(M7): one Linux user per profile; for now only the first profile's user
-          # owns the session.
-          hinteros.session.user = lib.mkIf (profiles != [ ]) (lib.mkDefault (builtins.head profiles).user);
+        # TODO(M7): one Linux user per profile; for now only the first profile's user
+        # owns the session.
+        hinteros.session.user = lib.mkIf (profiles != [ ]) (lib.mkDefault (builtins.head profiles).user);
 
-          # sshd on/off. Opt-in; the admin account is the only login (see hardening.nix).
-          hinteros.ssh.enable = sshEnable;
-        }
+        # sshd on/off. Opt-in; the admin account is the only login (see hardening.nix).
+        hinteros.ssh.enable = sshEnable;
+      }
 
-        # The default apps are exactly the selected ones. mkOverride 900 beats apps.nix's
-        # mkDefault and loses to a device's own `enable = true`.
-        {
-          hinteros.apps = lib.genAttrs appIds.onIso (id: {
-            enable = lib.mkOverride 900 (builtins.elem id apps);
-          });
-        }
+      # The apps are exactly the selected catalog ids. mkOverride 900 beats the catalog's
+      # mkDefault (the `onIso` apps on) and loses to a device's own `enable = true`.
+      {
+        hinteros.apps = lib.genAttrs liveIds (id: {
+          enable = lib.mkOverride 900 (builtins.elem id apps);
+        });
+      }
 
-        (lib.mkIf (state ? stateVersion) { system.stateVersion = state.stateVersion; })
-        (lib.mkIf (settings ? hostname) { networking.hostName = lib.mkDefault settings.hostname; })
+      (lib.mkIf (state ? stateVersion) { system.stateVersion = state.stateVersion; })
+      (lib.mkIf (settings ? hostname) { networking.hostName = lib.mkDefault settings.hostname; })
 
-        # The admin account (hardening.nix). Its password hash is a root-only file written by the
-        # installer (and later the first-boot wizard); it is never part of state.json or the store.
-        (lib.mkIf (admin != null) {
-          hinteros.admin = {
-            enable = true;
-            inherit (admin) user;
-            hashedPasswordFile = lib.mkDefault "/var/lib/hinteros/admin-password-hash";
-          };
-        })
+      # The admin account (hardening.nix). Its password hash is a root-only file written by the
+      # installer (and later the first-boot wizard); it is never part of state.json or the store.
+      (lib.mkIf (admin != null) {
+        hinteros.admin = {
+          enable = true;
+          inherit (admin) user;
+          hashedPasswordFile = lib.mkDefault "/var/lib/hinteros/admin-password-hash";
+        };
+      })
 
-        (lib.mkIf (disk != null) { hinteros.disk.enable = true; })
-      ]
-      # One mkIf per known app keeps the list itself independent of the state.
-      ++ lib.mapAttrsToList (id: appConfig: lib.mkIf (builtins.elem id apps) appConfig) knownApps
-    )
+      (lib.mkIf (disk != null) { hinteros.disk.enable = true; })
+    ]
   );
 }

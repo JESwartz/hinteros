@@ -25,6 +25,15 @@
         git-hooks.follows = "git-hooks";
       };
     };
+    # The App Store catalog (design/catalog.md): app entries, Store index and vendor terms, locked
+    # per release like the other inputs.
+    hinteros-catalog = {
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        git-hooks.follows = "git-hooks";
+      };
+    };
   };
 
   outputs =
@@ -34,12 +43,31 @@
       git-hooks,
       hinteros-launcher,
       hinteros-daemon,
+      hinteros-catalog,
     }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
 
       overlayModule = import ./nixos/modules/overlay.nix { inherit self; };
+
+      # The catalog (design/catalog.md) as a keyed module: importing it twice is harmless.
+      catalogModule = {
+        key = "hinteros:catalog";
+        imports = [
+          (import ./nixos/modules/catalog.nix {
+            entries = hinteros-catalog.catalog;
+            inherit (hinteros-catalog.lib) cacheableUnfree;
+            index = hinteros-catalog.packages.${system}.index;
+          })
+        ];
+      };
+      withCatalog = path: {
+        imports = [
+          catalogModule
+          path
+        ];
+      };
 
       mkVm =
         extraModules:
@@ -67,17 +95,19 @@
       nixosModules = {
         default.imports = [
           overlayModule
+          catalogModule
           ./nixos/modules
         ];
         overlay = overlayModule;
         session = ./nixos/modules/session.nix;
         daemon = ./nixos/modules/daemon.nix;
         input = ./nixos/modules/input.nix;
-        state = ./nixos/modules/state.nix;
+        state = withCatalog ./nixos/modules/state.nix;
+        catalog = catalogModule;
         fake-steam = ./nixos/modules/fake-steam.nix;
         unfree = ./nixos/modules/unfree.nix;
         firefox-kiosk = ./nixos/modules/firefox-kiosk.nix;
-        apps = ./nixos/modules/apps.nix;
+        apps = withCatalog ./nixos/modules/apps.nix;
         device-config = ./nixos/modules/device-config.nix;
         runtime = ./nixos/modules/runtime.nix;
         maintenance = ./nixos/modules/maintenance.nix;
@@ -134,6 +164,7 @@
         config-sync = import ./tests/vm/config-sync.nix { inherit self pkgs; };
         runtime = import ./tests/vm/runtime.nix { inherit self pkgs; };
         runtime-settings = import ./tests/vm/runtime-settings.nix { inherit self pkgs; };
+        installer-ui = import ./tests/vm/installer-ui.nix { inherit self pkgs; };
         hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };

@@ -1,27 +1,20 @@
-# App registry (M4): `hinteros.apps.<id>` describes an app the launcher lists. Each enabled app
-# becomes an `[[apps]]` entry of the session daemon's session.toml (id, name, kind, icon,
-# command; see the hinteros-daemon README) and its package is installed.
+# App registry: `hinteros.apps.<id>` describes an app the launcher lists. Each enabled app becomes an
+# `[[apps]]` entry of the session daemon's session.toml (id, name, kind, command, input and the
+# icon fields; see the hinteros-daemon README) and its package is installed.
 #
-# Default apps (jellyfin, youtube, crunchyroll, firefox) are enabled whenever the session is.
-# Plex HTPC is defined but disabled; the dev box enables it (unfree, see unfree.nix).
+# The apps themselves come from the catalog (catalog.nix: one `hinteros.apps.<id>` per entry,
+# with the entry's settings as defaults). The `onIso` apps (jellyfin, youtube, crunchyroll,
+# firefox) are enabled whenever the session is, until a state.json selects the apps; a device
+# enables any other catalog id with `hinteros.apps.<id>.enable = true` (Plex and Steam are unfree:
+# allowed by name from the entry, see unfree.nix).
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 let
   cfg = config.hinteros.apps;
-  sessionEnabled = config.hinteros.session.enable;
   kioskCmd = lib.getExe config.hinteros.firefoxKiosk.wrapper;
-  mkIcon = pkgs.callPackage ../pkgs/app-icon.nix { };
-
-  # TV User-Agent for YouTube's leanback UI (youtube.com/tv refuses desktop browsers).
-  # A PlayStation 5 browser UA: YouTube serves its TV UI to it, and Firefox on Linux with
-  # it is the combination used by existing "YouTube TV in a desktop browser" setups.
-  # Not verifiable offline; if Google stops accepting it, change it here or fall back to
-  # backend = "vacuumtube". Alternatives: an Xbox Series X or Fire TV UA.
-  youtubeTvUserAgent = "Mozilla/5.0 (PlayStation; PlayStation 5/2.26) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0 Safari/605.1.15";
 
   appModule =
     { config, name, ... }:
@@ -87,21 +80,40 @@ let
           };
         };
 
+        listed = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Whether the launcher lists the app. False for catalog entries that only add system config (Steam: the daemon's built-in `steam` entry is its tile).";
+        };
+
         icon = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
           default = null;
-          description = "PNG icon (absolute path). The default apps use generated neutral letter icons.";
+          description = "PNG icon (absolute path), first choice when set. Catalog apps leave it unset: the daemon finds real icons at runtime from the fields below.";
         };
 
-        unfreeName = lib.mkOption {
+        desktopId = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
-          example = "plex-htpc";
-          description = ''
-            Name of the unfree package (`lib.getName`); added to `hinteros.unfreeAllowlist` while
-            the app is enabled. A plain string, not derived from `package`: nixpkgs.config
-            depends on it, so it must not depend on pkgs.
-          '';
+          description = "The installed app's freedesktop `.desktop` file id; its `Icon=` is the icon (session.toml `desktop_id`).";
+        };
+
+        iconUrl = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "https URL of the vendor's own logo, fetched by the daemon at runtime (session.toml `icon_url`).";
+        };
+
+        siteUrl = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Site whose icon the daemon looks up (session.toml `site_url`).";
+        };
+
+        firefoxProfile = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = "Use the favicon the app's kiosk profile stored (session.toml `firefox_profile`, needs `siteUrl`).";
         };
 
         input = lib.mkOption {
@@ -125,19 +137,6 @@ let
           example = "backspace";
           description = "Key the daemon presses for \"back\" (keyboard input): a name from the API's key list, e.g. `backspace` or `alt+left`.";
         };
-
-        # youtube only: which implementation runs.
-        backend = lib.mkOption {
-          type = lib.types.enum [
-            "firefox"
-            "vacuumtube"
-          ];
-          default = "firefox";
-          description = ''
-            Only used by the `youtube` app: `firefox` (kiosk profile at youtube.com/tv with a
-            TV User-Agent) or `vacuumtube` (the Electron YouTube TV wrapper).
-          '';
-        };
       };
 
       config = {
@@ -157,11 +156,15 @@ let
       };
     };
 
+  # Entries the launcher lists (catalog apps that only add system config, like Steam, are not).
   enabled = lib.filterAttrs (_: a: a.enable) cfg;
+  listed = lib.filterAttrs (_: a: a.listed) enabled;
   sorted = lib.sort (
     a: b: a.value.order < b.value.order || (a.value.order == b.value.order && a.name < b.name)
-  ) (lib.mapAttrsToList lib.nameValuePair enabled);
+  ) (lib.mapAttrsToList lib.nameValuePair listed);
 
+  # The icon fields are the daemon's own (hinteros-daemon README, "Icons"): it finds the real
+  # icon at runtime, so HinterOS ships no logos.
   toEntry =
     { name, value }:
     {
@@ -169,6 +172,12 @@ let
       inherit (value) kind command name;
     }
     // lib.optionalAttrs (value.icon != null) { icon = toString value.icon; }
+    // lib.optionalAttrs (value.desktopId != null) { desktop_id = value.desktopId; }
+    // lib.optionalAttrs (value.iconUrl != null) { icon_url = value.iconUrl; }
+    // lib.optionalAttrs (value.siteUrl != null) { site_url = value.siteUrl; }
+    // lib.optionalAttrs value.firefoxProfile {
+      firefox_profile = "~/.local/share/hinteros/firefox/${name}";
+    }
     // lib.optionalAttrs (value.input != null) { inherit (value) input; }
     // lib.optionalAttrs (value.backKey != null) { back_key = value.backKey; };
 in
@@ -186,102 +195,15 @@ in
   };
 
   config = lib.mkMerge [
-    {
-      hinteros.apps = {
-        jellyfin = {
-          enable = lib.mkDefault sessionEnabled;
-          name = lib.mkDefault "Jellyfin";
-          order = lib.mkDefault 10;
-          # jellyfin-desktop (formerly jellyfin-media-player; the old name is an alias): Qt +
-          # mpv, with its own TV mode driven by the gamepad.
-          package = lib.mkDefault pkgs.jellyfin-desktop;
-          icon = lib.mkDefault (mkIcon {
-            letter = "J";
-            color = "#5b4bb7";
-          });
-        };
-        youtube = {
-          enable = lib.mkDefault sessionEnabled;
-          name = lib.mkDefault "YouTube";
-          order = lib.mkDefault 20;
-          kind = lib.mkDefault "web";
-          kiosk = lib.mkIf (cfg.youtube.backend == "firefox") {
-            url = lib.mkDefault "https://www.youtube.com/tv";
-            userAgent = lib.mkDefault youtubeTvUserAgent;
-          };
-          package = lib.mkIf (cfg.youtube.backend == "vacuumtube") (lib.mkDefault pkgs.vacuum-tube);
-          # The TV UI is keyboard driven: arrows, Enter, Escape.
-          input = lib.mkDefault "keyboard";
-          backKey = lib.mkDefault "escape";
-          icon = lib.mkDefault (mkIcon {
-            letter = "Y";
-            color = "#b3261e";
-          });
-        };
-        crunchyroll = {
-          enable = lib.mkDefault sessionEnabled;
-          name = lib.mkDefault "Crunchyroll";
-          order = lib.mkDefault 30;
-          kiosk.url = lib.mkDefault "https://www.crunchyroll.com";
-          input = lib.mkDefault "keyboard";
-          backKey = lib.mkDefault "escape";
-          icon = lib.mkDefault (mkIcon {
-            letter = "C";
-            color = "#d9731a";
-          });
-        };
-        firefox = {
-          enable = lib.mkDefault sessionEnabled;
-          name = lib.mkDefault "Firefox";
-          order = lib.mkDefault 40;
-          kind = lib.mkDefault "web";
-          kiosk = {
-            url = lib.mkDefault "about:home";
-            fullscreenOnly = lib.mkDefault true;
-          };
-          input = lib.mkDefault "keyboard";
-          backKey = lib.mkDefault "escape";
-          icon = lib.mkDefault (mkIcon {
-            letter = "F";
-            color = "#2f6fb5";
-          });
-        };
-        # Not a default app: Store app later (M8); the dev box enables it directly.
-        plex = {
-          name = lib.mkDefault "Plex";
-          order = lib.mkDefault 15;
-          package = lib.mkDefault pkgs.plex-htpc;
-          unfreeName = lib.mkDefault "plex-htpc";
-          icon = lib.mkDefault (mkIcon {
-            letter = "P";
-            color = "#3c3c3c";
-          });
-        };
-        # Not a default app either: online installs only (nixos/lib/app-ids.nix).
-        moonlight = {
-          name = lib.mkDefault "Moonlight";
-          order = lib.mkDefault 25;
-          package = lib.mkDefault pkgs.moonlight-qt;
-          input = lib.mkDefault "gamepad";
-          icon = lib.mkDefault (mkIcon {
-            letter = "M";
-            color = "#2e7d4f";
-          });
-        };
-      };
-    }
-
-    (lib.mkIf (enabled != { }) {
+    (lib.mkIf (listed != { }) {
       hinteros.daemon.session.settings.apps = map toEntry sorted;
-      environment.systemPackages = lib.concatMap (a: lib.optional (a.package != null) a.package) (
-        lib.attrValues enabled
-      );
-      hinteros.unfreeAllowlist = lib.concatMap (a: lib.optional (a.unfreeName != null) a.unfreeName) (
-        lib.attrValues enabled
-      );
     })
 
     {
+      environment.systemPackages = lib.concatMap (a: lib.optional (a.package != null) a.package) (
+        lib.attrValues enabled
+      );
+
       hinteros.firefoxKiosk.enable = lib.mkDefault (
         lib.any (a: a.kiosk.url != null) (lib.attrValues enabled)
       );
@@ -289,7 +211,7 @@ in
       assertions = lib.mapAttrsToList (id: a: {
         assertion = a.command != [ ];
         message = "hinteros.apps.${id}: no command (set package, command or kiosk.url)";
-      }) enabled;
+      }) listed;
     }
   ];
 }

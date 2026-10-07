@@ -29,7 +29,7 @@ let
       ];
     };
 
-  appsOf = c: map (a: a.id) c.config.hinteros.daemon.session.settings.apps;
+  appsOf = c: map (a: a.id) (c.config.hinteros.daemon.session.settings.apps or [ ]);
   base = mk { };
   noOsk = mk {
     hinteros.daemon.osk.enable = false;
@@ -37,14 +37,47 @@ let
   };
   cage = mk { hinteros.session.compositor = "cage"; };
   settings = c: c.config.hinteros.daemon.session.settings;
-  vacuum = mk { hinteros.apps.youtube.backend = "vacuumtube"; };
-  plex = mk { hinteros.apps.plex.enable = true; };
+  plex = mk { hinteros.apps.plex-htpc.enable = true; };
   forbidden = mk {
-    hinteros.apps.plex.enable = true;
+    hinteros.apps.plex-htpc.enable = true;
     hinteros.forbidUnfree = true;
   };
   entry = c: id: lib.findFirst (a: a.id == id) null c.config.hinteros.daemon.session.settings.apps;
   failedAssertions = c: map (a: a.message) (lib.filter (a: !a.assertion) c.config.assertions);
+
+  catalogEntries = self.inputs.hinteros-catalog.catalog;
+  liveIds = builtins.attrNames (lib.filterAttrs (_: e: e.status != "removed") catalogEntries);
+  mkApps =
+    ids: extra:
+    self.lib.mkDevice {
+      state = {
+        schemaVersion = 1;
+        apps = ids;
+        disk.layout = "gpt-esp-ext4";
+        profiles = [
+          {
+            id = "p1";
+            name = "T";
+            user = "tester";
+          }
+        ];
+      };
+      extraModules = [
+        { system.stateVersion = "25.11"; }
+        extra
+      ];
+    };
+  # A device with every catalog entry enabled (nothing built: the drv paths below force evaluation).
+  every = mkApps liveIds { };
+  iso = self.nixosConfigurations.installer;
+  cacheable = self.inputs.hinteros-catalog.lib.cacheableUnfree;
+  # What the cache job builds: everything but unfree-and-not-redistributable.
+  cacheJob = mkApps (lib.filter (id: !(lib.elem id [ "plex-htpc" ])) liveIds) {
+    hinteros.forbidUnfree = true;
+    hinteros.unfreeExceptions = cacheable;
+  };
+  sessionCmd = c: c.config.services.greetd.settings.initial_session.command;
+  gs = mk { hinteros.session.compositor = "gamescope"; };
 
   results = lib.runTests {
     testDefaultApps = {
@@ -135,10 +168,6 @@ let
       expr = lib.elem "--user-agent" (entry base "crunchyroll").command;
       expected = false;
     };
-    testVacuumTubeBackend = {
-      expr = lib.hasSuffix "/bin/VacuumTube" (lib.head (entry vacuum "youtube").command);
-      expected = true;
-    };
     testPlexAllowlisted = {
       expr = [
         (appsOf plex)
@@ -147,13 +176,122 @@ let
       expected = [
         [
           "jellyfin"
-          "plex"
+          "plex-htpc"
           "youtube"
           "crunchyroll"
           "firefox"
         ]
         true
       ];
+    };
+    # Icons: the catalog's fields reach session.toml; no generated icon files.
+    testIconFields = {
+      expr = [
+        (entry base "jellyfin").desktop_id
+        (entry base "youtube").firefox_profile
+        (entry base "youtube").site_url
+        (lib.hasPrefix "https://" (entry base "youtube").icon_url)
+        (entry base "crunchyroll" ? icon_url)
+        (lib.any (a: a ? icon) (settings base).apps)
+      ];
+      expected = [
+        "org.jellyfin.JellyfinDesktop"
+        "~/.local/share/hinteros/firefox/youtube"
+        "https://www.youtube.com"
+        true
+        false
+        false
+      ];
+    };
+    # The catalog index and vendor terms are installed.
+    testIndexInstalled = {
+      expr = lib.elem base.config.hinteros.catalog.index base.config.environment.systemPackages;
+      expected = true;
+    };
+    # Steam only adds system config (its tile is the daemon's built-in one) and is cached: allowed by name.
+    testSteamNotListed = {
+      expr =
+        let
+          s = mkApps [ "steam" ] { };
+        in
+        [
+          (appsOf s)
+          s.config.programs.steam.enable
+          s.config.hinteros.unfreeAllowlist
+          s.config.hardware.graphics.enable32Bit
+        ];
+      expected = [
+        [ ]
+        true
+        [
+          "steam"
+          "steam-unwrapped"
+        ]
+        true
+      ];
+    };
+    # Unfree for the cache job: only the catalog's cacheable names (Steam), never Plex.
+    testCacheableIsSteamOnly = {
+      expr = cacheable;
+      expected = [
+        "steam"
+        "steam-unwrapped"
+      ];
+    };
+    testCacheJobPasses = {
+      expr = failedAssertions cacheJob;
+      expected = [ ];
+    };
+    testCacheJobRefusesPlex = {
+      expr = lib.any (lib.hasInfix "plex-htpc") (
+        failedAssertions (
+          mkApps [ "plex-htpc" ] {
+            hinteros.forbidUnfree = true;
+            hinteros.unfreeExceptions = cacheable;
+          }
+        )
+      );
+      expected = true;
+    };
+    # The ISO is fully free: no allowlist, no exceptions, Steam not on it (it is cached, not shipped).
+    testIsoFullyFree = {
+      expr = [
+        iso.config.hinteros.unfreeAllowlist
+        iso.config.hinteros.unfreeExceptions
+        iso.config.hinteros.forbidUnfree
+        (lib.any (a: !a.assertion) iso.config.assertions)
+      ];
+      expected = [
+        [ ]
+        [ ]
+        true
+        false
+      ];
+    };
+    testEveryEntryEnabled = {
+      expr = lib.all (id: every.config.hinteros.apps.${id}.enable) liveIds;
+      expected = true;
+    };
+    # gamescope: mode files for the runtime display settings, no fixed output size.
+    testGamescopeModeFiles = {
+      expr = [
+        (lib.hasInfix "hinteros-display-env" (sessionCmd gs))
+        (lib.hasInfix " -W" (sessionCmd gs))
+        (lib.hasInfix " -H" (sessionCmd gs))
+        (lib.hasInfix " -r " (sessionCmd gs))
+        (lib.hasInfix "hinteros-display-env" gs.config.systemd.user.services.hinteros-session.serviceConfig.ExecStart)
+      ];
+      expected = [
+        true
+        false
+        false
+        false
+        true
+      ];
+    };
+    testPactl = {
+      expr = lib.hasSuffix "/bin/pactl" (settings base).audio.pactl;
+      expected = true;
     };
     testForbidUnfreeFails = {
       expr = lib.any (lib.hasInfix "forbidUnfree") (failedAssertions forbidden);
@@ -169,14 +307,22 @@ let
     };
   };
 in
-pkgs.runCommand "hinteros-apps-eval" { } (
-  if results == [ ] then
-    "touch $out"
-  else
-    ''
-      cat >&2 <<'EOT'
-      ${builtins.toJSON results}
-      EOT
-      exit 1
-    ''
-)
+pkgs.runCommand "hinteros-apps-eval"
+  {
+    # Evaluation only: every catalog entry in one device config, and the ISO (which throws on any
+    # unfree package, as it allows none).
+    everyDrv = builtins.unsafeDiscardStringContext every.config.system.build.toplevel.drvPath;
+    cacheDrv = builtins.unsafeDiscardStringContext cacheJob.config.system.build.toplevel.drvPath;
+    isoDrv = builtins.unsafeDiscardStringContext iso.config.system.build.isoImage.drvPath;
+  }
+  (
+    if results == [ ] then
+      "touch $out"
+    else
+      ''
+        cat >&2 <<'EOT'
+        ${builtins.toJSON results}
+        EOT
+        exit 1
+      ''
+  )

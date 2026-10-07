@@ -86,7 +86,10 @@ in
     by_id = {a["id"]: a for a in apps}
     assert by_id["youtube"]["kind"] == "web" and by_id["jellyfin"]["kind"] == "native", by_id
     assert by_id["youtube"]["name"] == "YouTube", by_id["youtube"]
-    machine.succeed("test -s " + shlex.quote(by_id["youtube"]["icon"]))
+    # Icons are found by the daemon at runtime (no network here): session.toml carries the catalog's fields.
+    toml = machine.succeed("cat $(ps -u hinteros -o args= | grep -o '/nix/store/[^ ]*hinteros-session.toml' | head -n1)")
+    for want in ("desktop_id = \"org.jellyfin.JellyfinDesktop\"", "firefox_profile = ", "site_url = "):
+        assert want in toml, toml
 
     # YouTube: apps.launch starts the kiosk wrapper with its own profile and the TV UA.
     ok("apps.launch", {"id": "youtube"})

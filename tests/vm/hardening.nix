@@ -27,6 +27,7 @@ let
   box = extra: {
     imports = [
       ../../nixos/modules # everything but the overlay (the test pkgs already have it)
+      self.nixosModules.catalog
       ../../nixos/vm
       extra
     ];

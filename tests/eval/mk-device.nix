@@ -1,6 +1,10 @@
 # Eval-level tests for lib.mkDevice and the state.json translation: good states evaluate and
 # map to the expected options; bad ones fail evaluation with a clear message. Nothing is built.
-{ self, pkgs }:
+{
+  self,
+  pkgs,
+  nixpkgs ? self.inputs.nixpkgs,
+}:
 let
   inherit (pkgs) lib;
 
@@ -105,6 +109,48 @@ let
       );
       expected = true;
     };
+    # A tombstoned catalog id is known: a state may still list it and it does nothing.
+    testTombstoneAccepted = {
+      expr =
+        let
+          cat = {
+            gone = {
+              status = "removed";
+              name = "Gone";
+            };
+          };
+          sys = nixpkgs.lib.nixosSystem {
+            system = "x86_64-linux";
+            modules = [
+              (self + "/nixos/modules")
+              self.nixosModules.overlay
+              (import (self + "/nixos/modules/catalog.nix") {
+                entries = cat;
+                cacheableUnfree = [ ];
+                index = pkgs.hello;
+              })
+              {
+                hinteros.state = {
+                  schemaVersion = 1;
+                  apps = [ "gone" ];
+                };
+                system.stateVersion = "25.11";
+              }
+            ];
+          };
+          msgs = map (a: a.message) (
+            builtins.filter (a: !a.assertion && lib.hasPrefix "hinteros state:" a.message) sys.config.assertions
+          );
+        in
+        [
+          msgs
+          (sys.config.hinteros.apps ? gone)
+        ];
+      expected = [
+        [ ]
+        false
+      ];
+    };
     testUnknownApp = {
       expr = lib.hasInfix "unknown app id(s): bogus" (failures (good // { apps = [ "bogus" ]; }));
       expected = true;
@@ -137,14 +183,14 @@ let
             )).config.hinteros.apps;
         in
         lib.mapAttrs (_: x: x.enable) (
-          lib.getAttrs [ "jellyfin" "youtube" "crunchyroll" "firefox" "plex" "moonlight" ] a
+          lib.getAttrs [ "jellyfin" "youtube" "crunchyroll" "firefox" "plex-htpc" "moonlight" ] a
         );
       expected = {
         jellyfin = false;
         youtube = true;
         crunchyroll = false;
         firefox = true;
-        plex = false;
+        plex-htpc = false;
         moonlight = false;
       };
     };
@@ -163,7 +209,7 @@ let
             )).config;
         in
         [
-          a.hinteros.apps.plex.enable
+          a.hinteros.apps.plex-htpc.enable
           a.hinteros.apps.moonlight.enable
           a.hinteros.unfreeAllowlist
         ];

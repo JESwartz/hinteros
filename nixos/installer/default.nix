@@ -19,7 +19,7 @@
 }:
 let
   cfg = config.hinteros.installer;
-  appIds = import ../lib/app-ids.nix;
+  appIds = import ../lib/app-ids.nix config.hinteros.catalog.entries;
 
   # The same URL channels.json ships (hinteros.update.repo), so the device flake's input line is
   # exactly what hinteros-system's channel.set looks for.
@@ -201,6 +201,8 @@ let
       lib.concatLines (sources ++ [ "${launcherPubspecLock}" ])
     );
     appsJson = pkgs.writeText "hinteros-install-apps.json" (builtins.toJSON appIds);
+    # The Store index of this ISO's catalog: which apps have vendor terms, and their versions.
+    catalogIndex = "${config.hinteros.catalog.index}/share/hinteros/catalog.json";
     stateVersion = config.system.nixos.release;
     inherit repoUrl isoRev;
     nix = config.nix.package;
@@ -218,6 +220,7 @@ let
       channel = "stable";
       base = "unstable";
       apps = appIds.preselected;
+      acceptedTerms = { };
     }
   );
 in
@@ -247,12 +250,17 @@ in
     ui.command = lib.mkOption {
       type = lib.types.nullOr (lib.types.listOf lib.types.str);
       default = null;
-      example = [ "/run/current-system/sw/bin/hinteros-installer-ui" ];
+      example = [
+        "/run/current-system/sw/bin/hinteros-launcher"
+        "--installer"
+      ];
       description = ''
-        The installer UI (the controller-driven screens from the launcher repo). When set, it runs
-        as a root service on boot; it drives `hinteros-install --plan -` (JSON plan on stdin, JSON
-        progress lines on stdout). Null: nothing starts automatically and the console shows a
-        notice with the manual command.
+        The installer UI (the controller-driven screens from the launcher repo). When set, cage
+        runs it fullscreen on tty1 as root (`services.cage`; root because it reads the gamepads,
+        runs nmcli and `systemctl reboot` and starts `hinteros-install`, which needs root). It
+        drives `hinteros-install --plan -` (JSON plan on stdin, JSON progress lines on stdout).
+        If the UI exits, tty1 falls back to the console with the notice. Null: nothing starts
+        automatically and the console shows the notice with the manual command.
       '';
     };
   };
@@ -305,14 +313,31 @@ in
 
     '';
 
-    systemd.services.hinteros-installer-ui = lib.mkIf (cfg.ui.command != null) {
-      description = "HinterOS installer UI";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "NetworkManager.service" ];
-      serviceConfig = {
-        ExecStart = lib.escapeShellArgs cfg.ui.command;
-        Restart = "on-failure";
+    services.cage = lib.mkIf (cfg.ui.command != null) {
+      enable = true;
+      user = "root";
+      program = lib.escapeShellArgs cfg.ui.command;
+      environment = {
+        # The launcher runs on native Wayland (as on the box); software GL is allowed for machines
+        # whose GPU cage cannot use. The fonts are bundled in the launcher.
+        GDK_BACKEND = "wayland";
+        XKB_DEFAULT_LAYOUT = "us";
+        WLR_RENDERER_ALLOW_SOFTWARE = "1";
       };
+    };
+
+    systemd.services.cage-tty1 = lib.mkIf (cfg.ui.command != null) {
+      wantedBy = [ "multi-user.target" ];
+      # hinteros-install is looked up by name, like lsblk, nmcli and systemctl.
+      path = [
+        hinteros-install
+        pkgs.util-linux
+        pkgs.networkmanager
+        pkgs.systemd
+      ];
+      # The console notice (the getty on tty1) is the fallback when the UI exits.
+      onSuccess = [ "getty@tty1.service" ];
+      onFailure = [ "getty@tty1.service" ];
     };
   };
 }
