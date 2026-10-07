@@ -89,6 +89,15 @@
         (import ./nixos/overlay.nix)
       ];
 
+      # The catalog's ids with the little the update check needs to say which apps a new
+      # revision adds or retires: `{ <id> = { name; status; statusReason; }; }`. hinteros-system
+      # evaluates it against a target revision (`nix eval --json --option allow-import-from-derivation
+      # false "<input url>&rev=<rev>#lib.catalogIds"`), so it must stay a plain attribute set that
+      # needs no build.
+      lib.catalogIds = nixpkgs.lib.mapAttrs (_: e: {
+        inherit (e) name status statusReason;
+      }) hinteros-catalog.catalog;
+
       # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
       lib.mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
 

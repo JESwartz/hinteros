@@ -111,6 +111,53 @@ let
         true
       ];
     };
+    # The session daemon's polkit agent needs the socket-activated helper (the session unit keeps
+    # NoNewPrivileges, which defeats the setuid helper); nixpkgs' polkit module wires the socket.
+    testAgentHelperSocket = {
+      expr = [
+        (c.systemd.sockets ? polkit-agent-helper)
+        (c.systemd.sockets.polkit-agent-helper.wantedBy or [ ])
+        c.systemd.user.services.hinteros-session.serviceConfig.NoNewPrivileges
+      ];
+      expected = [
+        true
+        [ "sockets.target" ]
+        true
+      ];
+    };
+    # The Store index and the terms are read from /run/current-system/sw/share/hinteros.
+    testCatalogOnPath = {
+      expr = [
+        (lib.elem c.hinteros.catalog.index c.environment.systemPackages)
+        (lib.elem "/share/hinteros" c.environment.pathsToLink)
+      ];
+      expected = [
+        true
+        true
+      ];
+    };
+    # lib.catalogIds: what the daemon's `nix eval ...#lib.catalogIds` reads from a target revision.
+    testCatalogIds = {
+      expr = [
+        (lib.attrNames self.lib.catalogIds == lib.attrNames c.hinteros.catalog.entries)
+        (lib.all (
+          e:
+          lib.attrNames e == [
+            "name"
+            "status"
+            "statusReason"
+          ]
+        ) (lib.attrValues self.lib.catalogIds))
+        self.lib.catalogIds.crunchyroll.name
+        self.lib.catalogIds.crunchyroll.status
+      ];
+      expected = [
+        true
+        true
+        "Crunchyroll"
+        "available"
+      ];
+    };
     testDaemonsInSystemPath = {
       expr = map lib.getName (
         lib.filter (p: lib.hasPrefix "hinteros-s" (lib.getName p)) c.environment.systemPackages
@@ -152,12 +199,13 @@ pkgs.runCommand "hinteros-daemon-eval"
     # No signers by default: only comments, so nothing verifies.
     ! grep -v '^#' hinteros/update/allowed_signers | grep -q .
     grep -q 'update verifies' hinteros/update/allowed_signers
-    # polkit: every action is "no" except ssh.
-    for a in settings rebuild update.check update.apply rollback channel jobs.cancel; do
+    # polkit: every action is "no" except ssh (the admin password, with a message the launcher shows).
+    for a in settings rebuild update.check update.apply rollback channel jobs.cancel apps; do
       grep -q "org.hinteros.system.$a\"" polkit-1/actions/org.hinteros.system.policy
     done
-    [ "$(grep -c '<allow_any>no</allow_any>' polkit-1/actions/org.hinteros.system.policy)" = 7 ]
+    [ "$(grep -c '<allow_any>no</allow_any>' polkit-1/actions/org.hinteros.system.policy)" = 8 ]
     [ "$(grep -c '<allow_active>auth_admin</allow_active>' polkit-1/actions/org.hinteros.system.policy)" = 1 ]
+    grep -q '<message>Authentication is required to turn remote login (SSH) on or off</message>' polkit-1/actions/org.hinteros.system.policy
     ! grep -q 'org.hinteros.system.ssh.admin' polkit-1/actions/org.hinteros.system.policy
     # With a key: the principal, the pinned namespace, the key, and dev in release.json.
     grep -qx 'owner namespaces="git" ssh-ed25519 .* owner@hinteros' $shareKey/share/hinteros/update/allowed_signers

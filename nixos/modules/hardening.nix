@@ -139,8 +139,9 @@ in
         # this is set.
         boot.loader.systemd-boot.editor = false;
 
-        # Only root (and the optional admin) approve polkit actions; no auth agent, so auth_admin
-        # fails closed for the session.
+        # Only root (and the optional admin) approve polkit actions; without an auth agent, auth_admin
+        # fails closed for the session unless the session daemon's polkit agent (hinteros-session, API
+        # 0.8) answers the prompt: it only talks to the launcher, only for requests it relayed.
         security.polkit.adminIdentities = [ "unix-user:0" ] ++ lib.optional admin "unix-user:${adminUser}";
 
         # No setuid sudo at all unless dev.

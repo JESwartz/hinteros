@@ -44,10 +44,10 @@ let
   # polkit actions. Defaults are "no" for everything except ssh (the admin password); the rules
   # below grant the rest to the hinteros group. That keeps the grant in one readable place and
   # does not depend on how polkit classifies a user service's process.
-  mkAction = id: description: defaults: ''
+  mkAction' = id: description: message: defaults: ''
     <action id="org.hinteros.system.${id}">
       <description>${description}</description>
-      <message>${description}</message>
+      <message>${message}</message>
       <defaults>
         <allow_any>${defaults}</allow_any>
         <allow_inactive>${defaults}</allow_inactive>
@@ -55,6 +55,7 @@ let
       </defaults>
     </action>
   '';
+  mkAction = id: description: mkAction' id description description;
   policy = ''
     <?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
@@ -69,9 +70,13 @@ let
         rollback = "Roll back to the previous system generation";
         channel = "Switch the update channel or the base";
         "jobs.cancel" = "Cancel a running system job";
+        apps = "Install or remove apps";
       }
     )}
-    ${mkAction "ssh" "The admin password is required to turn SSH on or off" "auth_admin"}
+    ${mkAction' "ssh" "Turn remote login (SSH) on or off"
+      "Authentication is required to turn remote login (SSH) on or off"
+      "auth_admin"
+    }
     </policyconfig>
   '';
 
