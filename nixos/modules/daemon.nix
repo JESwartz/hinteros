@@ -14,80 +14,214 @@ let
   sessionUser = config.hinteros.session.user;
   toml = pkgs.formats.toml { };
   sessionConfig = toml.generate "hinteros-session.toml" cfg.session.settings;
+
+  # What every generation ships for the privileged service, at
+  # /run/current-system/sw/share/hinteros. hinteros-system reads the *running* generation's copy,
+  # so an update can never widen its own trust.
+  channels = {
+    inherit (config.hinteros.update) repo;
+    branches = {
+      stable = "stable";
+      beta = "beta";
+    };
+  };
+
+  # "<principal> <ssh-ed25519 key> [comment]" to ssh-keygen's allowed_signers format. The
+  # namespace is pinned, so these keys can only vouch for git commits.
+  signerLine =
+    l:
+    let
+      m = builtins.match "([^ #]+) (ssh-ed25519 [A-Za-z0-9+/=]+( .*)?)" l;
+    in
+    ''${builtins.elemAt m 0} namespaces="git" ${builtins.elemAt m 1}'';
+  allowedSigners = pkgs.writeText "hinteros-allowed-signers" ''
+    # Keys whose SSH signatures hinteros-system accepts on update commits (generated from
+    # hinteros.update.allowedSigners; git, ssh-keygen allowed_signers format).
+    # No entry below = no update verifies: every signature is rejected as unknown_signer.
+    ${lib.concatMapStringsSep "\n" signerLine config.hinteros.update.allowedSigners}
+  '';
+
+  # polkit actions. Defaults are "no" for everything except ssh (the admin password); the rules
+  # below grant the rest to the hinteros group. That keeps the grant in one readable place and
+  # does not depend on how polkit classifies a user service's process.
+  mkAction = id: description: defaults: ''
+    <action id="org.hinteros.system.${id}">
+      <description>${description}</description>
+      <message>${description}</message>
+      <defaults>
+        <allow_any>${defaults}</allow_any>
+        <allow_inactive>${defaults}</allow_inactive>
+        <allow_active>${defaults}</allow_active>
+      </defaults>
+    </action>
+  '';
+  policy = ''
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+    <policyconfig>
+      <vendor>HinterOS</vendor>
+    ${lib.concatStrings (
+      lib.mapAttrsToList (id: d: mkAction id d "no") {
+        settings = "Change HinterOS settings";
+        rebuild = "Rebuild the system";
+        "update.check" = "Check for HinterOS updates";
+        "update.apply" = "Install a HinterOS update";
+        rollback = "Roll back to the previous system generation";
+        channel = "Switch the update channel or the base";
+        "jobs.cancel" = "Cancel a running system job";
+      }
+    )}
+    ${mkAction "ssh" "The admin password is required to turn SSH on or off" "auth_admin"}
+    </policyconfig>
+  '';
+
+  # release.json, update/*, and the polkit action definitions, as one package in systemPackages.
+  share = pkgs.runCommand "hinteros-system-share" { } ''
+    mkdir -p $out/share/hinteros/update $out/share/polkit-1/actions
+    cp ${
+      pkgs.writeText "release.json" (
+        builtins.toJSON {
+          inherit (config.hinteros.release) version;
+          dev = (config.hinteros.dev or { enable = false; }).enable;
+        }
+      )
+    } $out/share/hinteros/release.json
+    cp ${pkgs.writeText "channels.json" (builtins.toJSON channels)} $out/share/hinteros/update/channels.json
+    cp ${allowedSigners} $out/share/hinteros/update/allowed_signers
+    cp ${pkgs.writeText "org.hinteros.system.policy" policy} $out/share/polkit-1/actions/org.hinteros.system.policy
+  '';
+
+  # ssh is not granted here: it stays auth_admin. Local overrides (parental controls) go in a
+  # lower-numbered rules file that returns NO.
+  polkitRules = ''
+    polkit.addRule(function (action, subject) {
+      if (action.id.indexOf("org.hinteros.system.") === 0 &&
+          action.id !== "org.hinteros.system.ssh" && subject.isInGroup("${cfg.group}")) {
+        return polkit.Result.YES;
+      }
+    });
+  '';
+
+  # What the job unit needs on PATH (hinteros-system job runs nix, git, ssh-keygen, nixos-facter).
+  jobPath = [
+    config.nix.package
+    pkgs.git
+    pkgs.openssh
+    pkgs.nixos-facter
+    pkgs.coreutils
+  ];
 in
 {
-  options.hinteros.daemon = {
-    enable = lib.mkEnableOption "the HinterOS session daemon and system service";
-
-    group = lib.mkOption {
+  options.hinteros = {
+    release.version = lib.mkOption {
       type = lib.types.str;
-      default = "hinteros";
-      description = "Group that owns the system socket; the session user is a member.";
+      default = "0.1.0-dev";
+      description = "HinterOS release version, shipped in `share/hinteros/release.json` (shown by `system.info`). A placeholder until releases are cut (M6).";
     };
 
-    session.package = lib.mkOption {
-      type = lib.types.package;
-      default = pkgs.hinteros-session;
-      defaultText = lib.literalExpression "pkgs.hinteros-session";
-      description = "Package providing the `hinteros-session` binary.";
-    };
-
-    system.package = lib.mkOption {
-      type = lib.types.package;
-      default = pkgs.hinteros-system;
-      defaultText = lib.literalExpression "pkgs.hinteros-system";
-      description = "Package providing the `hinteros-system` binary.";
-    };
-
-    session.settings = lib.mkOption {
-      inherit (toml) type;
-      default = { };
-      example = lib.literalExpression ''
-        {
-          steam.autostart = true;
-          apps = [ { id = "jellyfin"; name = "Jellyfin"; command = [ "jellyfin-desktop" ]; } ];
-        }
-      '';
-      description = ''
-        Contents of the session daemon's `session.toml` (see the hinteros-daemon README), as a
-        Nix attribute set. The file is generated into the store and passed with `--config`.
-        The module already sets `launcher.app_id`, `gamescope.*`, `osk.*`, `steam.path`, `steam.tag_windows`,
-        `steam.library_poll_s`, `steam.library_debounce_ms` and `close.timeout_ms` (all with
-        `mkDefault`; `steam.dir` is left to the daemon's default unless a test sets it).
-      '';
-    };
-
-    # The on-screen keyboard: a second entrypoint of the launcher (`hinteros-osk`), started and
-    # restarted by the session daemon and shown as a gamescope overlay (spike 5).
-    osk = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Run the on-screen keyboard (`[osk] enable`); Guide+Y or `osk.show` summons it.";
-      };
-      package = lib.mkOption {
-        type = lib.types.package;
-        default = pkgs.hinteros-launcher;
-        defaultText = lib.literalExpression "pkgs.hinteros-launcher";
-        description = "Package providing `bin/hinteros-osk` (the launcher ships it).";
-      };
-      summon = lib.mkOption {
+    update = {
+      repo = lib.mkOption {
         type = lib.types.str;
-        default = "guide+context";
-        example = "none";
+        default = "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git";
         description = ''
-          Controller chord that toggles the keyboard: `guide+<button>` (hold Guide, press the
-          button; `context` is Y) or `none`. With a chord, Home fires on Guide release; `none`
-          puts it back on the press.
+          The system repo that updates and channel switches fetch, as shipped in
+          `share/hinteros/update/channels.json`. The device flake's input line
+          (`"git+<repo>?ref=<branch>"`) must use exactly this URL (the installer's template does).
+        '';
+      };
+
+      allowedSigners = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "owner ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... owner@hinteros" ];
+        description = ''
+          Keys whose SSH signatures hinteros-system accepts on update commits, one
+          `"<principal> <ssh-ed25519 key> [comment]"` per entry; they become the generation's
+          `share/hinteros/update/allowed_signers` (the namespace is pinned to `git`).
+
+          EMPTY BY DEFAULT: the owner must add his signing key (and an offline backup key) here
+          before M6 releases. With no key, `update.check`, `update.apply` and `channel.set` fail
+          closed: git's verification finds no matching principal, so every tip is rejected with
+          `update_verification_failed` (`unknown_signer`) and nothing is ever applied. The running
+          generation's list is what counts, so a key added here only takes effect once a
+          generation containing it is running.
         '';
       };
     };
 
-    logLevel = lib.mkOption {
-      type = lib.types.str;
-      default = "info";
-      example = "debug";
-      description = "`RUST_LOG` filter for both daemons.";
+    daemon = {
+      enable = lib.mkEnableOption "the HinterOS session daemon and system service";
+
+      group = lib.mkOption {
+        type = lib.types.str;
+        default = "hinteros";
+        description = "Group that owns the system socket; the session user is a member.";
+      };
+
+      session.package = lib.mkOption {
+        type = lib.types.package;
+        default = pkgs.hinteros-session;
+        defaultText = lib.literalExpression "pkgs.hinteros-session";
+        description = "Package providing the `hinteros-session` binary.";
+      };
+
+      system.package = lib.mkOption {
+        type = lib.types.package;
+        default = pkgs.hinteros-system;
+        defaultText = lib.literalExpression "pkgs.hinteros-system";
+        description = "Package providing the `hinteros-system` binary.";
+      };
+
+      session.settings = lib.mkOption {
+        inherit (toml) type;
+        default = { };
+        example = lib.literalExpression ''
+          {
+            steam.autostart = true;
+            apps = [ { id = "jellyfin"; name = "Jellyfin"; command = [ "jellyfin-desktop" ]; } ];
+          }
+        '';
+        description = ''
+          Contents of the session daemon's `session.toml` (see the hinteros-daemon README), as a
+          Nix attribute set. The file is generated into the store and passed with `--config`.
+          The module already sets `launcher.app_id`, `gamescope.*`, `osk.*`, `steam.path`, `steam.tag_windows`,
+          `steam.library_poll_s`, `steam.library_debounce_ms` and `close.timeout_ms` (all with
+          `mkDefault`; `steam.dir` is left to the daemon's default unless a test sets it).
+        '';
+      };
+
+      # The on-screen keyboard: a second entrypoint of the launcher (`hinteros-osk`), started and
+      # restarted by the session daemon and shown as a gamescope overlay (spike 5).
+      osk = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Run the on-screen keyboard (`[osk] enable`); Guide+Y or `osk.show` summons it.";
+        };
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = pkgs.hinteros-launcher;
+          defaultText = lib.literalExpression "pkgs.hinteros-launcher";
+          description = "Package providing `bin/hinteros-osk` (the launcher ships it).";
+        };
+        summon = lib.mkOption {
+          type = lib.types.str;
+          default = "guide+context";
+          example = "none";
+          description = ''
+            Controller chord that toggles the keyboard: `guide+<button>` (hold Guide, press the
+            button; `context` is Y) or `none`. With a chord, Home fires on Guide release; `none`
+            puts it back on the press.
+          '';
+        };
+      };
+
+      logLevel = lib.mkOption {
+        type = lib.types.str;
+        default = "info";
+        example = "debug";
+        description = "`RUST_LOG` filter for both daemons.";
+      };
     };
   };
 
@@ -122,61 +256,128 @@ in
     users.groups.${cfg.group} = { };
     users.users.${sessionUser}.extraGroups = [ cfg.group ];
 
-    systemd.services.hinteros-system = {
-      description = "HinterOS system service";
-      wantedBy = [ "multi-user.target" ];
-      environment.RUST_LOG = cfg.logLevel;
-      serviceConfig = {
-        ExecStart = lib.getExe cfg.system.package;
-        # Root, because it will rebuild the system and manage settings (M5). The socket is
-        # created in the runtime directory, owned by root:hinteros, mode 0660.
-        User = "root";
-        Group = cfg.group;
-        RuntimeDirectory = "hinteros";
-        RuntimeDirectoryMode = "0755";
-        Restart = "on-failure";
-        RestartSec = 2;
-        # Reasonable baseline. Tighten as the service gains real work; it will need to write
-        # /etc/hinteros and run nixos-rebuild, so no ProtectSystem=strict yet.
-        NoNewPrivileges = true;
-        PrivateTmp = true;
-        ProtectHome = true;
-        ProtectKernelModules = true;
-        ProtectKernelTunables = true;
-        ProtectControlGroups = true;
-        RestrictAddressFamilies = [ "AF_UNIX" ];
-        RestrictRealtime = true;
-        LockPersonality = true;
-        UMask = "0007";
-      };
+    assertions = [
+      {
+        assertion = lib.all (
+          l: builtins.match "([^ #]+) (ssh-ed25519 [A-Za-z0-9+/=]+( .*)?)" l != null
+        ) config.hinteros.update.allowedSigners;
+        message = "hinteros.update.allowedSigners: every entry must be \"<principal> ssh-ed25519 <key> [comment]\".";
+      }
+    ];
+
+    security.polkit.enable = true;
+    environment = {
+      # sw/bin/hinteros-session and sw/bin/hinteros-system (hinteros-system compares them across
+      # generations for session_restart_required), plus the per-generation files and polkit actions.
+      systemPackages = [
+        cfg.session.package
+        cfg.system.package
+        share
+      ];
+      pathsToLink = [
+        "/share/hinteros"
+        "/share/polkit-1/actions"
+      ];
+      etc."polkit-1/rules.d/50-hinteros.rules".text = polkitRules;
     };
 
-    # User unit: applies to every user's manager, so restrict it to the session user.
-    # It is wanted by default.target, which the user manager reaches at autologin, i.e. at
-    # the same time as the compositor and home app start.
-    systemd.user.services.hinteros-session = {
-      description = "HinterOS session daemon";
-      wantedBy = [ "default.target" ];
-      unitConfig.ConditionUser = sessionUser;
-      environment = {
-        RUST_LOG = cfg.logLevel;
-      }
-      # Under cage the daemon sees no gamescope (so no child_env) and apps it launches inherit
-      # its environment: point them at cage's Xwayland (its first X display) and socket.
-      // lib.optionalAttrs (config.hinteros.session.compositor == "cage") {
-        DISPLAY = ":0";
-        WAYLAND_DISPLAY = "wayland-0";
+    systemd = {
+      services.hinteros-system = {
+        description = "HinterOS system service";
+        wantedBy = [ "multi-user.target" ];
+        environment.RUST_LOG = cfg.logLevel;
+        serviceConfig = {
+          ExecStart = lib.getExe cfg.system.package;
+          # Root, because it starts the jobs that rebuild the system. The socket is created in the
+          # runtime directory, owned by root:hinteros, mode 0660.
+          User = "root";
+          Group = cfg.group;
+          RuntimeDirectory = "hinteros";
+          RuntimeDirectoryMode = "0755";
+          # The job directories in /run/hinteros/jobs must survive a restart of this service
+          # during a switch; the restarted service re-attaches to running jobs.
+          RuntimeDirectoryPreserve = "yes";
+          # /var/lib/hinteros (root, 0700): the update cache, staging and the git mirror.
+          StateDirectory = "hinteros";
+          StateDirectoryMode = "0700";
+          Restart = "on-failure";
+          RestartSec = 2;
+          # It reads /etc/hinteros, /proc, the profile links and /run/current-system, and writes
+          # only /run/hinteros. Everything that changes the system happens in hinteros-job@.
+          ProtectSystem = "strict";
+          ReadWritePaths = [ "/run/hinteros" ];
+          NoNewPrivileges = true;
+          PrivateTmp = true;
+          ProtectHome = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectControlGroups = true;
+          # D-Bus (logind, polkit, systemd), the journal and its own socket; no network.
+          RestrictAddressFamilies = [ "AF_UNIX" ];
+          RestrictRealtime = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          SystemCallFilter = [ "@system-service" ];
+          # Only so the audit entries can read /proc/<pid>/exe of another user's process
+          # (HINTEROS_EXE; with an empty set the field is "?").
+          CapabilityBoundingSet = [ "CAP_SYS_PTRACE" ];
+          UMask = "0007";
+        };
       };
-      serviceConfig = {
-        ExecStart = "${lib.getExe cfg.session.package} --config ${sessionConfig}";
-        Restart = "on-failure";
-        RestartSec = 1;
-        NoNewPrivileges = true;
-        ProtectKernelModules = true;
-        ProtectKernelTunables = true;
-        ProtectControlGroups = true;
-        RestrictRealtime = true;
-        LockPersonality = true;
+
+      # One job per unit instance (`hinteros-job@<id>`), started by hinteros-system over D-Bus:
+      # a switch restarts hinteros-system when its unit changes, which must not kill the rebuild
+      # that causes it. Root with network and no ProtectSystem: it switches the system.
+      services."hinteros-job@" = {
+        description = "HinterOS system job %i";
+        # Neither the switch it performs nor a later one may restart or stop a running instance.
+        restartIfChanged = false;
+        stopIfChanged = false;
+        path = jobPath;
+        environment = {
+          RUST_LOG = cfg.logLevel;
+          SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt";
+          HOME = "/root";
+        };
+        serviceConfig = {
+          Type = "exec";
+          ExecStart = "${lib.getExe cfg.system.package} job %i";
+          User = "root";
+          Nice = 10;
+          IOSchedulingClass = "idle";
+          KillMode = "control-group";
+          StateDirectory = "hinteros";
+          StateDirectoryMode = "0700";
+        };
+      };
+
+      # User unit: applies to every user's manager, so restrict it to the session user.
+      # It is wanted by default.target, which the user manager reaches at autologin, i.e. at
+      # the same time as the compositor and home app start.
+      user.services.hinteros-session = {
+        description = "HinterOS session daemon";
+        wantedBy = [ "default.target" ];
+        unitConfig.ConditionUser = sessionUser;
+        environment = {
+          RUST_LOG = cfg.logLevel;
+        }
+        # Under cage the daemon sees no gamescope (so no child_env) and apps it launches inherit
+        # its environment: point them at cage's Xwayland (its first X display) and socket.
+        // lib.optionalAttrs (config.hinteros.session.compositor == "cage") {
+          DISPLAY = ":0";
+          WAYLAND_DISPLAY = "wayland-0";
+        };
+        serviceConfig = {
+          ExecStart = "${lib.getExe cfg.session.package} --config ${sessionConfig}";
+          Restart = "on-failure";
+          RestartSec = 1;
+          NoNewPrivileges = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectControlGroups = true;
+          RestrictRealtime = true;
+          LockPersonality = true;
+        };
       };
     };
   };

@@ -209,7 +209,7 @@ let
     };
     testSshAdminPolkitAction = {
       expr = lib.any (
-        p: p ? name && lib.hasInfix "org.hinteros.system.ssh" p.name
+        p: p ? name && lib.hasInfix "hinteros-system-share" p.name
       ) c.environment.systemPackages;
       expected = true;
     };

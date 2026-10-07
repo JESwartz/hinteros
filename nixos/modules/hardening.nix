@@ -6,7 +6,6 @@
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 let
@@ -16,26 +15,6 @@ let
   adminCfg = cfg.admin;
   admin = adminCfg.enable;
   adminUser = adminCfg.user;
-
-  # Declares the polkit action the future privileged service checks before it enables SSH:
-  # only an admin identity (root or the admin account) can approve it, so enabling SSH takes
-  # the admin password.
-  sshAdminPolicy = pkgs.writeTextDir "share/polkit-1/actions/org.hinteros.system.ssh.policy" ''
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
-    <policyconfig>
-      <vendor>HinterOS</vendor>
-      <action id="org.hinteros.system.ssh">
-        <description>Enable SSH access</description>
-        <message>The admin password is required to enable SSH.</message>
-        <defaults>
-          <allow_any>auth_admin</allow_any>
-          <allow_inactive>auth_admin</allow_inactive>
-          <allow_active>auth_admin</allow_active>
-        </defaults>
-      </action>
-    </policyconfig>
-  '';
 
   # Every user (other than root) that is a wheel member, by either route.
   wheelUsers =
@@ -74,7 +53,7 @@ in
     ssh.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Run sshd (set from state.json `settings.ssh.enable`; the privileged service gates flipping it behind the admin password via polkit `org.hinteros.system.ssh`). Needs hinteros.admin: the admin account is the only login.";
+      description = "Run sshd (set from state.json `settings.ssh.enable`; hinteros-system gates flipping it behind the admin password via polkit `org.hinteros.system.ssh`, defined in daemon.nix). Needs hinteros.admin: the admin account is the only login.";
     };
 
     dev = {
@@ -163,8 +142,6 @@ in
         # Only root (and the optional admin) approve polkit actions; no auth agent, so auth_admin
         # fails closed for the session.
         security.polkit.adminIdentities = [ "unix-user:0" ] ++ lib.optional admin "unix-user:${adminUser}";
-        environment.systemPackages = [ sshAdminPolicy ];
-        environment.pathsToLink = [ "/share/polkit-1/actions" ];
 
         # No setuid sudo at all unless dev.
         security.sudo.enable = lib.mkDefault admin;

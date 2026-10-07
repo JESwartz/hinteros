@@ -21,7 +21,9 @@ let
   cfg = config.hinteros.installer;
   appIds = import ../lib/app-ids.nix;
 
-  repoUrl = "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git";
+  # The same URL channels.json ships (hinteros.update.repo), so the device flake's input line is
+  # exactly what hinteros-system's channel.set looks for.
+  repoUrl = config.hinteros.update.repo;
 
   # A clean checkout has `rev`; a dirty one (development) gets a placeholder, which Nix accepts as
   # long as the narHash is in the store. Never ship an ISO built from a dirty tree.
