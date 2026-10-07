@@ -3,8 +3,20 @@
 # from a JSON plan, then the installed disk is booted (UEFI, systemd-boot) in a second VM step
 # and checked: the session comes up, /etc/hinteros and its snapshot, sshd with the admin's
 # password, no password for the session user or root, and the daemon's app list.
-{ self, pkgs }:
+{
+  self,
+  pkgs,
+  # Parameterisation: the installer gets this nixos-facter report through the HINTEROS_INSTALL_FACTER
+  # hook (a real machine's report; a VM's own report changes nothing), and the test name.
+  facterFixture ? null,
+  name ? "hinteros-install-offline",
+}:
 let
+  withReport = facterFixture != null;
+  facterStub = pkgs.writeShellScript "facter-stub" ''
+    [ "$1" = -o ] && cp ${facterFixture} "$2"
+  '';
+  facterEnv = pkgs.lib.optionalString withReport "HINTEROS_INSTALL_FACTER=${facterStub} ";
 
   # The installed system also needs the test driver's backdoor, plus the same software-rendering
   # session settings as nixos/vm. Handed to the installer as its test hook
@@ -56,7 +68,7 @@ let
   );
 in
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
-  name = "hinteros-install-offline";
+  inherit name;
   # Installing takes a while even from a ready store.
   meta.timeout = 5400;
 
@@ -109,7 +121,7 @@ in
 
     with subtest("hinteros-install runs and reports progress"):
         installer.succeed(
-            "(HINTEROS_INSTALL_ALLOW_BIOS=1 HINTEROS_INSTALL_EXTRA_MODULE=/tmp/extra-module.nix "
+            "(HINTEROS_INSTALL_ALLOW_BIOS=1 ${facterEnv}HINTEROS_INSTALL_EXTRA_MODULE=/tmp/extra-module.nix "
             "timeout 1500 hinteros-install --plan /tmp/plan.json >/tmp/install.out 2>/tmp/install.stderr; "
             "echo $? >/tmp/install.rc) </dev/null >/dev/null 2>&1 &"
         )
@@ -140,6 +152,53 @@ in
         assert stages == ["validate", "partition", "facter", "config", "install", "snapshot", "finalize", "done"], stages
         assert any("Offline install" in l["message"] for l in lines), lines
 
+    ${
+      if withReport then
+        ''
+          with subtest("the real hardware report: no package built, report written and deferred"):
+              import re
+              built = installer.succeed(
+                  "grep -ao \"building '/nix/store/[^']*\\.drv\" /var/log/hinteros-install.log | sed 's|.*/[a-z0-9]\\{32\\}-||; s|\\.drv$||' | sort -u"
+              ).split()
+              print("built during the install:", built)
+              # Package builds, as opposed to the small file and environment assemblies any install builds.
+              heavy = [b for b in built if re.match(r"^(bash|glibc|gcc|binutils|coreutils|perl|python3|systemd|linux|linux-firmware|microcode-[a-z]+|wireless-regdb|mesa|nix|openssh|util-linux|kmod|intel-[a-z-]+|libva[a-z-]*|firefox[a-z-]*|hinteros-[a-z-]+)-[0-9][0-9a-z._]*$", b)]
+              assert not heavy, heavy
+              installer.succeed("mountpoint -q /mnt || mount /dev/disk/by-partlabel/hinteros-root /mnt")
+              installer.succeed("cmp ${facterFixture} /mnt/etc/hinteros/facter.json")
+              installer.succeed("test -e /mnt/etc/hinteros/facter.deferred")
+              installer.succeed("rm -rf /tmp/cfg && cp -r /mnt/etc/hinteros /tmp/cfg && umount -R /mnt")
+
+          with subtest("control: what the report would build (the first online update)"):
+              ref = "path:/tmp/cfg#nixosConfigurations.hinteros.config.system.build.toplevel"
+              opts = "--extra-experimental-features 'nix-command flakes' --no-update-lock-file --option substituters 'auto?trusted=1' --dry-run"
+              def names(out, header):
+                  # The derivation names listed under "<n> derivations will be built:" / "paths will be fetched".
+                  sec = out.split(header, 1)[1] if header in out else ""
+                  res = []
+                  for l in sec.splitlines()[1:]:
+                      l = l.strip()
+                      if not l.startswith("/nix/store/"):
+                          break
+                      res.append(l.removeprefix("/nix/store/").removesuffix(".drv"))
+                  return res
+              with_marker = installer.succeed(f"nix build {opts} {ref} 2>&1")
+              installer.succeed("rm /tmp/cfg/facter.deferred")
+              applied = installer.succeed(f"nix build {opts} {ref} 2>&1")
+              b0 = names(with_marker, "will be built")
+              b1 = names(applied, "will be built")
+              extra = sorted(set(b1) - set(b0))
+              print("M900-CONTROL: derivations that differ or are new once the report is applied (marker removed):")
+              for n in extra:
+                  print("M900-CONTROL:   ", n[33:])
+              print("M900-CONTROL: not built with the marker but in the generic system's closure:", sorted(set(b0))[:40])
+              assert applied != with_marker
+              assert extra, applied[-2000:]
+        ''
+      else
+        ""
+    }
+
     installer.succeed("sync")
     installer.shutdown()
 
@@ -166,6 +225,12 @@ in
         files = target.succeed("ls /etc/hinteros").split()
         for f in ("flake.nix", "flake.lock", "state.json", "facter.json", "facter.deferred"):
             assert f in files, files
+        ${
+          if withReport then
+            ''target.succeed("test \"$(sha256sum < /etc/hinteros/facter.json | cut -d' ' -f1)\" = ${builtins.hashFile "sha256" facterFixture}")''
+          else
+            "pass"
+        }
         state = json.loads(target.succeed("cat /etc/hinteros/state.json"))
         assert state["schemaVersion"] == 1, state
         assert state["apps"] == ["youtube", "firefox"], state

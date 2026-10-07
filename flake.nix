@@ -188,6 +188,11 @@
         store-install = import ./tests/vm/store-install.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
         install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
+        install-offline-m900 = import ./tests/vm/install-offline.nix {
+          inherit self pkgs;
+          name = "hinteros-install-offline-m900";
+          facterFixture = ./tests/vm/fixtures/facter-lenovo-m900.json;
+        };
         install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
