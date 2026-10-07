@@ -122,6 +122,24 @@ for method, params in [
 ]:
     refused(method, params)
 
+# apps.install / apps.remove (system API 0.3): ids that are not catalog ids, too many, unknown fields, terms
+# of other apps, wrong types. (Unknown but well-formed ids are not_found; store-install covers them.)
+for ids in (["../x"], ["/nix/store/abc-x"], ["a/b"], ["A"], [""], ["x" * 40], ["a;id"], [5], "crunchyroll", [],
+            ["a"] * 9, [f"app{i}" for i in range(5000)]):
+    refused("apps.install", {"ids": ids, "revision": REV})
+    refused("apps.remove", {"ids": ids, "revision": REV, "delete_data": True})
+for method, params in [
+    ("apps.install", {"ids": ["crunchyroll"], "revision": REV, "path": "/etc"}),
+    ("apps.install", {"ids": ["crunchyroll"], "revision": REV, "accepted_terms": {"../x": "1"}}),
+    ("apps.install", {"ids": ["crunchyroll"], "revision": REV, "accepted_terms": {"steam": "../../x"}}),
+    ("apps.install", {"ids": ["crunchyroll"], "revision": REV, "accepted_terms": ["steam"]}),
+    ("apps.install", {"ids": ["crunchyroll"]}),
+    ("apps.remove", {"ids": ["crunchyroll"], "revision": REV}),
+    ("apps.remove", {"ids": ["crunchyroll"], "revision": REV, "delete_data": "yes"}),
+    ("apps.remove", {"ids": ["crunchyroll"], "revision": REV, "delete_data": True, "paths": ["/"]}),
+]:
+    refused(method, params)
+
 # A hello that lies about the version, and a hello with extra fields.
 c = Conn(hello=False)
 r = c.call("hello", {"api_version": "9.0", "client": {"name": "x", "version": "0"}})
@@ -133,7 +151,7 @@ r = c.call("hello", {"api_version": "0.3", "client": {"name": "x", "version": "0
 print("hello with an extra field ->", "error" if "error" in r else "accepted, ignored")
 
 # Methods that do not exist (including ones the design keeps out of the API, and path-ish names).
-for method in ["ssh.keys.add", "profiles.create", "apps.install", "exec", "system.exec", "", "../x",
+for method in ["ssh.keys.add", "profiles.create", "exec", "system.exec", "", "../x",
                "rebuild\n", "__proto__", "power", "system.power", "update.apply ", "settings.set/x"]:
     refused(method, {}, code=NOT_FOUND_METHOD)
 
