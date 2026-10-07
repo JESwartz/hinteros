@@ -181,6 +181,8 @@
         system-escalation = import ./tests/vm/system-escalation.nix { inherit self pkgs; };
         system-authz = import ./tests/vm/system-authz.nix { inherit self pkgs; };
         system-jobs = import ./tests/vm/system-jobs.nix { inherit self pkgs; };
+        polkit-agent = import ./tests/vm/polkit-agent.nix { inherit self pkgs; };
+        session-restart = import ./tests/vm/session-restart.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
         install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
         install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };

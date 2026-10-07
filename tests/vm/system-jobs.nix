@@ -11,26 +11,7 @@
 # test covers an offline evaluation and build, in a much bigger VM).
 { self, pkgs }:
 let
-  stubNix =
-    nix:
-    pkgs.writeShellScriptBin "nix" ''
-      echo "$@" >> /run/stub/nix.log
-      while [ "$1" = "--extra-experimental-features" ]; do shift 2; done
-      case "$1" in
-      build)
-        echo '@nix {"action":"start","id":1,"level":3,"type":103,"text":""}' >&2
-        echo '@nix {"action":"result","id":1,"type":105,"fields":[1,4,0,0]}' >&2
-        while [ -e /run/stub/hold ]; do sleep 0.1; done
-        if [ -e /run/stub/fail ]; then
-          echo '@nix {"action":"msg","level":0,"msg":"error: builder for stub.drv failed"}' >&2
-          exit 1
-        fi
-        echo '@nix {"action":"result","id":1,"type":105,"fields":[4,4,0,0]}' >&2
-        cat /run/stub/toplevel
-        ;;
-      *) exec ${nix}/bin/nix "$@" ;;
-      esac
-    '';
+  stubNix = nix: import ./system/stub-nix.nix { inherit pkgs nix; };
 in
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
   name = "hinteros-system-jobs";

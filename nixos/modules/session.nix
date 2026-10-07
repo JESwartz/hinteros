@@ -226,6 +226,15 @@ in
       };
     };
 
+    # greetd starts `default_session` as a "greeter" once the `initial_session` has ended (a session
+    # restart, session.restart). A greeter that ends without having created a session makes greetd
+    # exit, so the *second* restart (or a crashing console session) would leave no console at all:
+    # start greetd again, which runs the initial session afresh.
+    systemd.services.greetd.serviceConfig = {
+      Restart = lib.mkForce "always";
+      RestartSec = 1;
+    };
+
     environment.systemPackages = [ cfg.gamescope.package ];
   };
 }
