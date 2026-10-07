@@ -63,7 +63,7 @@
 
     # The real launcher reached the real daemon: the home screen shows the built-in Steam tile
     # and the Games row (not the connecting, unreachable or version-mismatch notices), and the
-    # daemon logged a successful 0.7 handshake from the launcher.
+    # daemon logged a successful 0.8 handshake from the launcher.
     machine.wait_for_text("Steam", timeout=timedelta(seconds=120))
     machine.wait_for_text("Games", timeout=timedelta(seconds=60))
     screen = machine.get_screen_text()
@@ -71,7 +71,7 @@
         assert bad.lower() not in screen.lower(), f"launcher shows a connection notice ({bad}): {screen}"
     machine.wait_until_succeeds(
         "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
-        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.7'"
+        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.8'"
     )
 
     # System service: socket in /run/hinteros, root:hinteros 0660, answers the API.
@@ -79,13 +79,13 @@
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
     assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
     machine.succeed("id -nG hinteros | tr ' ' '\\n' | grep -qx hinteros")
-    assert rpc("/run/hinteros/system.sock", "0.2", as_user="hinteros") == "hinteros-system"
+    assert rpc("/run/hinteros/system.sock", "0.3", as_user="hinteros") == "hinteros-system"
 
     # Session daemon: user service of the session user, socket in its runtime dir, mode 0600.
     uid = machine.succeed("id -u hinteros").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros"
-    assert rpc(sock, "0.7", as_user="hinteros") == "hinteros-session"
+    assert rpc(sock, "0.8", as_user="hinteros") == "hinteros-session"
   '';
 }

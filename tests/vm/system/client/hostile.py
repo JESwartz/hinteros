@@ -61,7 +61,7 @@ for method, params in [
 ]:
     refused(method, params)
 
-# settings.set: fields of `changes` that do not exist (nothing is settable in API 0.2), named.
+# settings.set: fields of `changes` that do not exist (nothing is settable in API 0.3), named.
 for changes, field in [
     ({"ssh": {"enabled": True}}, "ssh"),
     ({"settings": {"ssh": {"authorizedKeys": ["command=\"x\" ssh-ed25519 AAAA"]}}}, "settings"),
@@ -127,7 +127,7 @@ c = Conn(hello=False)
 r = c.call("hello", {"api_version": "9.0", "client": {"name": "x", "version": "0"}})
 assert r["error"], r
 c = Conn(hello=False)
-r = c.call("hello", {"api_version": "0.2", "client": {"name": "x", "version": "0"}, "uid": 0})
+r = c.call("hello", {"api_version": "0.3", "client": {"name": "x", "version": "0"}, "uid": 0})
 # NOTE: the daemon (e0f95a2) accepts unknown fields in hello (the schema says closed); the extra
 # field is ignored, never used as an identity. Recorded, not asserted.
 print("hello with an extra field ->", "error" if "error" in r else "accepted, ignored")
@@ -213,7 +213,7 @@ for _ in range(40):
 served = 0
 for h in held:
     try:
-        r = h.call("hello", {"api_version": "0.2", "client": {"name": "flood", "version": "0"}})
+        r = h.call("hello", {"api_version": "0.3", "client": {"name": "flood", "version": "0"}})
         served += 1 if r and "result" in r else 0
     except (OSError, socket.timeout):
         pass
