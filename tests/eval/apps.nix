@@ -79,6 +79,18 @@ let
   sessionCmd = c: c.config.services.greetd.settings.initial_session.command;
   gs = mk { hinteros.session.compositor = "gamescope"; };
 
+  fx = c: c.config.programs.firefox;
+  oskOff = mk { hinteros.firefoxKiosk.oskExtension = "off"; };
+  oskEsr = mk { hinteros.firefoxKiosk.oskExtension = "esr-unsigned"; };
+  oskSigned = mk {
+    hinteros.firefoxKiosk.oskExtension = "signed";
+    hinteros.firefoxKiosk.oskExtensionXpi = "/nix/store/00000000000000000000000000000000-signed/osk.xpi";
+  };
+  oskSignedNoXpi = mk { hinteros.firefoxKiosk.oskExtension = "signed"; };
+  extId = "hinteros-osk@hinteros";
+  oskFailures = c: lib.filter (lib.hasInfix "oskExtension") (failedAssertions c);
+  hasSub = s: sub: lib.hasInfix sub (toString s);
+
   results = lib.runTests {
     testDefaultApps = {
       expr = appsOf base;
@@ -314,6 +326,82 @@ let
     };
     testForbidUnfreeFails = {
       expr = lib.any (lib.hasInfix "forbidUnfree") (failedAssertions forbidden);
+      expected = true;
+    };
+    # Firefox auto-OSK extension: the native-messaging host is always installed.
+    # The default is the owner's choice: Firefox ESR with the extension force-installed.
+    testOskExtensionDefault = {
+      expr = [
+        base.config.hinteros.firefoxKiosk.oskExtension
+        (lib.hasSuffix "esr" (fx base).finalPackage.version)
+        ((fx base).policies.ExtensionSettings ? "${extId}")
+      ];
+      expected = [
+        "esr-unsigned"
+        true
+        true
+      ];
+    };
+    testOskExtensionOff = {
+      expr = [
+        oskOff.config.hinteros.firefoxKiosk.oskExtension
+        ((fx oskOff).policies.ExtensionSettings ? "${extId}")
+        (fx oskOff).autoConfig
+        (lib.hasSuffix "esr" (fx oskOff).package.version)
+        (map lib.getName (fx oskOff).nativeMessagingHosts.packages)
+        (settings oskOff).osk.auto_show
+        (settings oskOff).input.xbox_label_swap
+      ];
+      expected = [
+        "off"
+        false
+        ""
+        false
+        [ "hinteros-session" ]
+        true
+        "auto"
+      ];
+    };
+    testOskExtensionEsrUnsigned = {
+      expr = [
+        (lib.hasSuffix "esr" (fx oskEsr).package.version)
+        (hasSub (fx oskEsr).autoConfig ''lockPref("xpinstall.signatures.required", false);'')
+        (fx oskEsr).policies.ExtensionSettings.${extId}.installation_mode
+        (hasSub (fx oskEsr).policies.ExtensionSettings.${extId}.install_url
+          "hinteros-osk-firefox-extension"
+        )
+        (lib.hasPrefix "file:///nix/store/" (fx oskEsr).policies.ExtensionSettings.${extId}.install_url)
+        (lib.hasSuffix "/hinteros-osk@hinteros.xpi"
+          (fx oskEsr).policies.ExtensionSettings.${extId}.install_url
+        )
+        (oskFailures oskEsr)
+      ];
+      expected = [
+        true
+        true
+        "force_installed"
+        true
+        true
+        true
+        [ ]
+      ];
+    };
+    testOskExtensionSigned = {
+      expr = [
+        (lib.hasSuffix "esr" (fx oskSigned).package.version)
+        (fx oskSigned).autoConfig
+        (fx oskSigned).policies.ExtensionSettings.${extId}.install_url
+        (oskFailures oskSigned)
+      ];
+      expected = [
+        false
+        ""
+        "file:///nix/store/00000000000000000000000000000000-signed/osk.xpi"
+        [ ]
+      ];
+    };
+    testOskExtensionSignedNeedsXpi = {
+      expr = lib.any (lib.hasInfix "oskExtensionXpi") (oskFailures oskSignedNoXpi);
       expected = true;
     };
     testForbidUnfreeOkWithoutUnfree = {
