@@ -375,6 +375,12 @@ in
         // lib.optionalAttrs (config.hinteros.session.compositor == "cage") {
           DISPLAY = ":0";
           WAYLAND_DISPLAY = "wayland-0";
+        }
+        # Under gamescope, GTK apps it starts (the OSK, native apps) must use Xwayland too: the
+        # daemon passes WAYLAND_DISPLAY, GTK would prefer it, and gamescope never sizes Wayland
+        # windows (session.nix). The OSK also needs X11 for GAMESCOPE_EXTERNAL_OVERLAY.
+        // lib.optionalAttrs (config.hinteros.session.compositor == "gamescope") {
+          GDK_BACKEND = "x11";
         };
         serviceConfig = {
           # Under gamescope the daemon sees the same mode files gamescope was started with

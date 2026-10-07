@@ -55,13 +55,47 @@ clients render: the `gamescope` test runs it (with `-e`) with the xterm placehol
 `GAMESCOPECTRL_BASELAYER_APPID` with xprop, uses the session socket (API 0.7) for `games.list`, a fake Steam game, `apps.close`, Big Picture and a fake Steam Guard pop-up (`steam_attention`, `steam.focus`), and checks
 by OCR of `gamescopectl screenshot` that the game, then (after SIGUSR1) the placeholder again, is shown. The Flutter launcher stays on cage in VM tests (spike 2).
 `nixosConfigurations.vm-gamescope` is the interactive VM with gamescope for a Vulkan-capable setup.
-On gamescope the launcher runs on native Wayland (`GDK_BACKEND=wayland`, `--expose-wayland`).
+On gamescope the launcher runs on Xwayland (`GDK_BACKEND=x11`); see "Display size" below.
 
 The `typing` test (cage, loopback only) runs Firefox on a page with a text and a password field;
 over the session socket (API 0.7) it calls `keys.type` with a URL, `keys.action tab`, `keys.type`
 with `P@ss-w0rd!` and `keys.action enter`, and checks that the page received exactly those values
 through the daemon's uinput keyboard. It also checks that the daemon started `hinteros-osk`, that
 the OSK connected at 0.7 and that `osk.show`/`osk.hide` answer.
+
+## Display size (gamescope)
+
+Real hardware (Skylake iGPU, 1920x1080 HDMI) showed the launcher as a blurry ~1080x1080 square in
+the middle of a correct 1920x1080 output. From the gamescope 3.16.31 source:
+
+- **Native Wayland windows are never sized.** gamescope's xdg-shell handling sends configures
+  without a size and ignores `set_fullscreen` (`wlserver.cpp`: `xdg_toplevel_new` is empty, nothing
+  calls `wlr_xdg_toplevel_set_size`/`_set_fullscreen`). The client's buffer is then aspect-fitted to
+  the output with a linear filter (`steamcompmgr.cpp`, `calc_scale_factor`, scaler `auto`). The
+  GTK launcher's fullscreen request was ignored, so it stayed at its tiny natural size and was
+  upscaled. **Fix:** under gamescope GTK apps run on Xwayland (`GDK_BACKEND=x11` for the session and
+  the daemon, which starts the OSK and native apps), the path Steam uses. Cage keeps Wayland (it
+  honors fullscreen). Costs (spike 1): slightly less steady frame times, no automatic 2x at 4K (the
+  launcher scales its 1080p layout to the window itself).
+- **X11 windows**: gamescope resizes a mapped window to the Xwayland root unless it pins its size
+  with min = max hints; a focused window with an app id only if it is fullscreen
+  (`_NET_WM_STATE_FULLSCREEN`). `--force-windows-fullscreen` makes every focused app window
+  root-sized.
+- **Root/nested size**: without `-w/-h` the nested size is the output mode found at start
+  (`main.cpp`), 1280x720 if no display was connected yet (`drm_unset_mode`). With one Xwayland
+  that size never changes: a later `display.set_mode` or a TV switched on after boot leaves apps
+  letterboxed or upscaled, and the `wl_output` the daemon reads as the "current mode" keeps the
+  start size, so `display.set_mode` never saw its switch ("gamescope did not switch"). **Fix:**
+  `--xwayland-count 2`: gamescope then sizes Xwayland `:0` (home app, every app the daemon starts)
+  and its `wl_output` to the output at start and on every mode change, and keeps the nested aspect
+  equal to the output's (`steamcompmgr.cpp`, `wlserver_set_xwayland_server_mode(0, ...)`). `:1`
+  (`STEAM_GAME_DISPLAY_0`) keeps the nested size; nothing of ours uses it. No `-W/-H/-w/-h` are
+  passed, so gamescope keeps choosing the mode (save file) and `display.set_mode` stays live.
+
+gamescope's and the home app's stdout/stderr are in the journal: `journalctl -t hinteros-compositor`
+(`wlserver: Updating mode for xwayland server #0: WxH@R` after each mode change). The
+`gamescope-size` test covers this (headless, so no live mode change; `gamescopectl screenshot`
+repaints at the nested size).
 
 ## Device config, runtime settings and maintenance (M5/M6 groundwork)
 
@@ -90,4 +124,4 @@ the OSK connected at 0.7 and that `osk.show`/`osk.hide` answer.
 
 - `pactl` (`pkgs.pulseaudio`) is set as `[audio] pactl` by absolute path; the user manager provides `XDG_RUNTIME_DIR`, which is how it finds `pipewire-pulse`.
 - BlueZ: this BlueZ's `bluetooth.conf` lets every local user call org.bluez (older ones: `at_console`/group `lp`). `runtime.nix` installs `hinteros-bluez.conf` (after BlueZ's): org.bluez is denied by default and allowed for the session user (root is allowed by BlueZ's own policy). The `runtime-settings` test checks both sides with `busctl`.
-- gamescope (real devices, no `-W/-H/-r`): the session command and the daemon unit run through `hinteros.session.displayEnvWrapper`, which sets `GAMESCOPE_PATCHED_EDID_FILE=$XDG_RUNTIME_DIR/gamescope-edid` (gamescope writes `<file>.modes`) and `GAMESCOPE_MODE_SAVE_FILE=$XDG_STATE_HOME/hinteros/gamescope-modes` (`~/.local/state/hinteros/gamescope-modes`, persistent, picked by gamescope at its next start). The daemon reads the same variables. The headless VM test keeps its explicit `-W/-H` through `gamescope.extraArgs`.
+- gamescope (real devices, no `-W/-H/-r`, see "Display size"): the session command and the daemon unit run through `hinteros.session.displayEnvWrapper`, which sets `GAMESCOPE_PATCHED_EDID_FILE=$XDG_RUNTIME_DIR/gamescope-edid` (gamescope writes `<file>.modes`) and `GAMESCOPE_MODE_SAVE_FILE=$XDG_STATE_HOME/hinteros/gamescope-modes` (`~/.local/state/hinteros/gamescope-modes`, persistent, picked by gamescope at its next start). The daemon reads the same variables. The headless VM test keeps its explicit `-W/-H` through `gamescope.extraArgs`.

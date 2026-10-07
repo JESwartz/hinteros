@@ -289,6 +289,25 @@ let
         true
       ];
     };
+    # gamescope: apps on Xwayland sized to the output (README "Display size"), output logged.
+    testGamescopeAppSize = {
+      expr = [
+        (lib.hasInfix "--xwayland-count 2 --force-windows-fullscreen" (sessionCmd gs))
+        (lib.hasInfix "GDK_BACKEND=x11" (sessionCmd gs))
+        gs.config.systemd.user.services.hinteros-session.environment.GDK_BACKEND
+        (lib.hasInfix "systemd-cat --identifier hinteros-compositor" (sessionCmd gs))
+        (cage.config.hinteros.session.environment.GDK_BACKEND or "unset")
+        (cage.config.systemd.user.services.hinteros-session.environment.GDK_BACKEND or "unset")
+      ];
+      expected = [
+        true
+        true
+        "x11"
+        true
+        "unset"
+        "unset"
+      ];
+    };
     testPactl = {
       expr = lib.hasSuffix "/bin/pactl" (settings base).audio.pactl;
       expected = true;

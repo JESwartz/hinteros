@@ -17,11 +17,27 @@ let
       cfg.gamescope.backend
     ]
     # -e: Steam mode. Only then does gamescope take app ids from reapers and publish the
-    # focus state, which the session daemon drives (spike 3). Native Wayland clients (the
-    # launcher, see GDK_BACKEND below) need gamescope's Wayland socket; Xwayland is always there.
+    # focus state, which the session daemon drives (spike 3). --expose-wayland puts gamescope's
+    # Wayland socket in the home app's environment; apps run on Xwayland (GDK_BACKEND below).
+    #
+    # App size (read from the gamescope 3.16.31 source; README "Display size"):
+    # --xwayland-count 2: with more than one Xwayland, gamescope sizes the first (:0, where the
+    #   home app and everything the daemon starts run) to the *output* mode, at start
+    #   (wlserver.cpp, gamescope_xwayland_server_t) and after every mode change
+    #   (steamcompmgr.cpp: wlserver_set_xwayland_server_mode(0, output size), and the nested
+    #   height follows the output's aspect). With a single Xwayland its size is the nested size,
+    #   fixed at start (main.cpp: nested = output at start, never updated): a display.set_mode to
+    #   another size, or a display that came up after gamescope (a TV switched on after boot:
+    #   gamescope starts at 1280x720), left every app letterboxed or upscaled. The second
+    #   Xwayland (:1, STEAM_GAME_DISPLAY_0) is the one SteamOS gives games; our apps do not use it.
+    # --force-windows-fullscreen: every focused X11 app window is resized to its Xwayland root
+    #   (= the output), also windows that never ask for fullscreen or pin their size.
     ++ [
       "-e"
       "--expose-wayland"
+      "--xwayland-count"
+      "2"
+      "--force-windows-fullscreen"
     ]
     ++ cfg.gamescope.extraArgs
     ++ [ "--" ];
@@ -64,8 +80,15 @@ let
     exec "$@"
   '';
 
+  # The compositor's and the home app's stdout/stderr go to the journal
+  # (`journalctl -t hinteros-compositor`); greetd would drop them.
   sessionCommand = lib.escapeShellArgs (
-    [ (lib.getExe' pkgs.coreutils "env") ]
+    [
+      (lib.getExe' config.systemd.package "systemd-cat")
+      "--identifier"
+      "hinteros-compositor"
+      (lib.getExe' pkgs.coreutils "env")
+    ]
     ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment
     ++ lib.optional (cfg.compositor == "gamescope") cfg.displayEnvWrapper
     ++ compositorCommand.${cfg.compositor}
@@ -184,10 +207,18 @@ in
     hardware.graphics.enable = true;
     hardware.uinput.enable = true;
 
-    # Spike 1: the Flutter launcher runs better on native Wayland than on Xwayland under
-    # gamescope (correct 2x scale at 4K, steadier frame times). The cage VM config sets the same.
+    # Under gamescope the launcher runs on Xwayland, as Steam does. gamescope 3.16.31 never sizes
+    # a native Wayland toplevel: its xdg_toplevel configures carry no size, set_fullscreen is
+    # ignored (wlserver.cpp: xdg_toplevel_new is empty; no wlr_xdg_toplevel_set_size or
+    # _set_fullscreen anywhere) and the client's buffer is aspect-fitted to the output with a
+    # linear filter (steamcompmgr.cpp, calc_scale_factor). The GTK window's fullscreen request
+    # thus left the launcher at its tiny natural size, drawn as a blurry centred square on real
+    # hardware. X11 windows are sized to the Xwayland root by gamescope itself (see the flags
+    # above). Spike 1 measured slightly steadier frame times on Wayland and no automatic 2x at 4K
+    # on X11; the launcher scales its own layout to the window. Cage keeps Wayland (VM config):
+    # cage honors fullscreen.
     hinteros.session.environment = lib.mkMerge [
-      (lib.mkIf (cfg.compositor == "gamescope") { GDK_BACKEND = lib.mkDefault "wayland"; })
+      (lib.mkIf (cfg.compositor == "gamescope") { GDK_BACKEND = lib.mkDefault "x11"; })
       # The daemon's virtual keyboard sends US key codes, so the compositor's layout must be US
       # (gamescope reads XKB_DEFAULT_LAYOUT in wlserver.cpp; cage/wlroots too). Non-US text goes
       # through gamescope's input method instead.

@@ -2,7 +2,7 @@
 # Shared by the interactive VM (nixosConfigurations.vm) and the nixosTest checks.
 # gamescope cannot start on the VM's software Vulkan (llvmpipe: no DRM format
 # modifiers, no dma-buf export), so the VM uses the cage fallback by default.
-{ lib, ... }:
+{ config, lib, ... }:
 {
   hinteros.daemon.enable = true;
 
@@ -12,8 +12,8 @@
     environment = {
       WLR_RENDERER = "pixman";
       WLR_NO_HARDWARE_CURSORS = "1";
-      # Flutter GTK app on cage: Wayland, software GL (no GPU in the VM).
-      GDK_BACKEND = "wayland";
+      # Flutter GTK app on cage: Wayland (under gamescope session.nix picks X11), software GL.
+      GDK_BACKEND = lib.mkIf (config.hinteros.session.compositor == "cage") "wayland";
       LIBGL_ALWAYS_SOFTWARE = "1";
       GALLIUM_DRIVER = "llvmpipe";
     };
