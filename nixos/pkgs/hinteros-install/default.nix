@@ -30,6 +30,7 @@
   # The device flake template and the app ids ({onIso, onlineOnly, preselected}).
   template ? ../../templates/device-flake.nix.in,
   appsJson,
+  catalogIndex,
   stateVersion,
   repoUrl ? "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git",
   isoRev ? "unknown",
@@ -43,6 +44,7 @@ let
       offlineLock
       sourcesFile
       appsJson
+      catalogIndex
       stateVersion
       repoUrl
       isoRev

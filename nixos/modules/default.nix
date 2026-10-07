@@ -14,5 +14,6 @@
     ./maintenance.nix
     ./disk.nix
     ./hardening.nix
+    ./branding.nix
   ];
 }

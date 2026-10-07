@@ -51,6 +51,7 @@ let
         "youtube"
         "firefox"
       ];
+      acceptedTerms = { };
     }
   );
 in
@@ -157,6 +158,10 @@ in
         target.succeed("pgrep -u hinteros -f hinteros-launcher")
         target.screenshot("installed-session")
 
+    with subtest("accepted terms are recorded (none for these apps)"):
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
+        assert json.loads(target.succeed("cat /var/lib/hinteros/terms-accepted.json")) == {}
+
     with subtest("/etc/hinteros and its snapshot"):
         files = target.succeed("ls /etc/hinteros").split()
         for f in ("flake.nix", "flake.lock", "state.json", "facter.json"):
@@ -242,7 +247,7 @@ in
         ids = [a["id"] for a in apps]
         print(ids)
         assert "youtube" in ids and "firefox" in ids, ids
-        for absent in ("jellyfin", "crunchyroll", "plex", "moonlight"):
+        for absent in ("jellyfin", "crunchyroll", "plex-htpc", "moonlight"):
             assert absent not in ids, ids
 
     target.shutdown()

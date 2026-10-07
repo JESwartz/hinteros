@@ -18,6 +18,7 @@ DISKO_SCRIPT=@diskoScript@
 OFFLINE_LOCK=@offlineLock@
 SOURCES_FILE=@sourcesFile@
 APPS_JSON=@appsJson@
+CATALOG_INDEX=@catalogIndex@
 STATE_VERSION=@stateVersion@
 REPO_URL=@repoUrl@
 ISO_REV=@isoRev@
@@ -129,11 +130,12 @@ PLAN=$(printf '%s' "$PLAN" | jq -c '{
   base: (.base // "unstable"),
   network: (.network // "auto"),
   apps: (.apps // []),
-  unknown: (keys - ["disk", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi"])
+  acceptedTerms: (.acceptedTerms // {}),
+  unknown: (keys - ["disk", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms"])
 }')
 
 # Plan-level problems, all at once: [{field, code, message}].
-problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" '
+problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile idx "$CATALOG_INDEX" '
   ($cat[0].onIso + $cat[0].onlineOnly) as $known
   | def bad(f; c; m): {field: f, code: c, message: m};
     [
@@ -172,6 +174,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" '
         then bad("channel"; "channel-invalid"; "channel must be stable or beta") else empty end),
       (if .base != "unstable"
         then bad("base"; "base-invalid"; "base must be unstable (the only base there is)") else empty end),
+      (if (.acceptedTerms | type) != "object" or any(.acceptedTerms[]; type != "string")
+        then bad("acceptedTerms"; "terms-invalid"; "acceptedTerms must map app ids to terms versions") else empty end),
       (if (.network | IN("auto", "online", "offline") | not)
         then bad("network"; "network-invalid"; "network must be auto, online or offline") else empty end),
       (if (.apps | type) != "array" or any(.apps[]; type != "string")
@@ -180,7 +184,13 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" '
           (.apps[] | select(. as $a | $known | index($a) | not)
              | bad("apps"; "app-unknown"; "unknown app id \(.) (known: \($known | join(", ")))")),
           (if (.apps | length) != (.apps | unique | length)
-            then bad("apps"; "app-duplicate"; "an app id is listed twice") else empty end)
+            then bad("apps"; "app-duplicate"; "an app id is listed twice") else empty end),
+          # Vendor terms: an app whose catalog entry has terms needs the user acceptance of
+          # exactly the version in the catalog index of this installer.
+          (. as $plan | .apps[] | . as $a
+             | ($idx[0].apps[] | select(.id == $a and .terms != null)) as $e
+             | select(($plan.acceptedTerms[$a] // null) != $e.terms.version)
+             | bad("acceptedTerms"; "terms-not-accepted"; "the terms of \($e.name) (\($e.terms.title), version \($e.terms.version)) have not been accepted"))
         end),
       (if .wifi != null then
           (if (.wifi | type) != "object" or ((.wifi.ssid | type) != "string")
@@ -205,7 +215,7 @@ report_problems() { # PROBLEMS_JSON: print each as an error line, exit 2 if any
 }
 report_problems "$problems"
 
-plan() { printf '%s' "$PLAN" | jq -r "$1"; }
+plan() { local o=-r; if [ "$1" = -c ]; then o=-c; shift; fi; printf '%s' "$PLAN" | jq "$o" "$1"; }
 
 disk=$(plan .disk)
 hostname=$(plan .hostname)
@@ -371,6 +381,17 @@ hash_file=$MNT/var/lib/hinteros/admin-password-hash
 )
 chmod 0600 "$hash_file"
 [ "$(wc -c <"$hash_file")" -gt 8 ] || fail 1 hash-failed "could not hash the admin password"
+# Which vendor terms the user accepted here: id -> [{version, accepted_at, by}]. Root only; the box
+# adds to it when apps are installed later.
+(
+  umask 0077
+  jq -n --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson apps "$(plan -c .apps)" \
+    --slurpfile idx "$CATALOG_INDEX" '
+    [$apps[] as $a | $idx[0].apps[] | select(.id == $a and .terms != null)
+       | {key: .id, value: [{version: .terms.version, accepted_at: $now, by: "installer"}]}]
+    | from_entries' >"$MNT/var/lib/hinteros/terms-accepted.json"
+)
+chmod 0600 "$MNT/var/lib/hinteros/terms-accepted.json"
 progress config 30 "Device configuration written to /etc/hinteros"
 
 # ---------------------------------------------------------------------------------------------

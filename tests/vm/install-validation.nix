@@ -49,10 +49,22 @@ let
         "youtube"
         "steam"
       ];
+      acceptedTerms.steam = "2026-09-10";
     };
+    steam-no-terms = plan { apps = [ "steam" ]; };
+    steam-old-terms = plan {
+      apps = [ "steam" ];
+      acceptedTerms.steam = "2020-01-01";
+    };
+    steam-terms = plan {
+      apps = [ "steam" ];
+      acceptedTerms.steam = "2026-09-10";
+    };
+    terms-invalid = plan { acceptedTerms.steam = 5; };
     steam-forced-offline = plan {
       network = "offline";
       apps = [ "plex-htpc" ];
+      acceptedTerms.plex-htpc = "2025-10-30";
     };
     forced-online = plan { network = "online"; };
     missing-disk = plan { disk = "/dev/vdz"; };
@@ -144,6 +156,13 @@ in
     with subtest("apps that need a network"):
         refused("steam-offline", "app-needs-network")
         refused("steam-forced-offline", "app-needs-network")
+        # Vendor terms: acceptance of exactly the catalog's version is required first.
+        refused("steam-no-terms", "terms-not-accepted")
+        refused("steam-old-terms", "terms-not-accepted")
+        refused("terms-invalid", "terms-invalid")
+        status, lines = run("steam-terms", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+        codes = [l.get("code") for l in lines if l["level"] == "error"]
+        assert "terms-not-accepted" not in codes and "app-needs-network" in codes, lines
         refused("forced-online", "no-network")
 
     with subtest("the disk"):
