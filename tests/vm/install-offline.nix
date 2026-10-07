@@ -176,6 +176,10 @@ in
         # The flake: the channel ref and the repo; hinteros is pinned to the ISO's revision.
         flake = target.succeed("cat /etc/hinteros/flake.nix")
         assert 'git+https://justsomeshed.com/JSwartz/HinterOS/hinteros.git?ref=stable' in flake, flake
+        # The input line is exactly what channels.json says (channel.set rewrites that one string).
+        channels = json.loads(target.succeed("cat /run/current-system/sw/share/hinteros/update/channels.json"))
+        assert f'inputs.hinteros.url = "git+{channels["repo"]}?ref={channels["branches"]["stable"]}";' in flake, (flake, channels)
+        assert json.loads(target.succeed("cat /run/current-system/sw/share/hinteros/release.json"))["dev"] is False
         lock = json.loads(target.succeed("cat /etc/hinteros/flake.lock"))
         node = lock["nodes"]["hinteros"]
         assert node["locked"]["narHash"] == "${self.narHash}", node
@@ -186,6 +190,17 @@ in
         target.succeed("test -e /dev/disk/by-partlabel/hinteros-esp && test -e /dev/disk/by-partlabel/hinteros-root")
         target.succeed("findmnt -no FSTYPE / | grep -qx ext4")
         target.succeed("findmnt -no FSTYPE /boot | grep -qx vfat")
+
+    with subtest("the privileged service answers (system API 0.2) and knows its channel"):
+        hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
+                 "params": {"api_version": "0.2", "client": {"name": "install-test", "version": "0"}}}
+        info = {"jsonrpc": "2.0", "id": 1, "method": "system.info", "params": {}}
+        payload = "".join(json.dumps(m) + "\n" for m in (hello, info))
+        cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:/run/hinteros/system.sock"
+        out = target.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        res = next(json.loads(l) for l in out.splitlines() if '"id":1' in l.replace(" ", ""))
+        print(res)
+        assert res["result"]["channel"] == "stable" and res["result"]["dev"] is False, res
 
     with subtest("accounts: admin with a password, the session user and root without"):
         assert target.succeed("passwd -S hinteros").split()[1] == "L", "session user has a password"
@@ -217,7 +232,7 @@ in
         sock = f"/run/user/{uid}/hinteros/session.sock"
         target.wait_until_succeeds(f"test -S {sock}")
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.4", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "0.6", "client": {"name": "install-test", "version": "0"}}}
         call = {"jsonrpc": "2.0", "id": 1, "method": "apps.list", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, call))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:{sock}"

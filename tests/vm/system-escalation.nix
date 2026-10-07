@@ -1,0 +1,118 @@
+# The privileged service against hostile input. As the session user (so, as any game or web page
+# running as it), a script talks to /run/hinteros/system.sock directly, not through the session
+# daemon, with unknown fields, forged identities, paths and URLs, wrong types, bad framing, non-UTF-8,
+# oversize messages and a connection flood. Every request must be refused, the service must stay
+# up (same process, no restart), /etc/hinteros must be untouched, no job unit may have started, and
+# the sandbox of the service and its job template must be what the module promises.
+{ self, pkgs }:
+(pkgs.extend self.overlays.default).testers.runNixOSTest {
+  name = "hinteros-system-escalation";
+
+  nodes.machine = import ./system/node.nix {
+    inherit pkgs;
+    rateLimits = true;
+  };
+
+  testScript = ''
+    import json
+
+    machine.wait_for_unit("multi-user.target")
+    machine.wait_for_unit("hinteros-system.service")
+    machine.wait_for_unit("greetd.service")
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
+    machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
+
+    def pid():
+        return machine.succeed("systemctl show -p MainPID --value hinteros-system.service").strip()
+
+    def tree_hash():
+        return machine.succeed("cd /etc/hinteros && find . -type f | sort | xargs sha256sum | sha256sum && stat -c '%n %a %U %Y' /etc/hinteros").strip()
+
+    def rpc(user, method, params=None):
+        out = machine.succeed(f"runuser -u {user} -- python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
+        return json.loads(out)
+
+    with subtest("the sandbox the module promises"):
+        show = machine.succeed("systemctl show hinteros-system.service -p ProtectSystem -p RuntimeDirectoryPreserve -p MemoryDenyWriteExecute -p CapabilityBoundingSet -p ReadWritePaths -p RestrictAddressFamilies -p NoNewPrivileges -p StateDirectory")
+        print(show)
+        for want in ("ProtectSystem=strict", "RuntimeDirectoryPreserve=yes", "MemoryDenyWriteExecute=yes",
+                     "NoNewPrivileges=yes", "RestrictAddressFamilies=AF_UNIX", "StateDirectory=hinteros",
+                     "ReadWritePaths=/run/hinteros"):
+            assert want in show, (want, show)
+        assert "cap_sys_ptrace" in show.lower() and "cap_dac_override" not in show.lower(), show
+        # Really read-only: even as root in its mount namespace it cannot write /etc.
+        mp = pid()
+        machine.fail(f"nsenter -m -t {mp} -- touch /etc/hinteros-write-test")
+        machine.fail(f"nsenter -m -t {mp} -- touch /nix/var/write-test")
+        machine.succeed(f"nsenter -m -t {mp} -- test -d /run/hinteros")
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros").strip() == "700 root"
+        assert machine.succeed("stat -c '%a %U:%G' /etc/hinteros").strip() == "755 root:root"
+        # The template: root, no ProtectSystem, never restarted by a switch.
+        unit = machine.succeed("systemctl cat 'hinteros-job@.service'")
+        print(unit)
+        assert "ExecStart=" in unit and " job %i" in unit and "X-RestartIfChanged=false" in unit and "X-StopIfChanged=false" in unit, unit
+        assert "ProtectSystem" not in unit and "User=root" in unit
+        assert machine.succeed("systemctl show 'hinteros-job@x.service' -p Nice --value").strip() == "10"
+
+    def jobs():
+        return rpc("hinteros", "jobs.list")["response"]["result"]["jobs"]
+
+    # The launcher (a client of the same uid, via the session daemon) may start a job of its own
+    # at startup (an update check); let it finish and take the baseline afterwards.
+    for _ in range(60):
+        if not [j for j in rpc("hinteros", "jobs.list")["response"]["result"]["jobs"] if j["state"] == "running"]:
+            break
+        machine.sleep(1)
+    machine.sleep(5)
+    baseline_jobs = sorted(j["job_id"] for j in jobs())
+    print("baseline jobs", baseline_jobs)
+    before_pid = pid()
+    before_tree = tree_hash()
+
+    with subtest("hostile input at the socket, as the session user"):
+        out = machine.succeed("runuser -u hinteros -- python3 /etc/hinteros-test/hostile.py 2>&1")
+        print(out)
+        assert out.rstrip().endswith("hostile: all refused, service alive")
+
+    def assert_untouched():
+        assert pid() == before_pid, "hinteros-system was restarted"
+        machine.succeed("systemctl is-active hinteros-system.service")
+        assert tree_hash() == before_tree, "/etc/hinteros changed"
+        assert sorted(j["job_id"] for j in jobs()) == baseline_jobs, "a job was started"
+        # No job unit other than the baseline's, no staging copy.
+        started = machine.succeed("systemctl list-units --all --plain --no-legend 'hinteros-job@*' | awk '{print $1}'").split()
+        assert all(s.split("@")[1].split(".")[0] in baseline_jobs for s in started), started
+        machine.fail("test -e /var/lib/hinteros/staging")
+        assert "panicked" not in machine.succeed("journalctl -u hinteros-system.service --no-pager")
+
+    with subtest("the service stayed up and nothing changed"):
+        assert_untouched()
+        assert rpc("hinteros", "system.info")["response"]["result"]["dev"] is False
+
+    with subtest("rate limiting: a burst of mutating requests is cut off"):
+        # Valid in shape, unknown job: not_found when let through, rate_limited when not.
+        codes = [rpc("hinteros", "jobs.cancel", {"job_id": "0123456789abcdef"})["response"]["error"]["code"] for _ in range(15)]
+        print(codes)
+        assert 3006 in codes and 3010 in codes, codes
+        assert set(codes) <= {3006, 3010}, codes
+        r = rpc("hinteros", "jobs.cancel", {"job_id": "0123456789abcdef"})["response"]
+        # Reads are never rate limited.
+        assert "result" in rpc("hinteros", "settings.get")["response"]
+        assert_untouched()
+
+    with subtest("the audit trail has the refusals, and the session user cannot read it"):
+        out = machine.succeed("journalctl -o json --no-pager HINTEROS_AUDIT=1")
+        entries = [json.loads(l) for l in out.splitlines() if l.strip()]
+        decisions = {e.get("HINTEROS_DECISION") for e in entries}
+        print(decisions)
+        # Denials are capped per minute and uid (then summarised), so the rate_limited ones may be
+        # folded into the summary after the hostile run; the invalid ones and the allowed (none here
+        # were mutating) ones must be there.
+        print([e["MESSAGE"] for e in entries if e.get("HINTEROS_DECISION") is None][:3])
+        assert "invalid" in decisions, decisions
+        assert all(e.get("HINTEROS_UID") for e in entries)
+        # The caller's executable comes from its pidfd.
+        assert any("python3" in e.get("HINTEROS_EXE", "") for e in entries), entries[-3:]
+        machine.fail("runuser -u hinteros -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
+  '';
+}
