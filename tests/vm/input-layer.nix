@@ -104,6 +104,21 @@
     assert "ui_guide" in sig and "ui_back" in sig, sig
     assert bc(f"get-property {IP} {CD} {CDI} InterceptMode").split()[-1] == "2"
 
+    # Xbox X/Y (real-hardware report: Y acted as "action", X as "context"). xpad sends BTN_Y for
+    # the top Y button and BTN_X for the left X button; the kernel defines BTN_Y = BTN_WEST (0x134)
+    # and BTN_X = BTN_NORTH (0x133). InputPlumber 0.81 (and upstream main) reads the codes
+    # positionally: Y -> West -> ui_action, X -> North -> ui_context. Its virtual Xbox pad writes
+    # the same codes back, so games see Y as BTN_Y and X as BTN_X: no swap for games. Swapping in
+    # InputPlumber (capability map) would fix the ui_* names but swap X/Y in every game, so the
+    # session daemon has to read ui_action as Y and ui_context as X for Xbox-convention pads.
+    # This pins the behaviour it relies on.
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 0")
+    r, sig = window("Microsoft X-Box 360", ["press BTN_Y", "release BTN_Y", "press BTN_X", "release BTN_X"])
+    assert "| BTN_Y 1" in r and "| BTN_X 1" in r and r.index("| BTN_Y 1") < r.index("| BTN_X 1"), r
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 2")
+    r, sig = window("Microsoft X-Box 360", ["press BTN_Y", "release BTN_Y", "press BTN_X", "release BTN_X"])
+    assert "ui_action" in sig and "ui_context" in sig and sig.index("ui_action") < sig.index("ui_context"), sig
+
     # InputPlumber restarts reset ManageAllDevices (the daemon re-applies it; see its tests).
     machine.succeed("systemctl restart inputplumber.service")
     machine.wait_until_succeeds(f"busctl tree {IP}")
