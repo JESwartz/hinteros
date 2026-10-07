@@ -124,7 +124,7 @@ in
         assert g[0]["rev"] == REV_A, g
         gen1 = g[0]["generation"]
         rev = ok("settings.get")["revision"]
-        assert ok("settings.get")["settings"] == {"base": "unstable", "ssh": {"enabled": False}}
+        assert ok("settings.get")["settings"] == {"base": "unstable", "ssh": {"enabled": False}, "apps": []}
         # No settable fields in API 0.2: an empty change is "nothing to do" (no job), a stale
         # revision is a conflict, any field is invalid.
         assert ok("settings.set", {"revision": rev, "changes": {}}) == {"job_id": None}

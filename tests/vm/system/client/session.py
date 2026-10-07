@@ -22,7 +22,7 @@ def sock_path():
 
 
 class Session:
-    def __init__(self, name="hinteros-launcher", timeout=30):
+    def __init__(self, name="hinteros-launcher", timeout=300):
         self.s = socket.socket(socket.AF_UNIX)
         self.s.settimeout(timeout)
         self.s.connect(sock_path())
@@ -83,7 +83,7 @@ class Session:
         except (socket.timeout, TimeoutError):
             pass
         finally:
-            self.s.settimeout(30)
+            self.s.settimeout(300)
         return not any(m.get("method") == name for m in self.events)
 
 
