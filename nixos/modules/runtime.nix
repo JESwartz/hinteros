@@ -98,6 +98,26 @@ in
       })
 
       (lib.mkIf cfg.bluetooth.enable {
+        # The session daemon pairs controllers over the system bus as the session user. This BlueZ
+        # (bluetooth.conf) lets *every* local user talk to org.bluez, and older ones only
+        # `at_console` users and group `lp`. Pin it: org.bluez is closed to everyone but root (BlueZ
+        # itself) and the session user, whatever BlueZ ships. Later policy wins, hence mkAfter (the
+        # BlueZ package is added to the list by hardware.bluetooth); a user policy beats the default
+        # context.
+        services.dbus.packages = lib.mkAfter [
+          (pkgs.writeTextDir "share/dbus-1/system.d/hinteros-bluez.conf" ''
+            <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+              "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+            <busconfig>
+              <policy context="default">
+                <deny send_destination="org.bluez"/>
+              </policy>
+              <policy user="${user}">
+                <allow send_destination="org.bluez"/>
+              </policy>
+            </busconfig>
+          '')
+        ];
         hardware.bluetooth = {
           enable = true;
           powerOnBoot = true;

@@ -251,6 +251,10 @@ in
         );
       };
       close.timeout_ms = lib.mkDefault 5000;
+      # Runtime settings (API 0.7): the audio client is pactl (PipeWire's PulseAudio server finds
+      # its socket through XDG_RUNTIME_DIR, which the user manager sets). An absolute path: the
+      # user unit's PATH is the profile's, which does not carry it.
+      audio.pactl = lib.mkDefault (lib.getExe' pkgs.pulseaudio "pactl");
     };
 
     users.groups.${cfg.group} = { };
@@ -368,7 +372,13 @@ in
           WAYLAND_DISPLAY = "wayland-0";
         };
         serviceConfig = {
-          ExecStart = "${lib.getExe cfg.session.package} --config ${sessionConfig}";
+          # Under gamescope the daemon sees the same mode files gamescope was started with
+          # (session.nix), so display.modes and display.set_mode find them.
+          ExecStart =
+            lib.optionalString (
+              config.hinteros.session.compositor == "gamescope"
+            ) "${config.hinteros.session.displayEnvWrapper} "
+            + "${lib.getExe cfg.session.package} --config ${sessionConfig}";
           Restart = "on-failure";
           RestartSec = 1;
           NoNewPrivileges = true;

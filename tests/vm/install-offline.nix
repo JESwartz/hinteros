@@ -232,7 +232,7 @@ in
         sock = f"/run/user/{uid}/hinteros/session.sock"
         target.wait_until_succeeds(f"test -S {sock}")
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.6", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "0.7", "client": {"name": "install-test", "version": "0"}}}
         call = {"jsonrpc": "2.0", "id": 1, "method": "apps.list", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, call))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:{sock}"

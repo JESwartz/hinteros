@@ -51,16 +51,16 @@ format modifiers and dma-buf export), so the VM and the `boot` test use
 `hinteros.session.compositor = "cage"` (software rendering). gamescope's `headless` backend
 (`hinteros.session.gamescope.backend = "headless"`) does run on lavapipe, but only simple
 clients render: the `gamescope` test runs it (with `-e`) with the xterm placeholder home app and the session daemon, checks
-`GAMESCOPECTRL_BASELAYER_APPID` with xprop, uses the session socket (API 0.6) for `games.list`, a fake Steam game, `apps.close`, Big Picture and a fake Steam Guard pop-up (`steam_attention`, `steam.focus`), and checks
+`GAMESCOPECTRL_BASELAYER_APPID` with xprop, uses the session socket (API 0.7) for `games.list`, a fake Steam game, `apps.close`, Big Picture and a fake Steam Guard pop-up (`steam_attention`, `steam.focus`), and checks
 by OCR of `gamescopectl screenshot` that the game, then (after SIGUSR1) the placeholder again, is shown. The Flutter launcher stays on cage in VM tests (spike 2).
 `nixosConfigurations.vm-gamescope` is the interactive VM with gamescope for a Vulkan-capable setup.
 On gamescope the launcher runs on native Wayland (`GDK_BACKEND=wayland`, `--expose-wayland`).
 
 The `typing` test (cage, loopback only) runs Firefox on a page with a text and a password field;
-over the session socket (API 0.6) it calls `keys.type` with a URL, `keys.action tab`, `keys.type`
+over the session socket (API 0.7) it calls `keys.type` with a URL, `keys.action tab`, `keys.type`
 with `P@ss-w0rd!` and `keys.action enter`, and checks that the page received exactly those values
 through the daemon's uinput keyboard. It also checks that the daemon started `hinteros-osk`, that
-the OSK connected at 0.6 and that `osk.show`/`osk.hide` answer.
+the OSK connected at 0.7 and that `osk.show`/`osk.hide` answer.
 
 ## Device config, runtime settings and maintenance (M5/M6 groundwork)
 
@@ -84,3 +84,9 @@ the OSK connected at 0.6 and that `osk.show`/`osk.hide` answer.
   (needs systemd-boot); on for the devbox. GC keeps the last `keepGenerations` (5) system
   generations (and boot entries), `nix.optimise`, and `hinteros-disk-check` logs a warning
   (identifier `hinteros-disk-check`, priority 4) below `diskCheck.minFreeGiB`.
+
+## Runtime settings wiring (session API 0.7)
+
+- `pactl` (`pkgs.pulseaudio`) is set as `[audio] pactl` by absolute path; the user manager provides `XDG_RUNTIME_DIR`, which is how it finds `pipewire-pulse`.
+- BlueZ: this BlueZ's `bluetooth.conf` lets every local user call org.bluez (older ones: `at_console`/group `lp`). `runtime.nix` installs `hinteros-bluez.conf` (after BlueZ's): org.bluez is denied by default and allowed for the session user (root is allowed by BlueZ's own policy). The `runtime-settings` test checks both sides with `busctl`.
+- gamescope (real devices, no `-W/-H/-r`): the session command and the daemon unit run through `hinteros.session.displayEnvWrapper`, which sets `GAMESCOPE_PATCHED_EDID_FILE=$XDG_RUNTIME_DIR/gamescope-edid` (gamescope writes `<file>.modes`) and `GAMESCOPE_MODE_SAVE_FILE=$XDG_STATE_HOME/hinteros/gamescope-modes` (`~/.local/state/hinteros/gamescope-modes`, persistent, picked by gamescope at its next start). The daemon reads the same variables. The headless VM test keeps its explicit `-W/-H` through `gamescope.extraArgs`.

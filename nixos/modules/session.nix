@@ -50,9 +50,24 @@ let
     else
       [ (lib.getExe cfg.homeApp) ];
 
+  # Runs its arguments with gamescope's display mode files set (runtime settings, API 0.7):
+  # `GAMESCOPE_PATCHED_EDID_FILE` (gamescope writes the connector's modes next to it, as
+  # `<file>.modes`) in the runtime dir, and `GAMESCOPE_MODE_SAVE_FILE` (the mode the user picked,
+  # which gamescope applies at its next start) in the session user's state dir. The session daemon
+  # runs through it too, so both see the same files. A wrapper, not fixed paths: the uid is only
+  # known at login.
+  displayEnvWrapper = pkgs.writeShellScript "hinteros-display-env" ''
+    state="''${XDG_STATE_HOME:-$HOME/.local/state}/hinteros"
+    ${pkgs.coreutils}/bin/mkdir -p "$state"
+    export GAMESCOPE_PATCHED_EDID_FILE="$XDG_RUNTIME_DIR/gamescope-edid"
+    export GAMESCOPE_MODE_SAVE_FILE="$state/gamescope-modes"
+    exec "$@"
+  '';
+
   sessionCommand = lib.escapeShellArgs (
     [ (lib.getExe' pkgs.coreutils "env") ]
     ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment
+    ++ lib.optional (cfg.compositor == "gamescope") cfg.displayEnvWrapper
     ++ compositorCommand.${cfg.compositor}
     ++ homeCommand
   );
@@ -114,6 +129,14 @@ in
         WLR_RENDERER = "pixman";
       };
       description = "Environment variables set for the compositor.";
+    };
+
+    displayEnvWrapper = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = displayEnvWrapper;
+      internal = true;
+      description = "Wrapper script that sets gamescope's mode file variables for the command it runs.";
     };
 
     gamescope = {

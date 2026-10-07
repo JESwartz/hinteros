@@ -133,6 +133,7 @@
         fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
         config-sync = import ./tests/vm/config-sync.nix { inherit self pkgs; };
         runtime = import ./tests/vm/runtime.nix { inherit self pkgs; };
+        runtime-settings = import ./tests/vm/runtime-settings.nix { inherit self pkgs; };
         hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
