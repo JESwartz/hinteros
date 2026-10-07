@@ -44,7 +44,12 @@
     machine.succeed(f"grep -q 'argv: -silent' {steam_log}")
 
     machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/xterm '", timeout=60)
-    machine.wait_for_text("Fake game", timeout=timedelta(seconds=120))
+    try:
+        machine.wait_for_text("Fake game", timeout=timedelta(seconds=120))
+    except Exception:
+        print("SCREEN:", machine.get_screen_text())
+        print(machine.execute("pgrep -au hinteros | cut -c1-150; journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager | tail -30")[1])
+        raise
     machine.screenshot("fake-game")
   '';
 }

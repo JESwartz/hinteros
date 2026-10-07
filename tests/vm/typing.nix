@@ -1,7 +1,7 @@
 # End-to-end typing under cage (no network, loopback only): the session daemon's uinput
 # keyboard types into a real Firefox kiosk, the way the on-screen keyboard and the launcher's
 # text entry will. Spike 5's test page (a text and a password field that POST every input to a
-# local server) is served from loopback; over the session socket at API 0.4 the test calls
+# local server) is served from loopback; over the session socket at API 0.6 the test calls
 # keys.type "https://example.com/a?b=1", keys.action tab, keys.type "P@ss-w0rd!" and
 # keys.action enter, then checks that the page received exactly those values. Also checks that
 # the daemon started the on-screen keyboard process (hinteros-osk, a second launcher
@@ -91,7 +91,7 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.4", "client": {"name": "typing-test", "version": "0"}}}
+                 "params": {"api_version": "0.6", "client": {"name": "typing-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
         out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
@@ -112,7 +112,7 @@ in
     machine.wait_until_succeeds("pgrep -u hinteros -x hinteros-osk || pgrep -u hinteros -f -- ' --osk'", timeout=60)
     machine.wait_until_succeeds(
         "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
-        "| grep -E 'handshake done client=hinteros-osk .*api_version=0.4'",
+        "| grep -E 'handshake done client=hinteros-osk .*api_version=0.6'",
         timeout=120,
     )
     # It is summoned over the API (the controller chord needs a pad). cage has no overlay, so
