@@ -129,6 +129,19 @@
         assert "error" not in reply, reply
         return reply["result"]
 
+    # Runtime settings wiring: gamescope and the daemon both run with the mode files
+    # (this test still pins -W/-H because the headless backend has no real display).
+    for name, pat in (("gamescope", "/bin/gamescope "), ("hinteros-session", "hinteros-session --config")):
+        pid = machine.succeed(f"pgrep -u hinteros -f '{pat}' | head -n1").strip()
+        penv = machine.succeed(f"tr '\0' '\n' < /proc/{pid}/environ")
+        assert "GAMESCOPE_MODE_SAVE_FILE=/home/hinteros/.local/state/hinteros/gamescope-modes" in penv, (name, penv)
+        assert f"GAMESCOPE_PATCHED_EDID_FILE=/run/user/{uid}/gamescope-edid" in penv, (name, penv)
+    machine.succeed("test -d /home/hinteros/.local/state/hinteros")
+    # display.modes answers under gamescope (modes, or a clean error: the headless backend writes no modes file).
+    modes = call("display.modes")
+    print("display.modes", modes)
+    assert "result" in modes or modes["error"]["data"]["service"] == "display", modes
+
     # A long-lived subscriber, so events can be checked after the fact.
     sub = [
         {"jsonrpc": "2.0", "id": 0, "method": "hello",

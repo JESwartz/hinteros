@@ -17,7 +17,7 @@
   };
 
   testScript = ''
-    from datetime import timedelta
+    import time
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
@@ -43,13 +43,23 @@
     machine.succeed(f"grep -q 'launch: 1000002' {steam_log}")
     machine.succeed(f"grep -q 'argv: -silent' {steam_log}")
 
+    # The window comes from a process that may need a moment to map and be raised over the
+    # launcher, and one OCR pass can miss text that is on screen. So: wait for the process, then
+    # keep taking fresh screenshots (all OCR variants) until "Fake game" is read or the deadline
+    # passes. The assertion is the same as before: the text must be on screen.
     machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/xterm '", timeout=60)
-    try:
-        machine.wait_for_text("Fake game", timeout=timedelta(seconds=120))
-    except Exception:
-        print("SCREEN:", machine.get_screen_text())
-        print(machine.execute("pgrep -au hinteros | cut -c1-150; journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager | tail -30")[1])
-        raise
+    deadline = time.monotonic() + 240
+    texts = []
+    while True:
+        machine.succeed("pgrep -u hinteros -f '/bin/xterm '")  # the window's process must stay up
+        texts = machine.get_screen_text_variants()
+        if any("fake game" in t.lower() for t in texts):
+            break
+        if time.monotonic() > deadline:
+            print("SCREEN:", texts)
+            print(machine.execute("pgrep -au hinteros | cut -c1-150; journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager | tail -30")[1])
+            raise Exception("no 'Fake game' window text on screen before the deadline")
+        machine.sleep(3)
     machine.screenshot("fake-game")
   '';
 }
