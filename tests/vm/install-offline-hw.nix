@@ -21,7 +21,7 @@ let
   '';
   plan = pkgs.writeText "plan.json" (
     builtins.toJSON {
-      disk = "/dev/vdb";
+      disk = "/dev/vdc";
       hostname = "mini-pc-7";
       admin = {
         user = "james";
@@ -44,7 +44,12 @@ in
   nodes.installer =
     { pkgs, ... }:
     {
-      imports = [ (import ./install/installer-node.nix { inherit self pkgs; }) ];
+      imports = [
+        (import ./install/installer-node.nix {
+          inherit self pkgs;
+          isolatedStore = true;
+        })
+      ];
     };
 
   testScript = ''
@@ -54,6 +59,8 @@ in
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
     installer.fail("curl -sS --max-time 3 https://cache.nixos.org/nix-cache-info")
+    # Nothing but lo: this is what turns nix's substitution off on a box without a network.
+    installer.succeed("test \"$(ls /sys/class/net)\" = lo")
     installer.copy_from_host("${plan}", "/tmp/plan.json")
 
     with subtest("the install with an Intel mini PC's hardware report succeeds"):

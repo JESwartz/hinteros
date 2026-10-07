@@ -200,6 +200,7 @@
         hardening-eval = import ./tests/eval/hardening.nix { inherit self pkgs; };
         daemon-eval = import ./tests/eval/daemon.nix { inherit self pkgs; };
         installer-iso-eval = import ./tests/eval/installer-iso.nix { inherit self pkgs; };
+        offline-inputs = import ./tests/eval/offline-inputs.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {

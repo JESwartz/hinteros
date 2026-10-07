@@ -50,7 +50,7 @@ let
 
   plan = pkgs.writeText "plan.json" (
     builtins.toJSON {
-      disk = "/dev/vdb";
+      disk = "/dev/vdc";
       hostname = "livingroom";
       admin = {
         user = "james";
@@ -76,7 +76,12 @@ in
     installer =
       { pkgs, ... }:
       {
-        imports = [ (import ./install/installer-node.nix { inherit self pkgs; }) ];
+        imports = [
+          (import ./install/installer-node.nix {
+            inherit self pkgs;
+            isolatedStore = true;
+          })
+        ];
         # What the test hook module adds to the installed system, so it is in the store.
         system.extraDependencies = [
           pkgs.socat
@@ -112,9 +117,11 @@ in
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
-    installer.succeed("test -b /dev/vdb")
+    installer.succeed("test -b /dev/vdc")
     # No network: the installer must work from its own store.
     installer.fail("curl -sS --max-time 3 https://cache.nixos.org/nix-cache-info")
+    # Nothing but lo: this is what turns nix's substitution off on a box without a network.
+    installer.succeed("test \"$(ls /sys/class/net)\" = lo")
 
     installer.copy_from_host("${plan}", "/tmp/plan.json")
     installer.copy_from_host("${extraModule}", "/tmp/extra-module.nix")

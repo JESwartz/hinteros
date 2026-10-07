@@ -65,22 +65,87 @@ let
     }
   );
 
+  # A device as an install makes it. `configDir` stands in for the /etc/hinteros the installer writes
+  # (the generation snapshot is built from it).
+  deviceConfigDir = pkgs.runCommand "hinteros-device-config" { } ''
+    mkdir $out
+    for f in flake.nix flake.lock state.json; do echo placeholder > $out/$f; done
+  '';
+  mkVariant =
+    {
+      hostname ? "hinteros",
+      user ? "admin",
+      ssh ? false,
+      apps,
+    }:
+    self.lib.mkDevice {
+      state = {
+        schemaVersion = 1;
+        base = "unstable";
+        stateVersion = config.system.nixos.release;
+        settings = {
+          inherit hostname;
+          ssh.enable = ssh;
+          admin.user = user;
+        };
+        disk.layout = "gpt-esp-ext4";
+        inherit apps;
+        profiles = [ ];
+      };
+      configDir = deviceConfigDir;
+    };
+
   # A representative device: the base plus the default apps. Its closure is what the ISO ships;
   # a real install differs from it only in small configuration derivations.
-  defaultDevice = self.lib.mkDevice {
-    state = {
-      schemaVersion = 1;
-      base = "unstable";
-      stateVersion = config.system.nixos.release;
-      settings = {
-        hostname = "hinteros";
-        ssh.enable = false;
-        admin.user = "admin";
-      };
-      disk.layout = "gpt-esp-ext4";
-      apps = appIds.onIso;
-      profiles = [ ];
-    };
+  defaultDevice = mkVariant { apps = appIds.onIso; };
+
+  # Devices an offline install can produce: the system stage (no apps), each app alone and all
+  # of them (the apps stage tries them one by one when the whole set fails), with and without ssh.
+  # The build-time inputs of what they build are put on the ISO (nixos/lib/offline-inputs.nix).
+  offlineInputs = import ../lib/offline-inputs.nix { inherit lib pkgs; };
+  toplevelOf = d: d.config.system.build.toplevel;
+  isoVariants = map (v: toplevelOf (mkVariant v)) (
+    [
+      { apps = [ ]; }
+      {
+        apps = [ ];
+        ssh = true;
+      }
+      {
+        apps = appIds.onIso;
+        ssh = true;
+      }
+    ]
+    ++ map (a: { apps = [ a ]; }) appIds.onIso
+  );
+  isoInputs = offlineInputs.analysis {
+    default = toplevelOf defaultDevice;
+    variants = isoVariants;
+  };
+  # A different set of devices (other host names and users, app pairs) that the flake check
+  # tests against the finished ISO.
+  checkInputs = offlineInputs.analysis {
+    default = toplevelOf defaultDevice;
+    variants = map (v: toplevelOf (mkVariant v)) [
+      {
+        hostname = "livingroom";
+        user = "james";
+        apps = [ ];
+      }
+      {
+        hostname = "tv-2";
+        user = "alex";
+        ssh = true;
+        apps = [
+          "youtube"
+          "firefox"
+        ];
+      }
+      {
+        hostname = "box";
+        apps = lib.take 2 (lib.reverseList appIds.onIso);
+      }
+    ];
   };
 
   # The store paths a derivation is built from, as one file that references them (so they travel
@@ -426,6 +491,16 @@ in
       description = "The flake.lock (as an attrset) written to /etc/hinteros: `hinteros` pinned to this installer's revision.";
     };
 
+    offlineInputs = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      readOnly = true;
+      default = {
+        iso = isoInputs;
+        check = checkInputs;
+      };
+      description = "Analyses of the build-time inputs of offline installs: `iso` is what the ISO carries, `check` is a different set of devices that tests/eval/offline-inputs.nix checks against the finished ISO.";
+    };
+
     ui.command = lib.mkOption {
       type = lib.types.nullOr (lib.types.listOf lib.types.str);
       default = null;
@@ -514,6 +589,7 @@ in
     ]
     ++ buildInputs
     ++ builderInputs
+    ++ offlineInputs.closure isoInputs
     ++ sources;
 
     environment.etc = {

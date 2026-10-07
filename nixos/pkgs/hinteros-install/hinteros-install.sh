@@ -416,7 +416,12 @@ xargs -a "$SOURCES_FILE" nix --extra-experimental-features nix-command copy --no
 
 progress install 36 "Building and installing the system"
 install_flags=(--root "$MNT" --no-root-passwd --no-channel-copy
-  --flake "path:$cfg#hinteros" --no-update-lock-file --log-format internal-json -v)
+  --flake "path:$cfg#hinteros" --no-update-lock-file --log-format internal-json -v
+  # nix turns substitution off as soon as the machine has no network interface with an address
+  # ("you don't have Internet access; disabling some network-dependent features"), local store
+  # substituters included. Without this an offline install on a box without a cable substituted
+  # nothing and tried to build the world from source (bash-5.3.tar.gz and friends).
+  --option substitute true)
 if [ "$online" -eq 0 ]; then
   # Offline: this installer's store is the only substituter. (nixos-install passes its own
   # --extra-substituters before these flags, so the list has to be set, not cleared.)
