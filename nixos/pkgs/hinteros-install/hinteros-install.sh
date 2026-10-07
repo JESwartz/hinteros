@@ -26,6 +26,8 @@ LOG=${HINTEROS_INSTALL_LOG:-/var/log/hinteros-install.log}
 MNT=/mnt
 TARGET_LINK=/dev/hinteros-target
 MIN_DISK_GIB=16
+# Test hook: the command that writes the hardware report (VM tests feed a fixture).
+FACTER=${HINTEROS_INSTALL_FACTER:-nixos-facter}
 
 # Progress goes to the original stdout; anything a tool prints to stdout is moved to stderr.
 exec 3>&1 1>&2
@@ -332,8 +334,17 @@ cfg=$MNT/etc/hinteros
 install -d -m 0755 "$MNT/etc" "$cfg" "$MNT/var/lib/hinteros"
 
 progress facter 22 "Detecting hardware"
-if nixos-facter -o "$cfg/facter.json" >>"$LOG" 2>&1 && jq -e . "$cfg/facter.json" >/dev/null 2>&1; then
-  progress facter 26 "Hardware report written"
+if $FACTER -o "$cfg/facter.json" >>"$LOG" 2>&1 && jq -e . "$cfg/facter.json" >/dev/null 2>&1; then
+  if [ "$online" -eq 1 ]; then
+    progress facter 26 "Hardware report written; it is applied by this install"
+  else
+    # Offline: install exactly the generic system that is on this medium (prebuilt, so nothing
+    # is built). A report changes the system (firmware, microcode, initrd modules, ...), which
+    # then has to be built, and that needs a network. The box applies the report with its first
+    # online rebuild or update (hinteros-facter-release removes the marker once it is online).
+    : >"$cfg/facter.deferred"
+    progress facter 26 "Hardware report written; it is applied by the first rebuild once the box is online"
+  fi
 else
   rm -f "$cfg/facter.json"
   progress facter 26 "Hardware detection failed; continuing with generic hardware support" warn facter-failed
@@ -366,7 +377,7 @@ jq --arg ref "$channel" \
   '.nodes.hinteros.original.ref = $ref | .nodes.hinteros.locked.ref = "refs/heads/" + $ref' \
   "$OFFLINE_LOCK" >"$cfg/flake.lock"
 chmod 0644 "$cfg/flake.nix" "$cfg/flake.lock" "$cfg/state.json"
-[ ! -e "$cfg/facter.json" ] || chmod 0644 "$cfg/facter.json"
+chmod 0644 "$cfg"/facter.*  2>/dev/null || true
 
 # The admin password: a hash in a root-only file the config points at. Never in the store, never
 # in state.json.
@@ -412,10 +423,10 @@ if [ "$online" -eq 0 ]; then
   install_flags+=(--option substituters "auto?trusted=1")
 fi
 
-# nix's internal-json log -> progress lines (copied/built paths of the build). The pipeline runs
-# in a process substitution so `progress` updates this shell's stage and percent; nixos-install's
-# exit status comes back through a file.
-rc_file=$(mktemp)
+# nix's internal-json log -> progress lines (copied/built paths of the build). nixos-install runs in
+# the background writing to its own file; a reader turns that file into progress lines while it
+# runs, and `wait` gives its real exit status (no race with the reader, whatever the reader does).
+NIXLOG=$(mktemp)
 # shellcheck disable=SC2016
 progress_filter='
   foreach (inputs | select(startswith("@nix ")) | .[5:] | fromjson? | select(. != null)) as $e (
@@ -430,19 +441,26 @@ progress_filter='
         | if $pct > .last then .last = $pct | .emit = {percent: $pct, message: "Installing: \($done) of \($exp) steps"} else . end
       else . end;
     select(.emit != null) | .emit)'
+nixos-install "${install_flags[@]}" >"$NIXLOG" 2>&1 </dev/null &
+install_pid=$!
 while IFS= read -r p; do
   progress install "$(printf '%s' "$p" | jq -r .percent)" "$(printf '%s' "$p" | jq -r .message)"
-done < <( { nixos-install "${install_flags[@]}" 2>&1 </dev/null; echo "$?" >"$rc_file"; } \
-  | tee -a "$LOG" | jq -cnR --unbuffered "$progress_filter" )
-install_rc=$(cat "$rc_file")
-rm -f "$rc_file"
+done < <(tail -n +1 -F --pid="$install_pid" "$NIXLOG" 2>/dev/null | jq -cnR --unbuffered "$progress_filter" 2>/dev/null || true)
+install_rc=0
+wait "$install_pid" || install_rc=$?
+cat "$NIXLOG" >>"$LOG"
 if [ "$install_rc" != 0 ]; then
-  echo "--- nix errors from $LOG" >&2
-  { grep -a '^@nix ' "$LOG" | sed 's/^@nix //' \
-      | jq -r 'select(.action == "msg" and .level <= 1) | .msg' 2>/dev/null | tail -n 40 \
-      || tail -n 40 "$LOG"; } >&2 || true
-  fail 1 install-failed "nixos-install failed (exit $install_rc); see $LOG"
+  # nix's own error messages (level 0 and 1 of the internal-json log, else the plain text).
+  errs=$({ sed -n 's/^@nix //p' "$NIXLOG" \
+      | jq -Rr 'fromjson? | select(.action == "msg" and .level <= 1) | .msg' 2>/dev/null \
+      | sed -e 's/\x1b\[[0-9;]*m//g' | grep -a . | tail -n 6; \
+    grep -av '^@nix ' "$NIXLOG" | tail -n 6; } || true)
+  echo "--- nixos-install failed (exit $install_rc); last lines:" >&2
+  printf '%s\n' "$errs" >&2
+  rm -f "$NIXLOG"
+  fail 1 install-failed "nixos-install failed (exit $install_rc): $(printf '%s' "$errs" | tail -n 4 | tr '\n' ' ' | cut -c1-600); see $LOG"
 fi
+rm -f "$NIXLOG"
 progress install 90 "System installed, boot loader written"
 
 # ---------------------------------------------------------------------------------------------

@@ -156,5 +156,37 @@ in
         ExecStart = lib.getExe syncScript;
       };
     };
+
+    # An offline install leaves `facter.deferred` next to the hardware report (see the device
+    # flake template): the report is only applied by a rebuild once the box is online, because
+    # applying it changes the system, which must then be built. Once the cache is reachable the
+    # marker is removed; the next rebuild or update picks the report up.
+    systemd.services.hinteros-facter-release = {
+      description = "Release the deferred hardware report in ${cfg.dir} once online";
+      wantedBy = [ "multi-user.target" ];
+      wants = [ "network-online.target" ];
+      after = [ "network-online.target" ];
+      unitConfig.ConditionPathExists = "${cfg.dir}/facter.deferred";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = lib.getExe (
+          pkgs.writeShellApplication {
+            name = "hinteros-facter-release";
+            runtimeInputs = [
+              pkgs.curl
+              pkgs.coreutils
+            ];
+            text = ''
+              curl -fsS --max-time 10 -o /dev/null https://cache.nixos.org/nix-cache-info
+              rm -f ${lib.escapeShellArg cfg.dir}/facter.deferred
+              echo "online: the hardware report will be applied by the next rebuild"
+            '';
+          }
+        );
+        # Not online yet (a NIC without a link, no internet): try again later.
+        Restart = "on-failure";
+        RestartSec = "10min";
+      };
+    };
   };
 }

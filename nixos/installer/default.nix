@@ -208,6 +208,48 @@ let
     nix = config.nix.package;
   };
 
+  # Copies the install log and what is needed to diagnose a failed install (network, hardware,
+  # journal) to a USB stick's partition.
+  saveLog = pkgs.writeShellApplication {
+    name = "hinteros-save-log";
+    runtimeInputs = [
+      pkgs.util-linux
+      pkgs.coreutils
+      pkgs.networkmanager
+      pkgs.iproute2
+      pkgs.pciutils
+      pkgs.usbutils
+      pkgs.systemd
+      pkgs.kmod
+    ];
+    text = ''
+      if [ $# -ne 1 ] || [ ! -b "$1" ]; then
+        echo "usage: hinteros-save-log /dev/sdX1   (a partition of a second USB stick, not the installer)" >&2
+        lsblk -o NAME,SIZE,FSTYPE,LABEL,MODEL,TRAN >&2
+        exit 2
+      fi
+      mp=$(mktemp -d)
+      mount "$1" "$mp"
+      trap 'umount "$mp"; rmdir "$mp"' EXIT
+      d="$mp/hinteros-diagnostics-$(date +%Y%m%d-%H%M%S)"
+      mkdir -p "$d"
+      cp /var/log/hinteros-install.log "$d/" 2>/dev/null || echo "no install log yet" >"$d/no-install-log"
+      {
+        echo "## nmcli device status"; nmcli device status
+        echo "## nmcli connection show"; nmcli connection show
+        echo "## ip -s link"; ip -s link
+        echo "## lspci -nnk"; lspci -nnk
+        echo "## lsusb"; lsusb
+        echo "## lsblk"; lsblk -o NAME,SIZE,FSTYPE,LABEL,MODEL,TRAN
+        echo "## lsmod"; lsmod
+      } >"$d/hardware-network.txt" 2>&1 || true
+      journalctl -b --no-pager >"$d/journal.txt" 2>&1 || true
+      dmesg >"$d/dmesg.txt" 2>&1 || true
+      sync
+      echo "Saved to $d on $1; it is safe to remove the stick."
+    '';
+  };
+
   examplePlan = pkgs.writeText "plan.example.json" (
     builtins.toJSON {
       disk = "/dev/nvme0n1";
@@ -275,6 +317,10 @@ in
       pkgs.disko
       pkgs.nixos-facter
       pkgs.jq
+      pkgs.pciutils
+      pkgs.usbutils
+      pkgs.ethtool
+      saveLog
     ];
 
     nix.settings.experimental-features = [
@@ -282,8 +328,47 @@ in
       "flakes"
     ];
 
-    networking.networkmanager.enable = true;
-    networking.wireless.enable = lib.mkForce false;
+    # Wired networking needs no UI action: NetworkManager brings up DHCP on any Ethernet link by
+    # itself (this profile matches every Ethernet device and has no interface name), the wired
+    # status the UI shows comes from `nmcli device status`. No second DHCP client (dhcpcd) may
+    # take interfaces away from NetworkManager, which would show them as "connected (externally)".
+    networking = {
+      networkmanager = {
+        enable = true;
+        ensureProfiles.profiles.hinteros-wired = {
+          connection = {
+            id = "Wired";
+            type = "ethernet";
+            autoconnect = "true";
+            autoconnect-priority = "-10";
+          };
+          ipv4.method = "auto";
+          ipv6.method = "auto";
+        };
+      };
+      wireless.enable = lib.mkForce false;
+      dhcpcd.enable = lib.mkForce false;
+      useDHCP = lib.mkForce false;
+    };
+
+    # Firmware for network cards, Wi-Fi, GPUs and the like (linux-firmware is redistributable, not
+    # an app, so `forbidUnfree` does not concern it).
+    hardware.enableRedistributableFirmware = lib.mkForce true;
+    assertions = [
+      {
+        assertion = config.hardware.enableRedistributableFirmware;
+        message = "hinteros installer: the firmware must be on the installer (NICs and Wi-Fi cards need it).";
+      }
+    ];
+
+    # A root console on tty2 (Ctrl+Alt+F2) for diagnostics, whatever tty1 shows.
+    systemd.services."getty@tty2" = {
+      overrideStrategy = "asDropin";
+      serviceConfig.ExecStart = [
+        ""
+        "@${pkgs.util-linux}/sbin/agetty agetty --login-program ${config.services.getty.loginProgram} --autologin root --noclear --keep-baud tty2 115200,38400,9600 $TERM"
+      ];
+    };
 
     # The offline closure.
     system.extraDependencies = [
@@ -311,12 +396,23 @@ in
       `nmtui` first if you want an online install. The disk named in the plan is erased.
       The log is /var/log/hinteros-install.log.
 
+      Something wrong? Press Ctrl+Alt+F2 for a root console (Ctrl+Alt+F1 goes back). To keep the log
+      and what is needed to diagnose a network or hardware problem, plug a SECOND USB stick in
+      (not the installer), find its partition with `lsblk`, and run
+
+        hinteros-save-log /dev/sdX1
+
+      It writes a folder with the install log, `nmcli`, `lspci -nnk`, the journal and dmesg.
+
     '';
 
     services.cage = lib.mkIf (cfg.ui.command != null) {
       enable = true;
       user = "root";
       program = lib.escapeShellArgs cfg.ui.command;
+      # -s: Ctrl+Alt+F2 etc. switch VTs (cage has a logind session on seat0), so a root console on
+      # tty2 is reachable while the UI runs.
+      extraArguments = [ "-s" ];
       environment = {
         # The launcher runs on native Wayland (as on the box); software GL is allowed for machines
         # whose GPU cage cannot use. The fonts are bundled in the launcher.

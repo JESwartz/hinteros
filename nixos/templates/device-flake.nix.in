@@ -9,8 +9,16 @@
     {
       nixosConfigurations.hinteros = hinteros.lib.mkDevice {
         state = builtins.fromJSON (builtins.readFile ./state.json);
-        # Written by `nixos-facter` during the install; the box still boots without it.
-        facterReport = if builtins.pathExists ./facter.json then ./facter.json else null;
+        # Written by `nixos-facter` during the install. An offline install installs the generic
+        # system that is on the installer medium and marks the report `facter.deferred`: a box
+        # that boots on hardware the medium's system was not built for would otherwise need a
+        # build. The marker goes away once the box is online (hinteros-facter-release), and the
+        # next rebuild or update applies the report. The box still boots without it.
+        facterReport =
+          if builtins.pathExists ./facter.json && !builtins.pathExists ./facter.deferred then
+            ./facter.json
+          else
+            null;
         # The snapshot embedded in every generation (flake.nix, flake.lock, state.json).
         configDir = ./.;
         extraModules = [ %EXTRA% ];

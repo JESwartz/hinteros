@@ -109,6 +109,7 @@
         ];
         overlay = overlayModule;
         session = ./nixos/modules/session.nix;
+        generic-hardware = ./nixos/modules/generic-hardware.nix;
         daemon = ./nixos/modules/daemon.nix;
         input = ./nixos/modules/input.nix;
         state = withCatalog ./nixos/modules/state.nix;
@@ -181,6 +182,7 @@
         system-authz = import ./tests/vm/system-authz.nix { inherit self pkgs; };
         system-jobs = import ./tests/vm/system-jobs.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
+        install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
         install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };

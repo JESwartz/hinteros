@@ -4,7 +4,8 @@
 {
   # Decoded state.json (an attrset).
   state,
-  # Path to a nixos-facter report, or null before one exists.
+  # Path to a nixos-facter report, or null: the device then gets generic hardware support
+  # (nixos/modules/generic-hardware.nix), the same on every machine.
   facterReport ? null,
   # The device config dir (flake.nix, flake.lock, state.json) this system is built from; embedded
   # in the toplevel as the generation snapshot. null: the snapshot is just state.json.
@@ -42,5 +43,6 @@ nixpkgsFor.${base}.lib.nixosSystem {
     }
   ]
   ++ nixpkgs.lib.optional (facterReport != null) { hardware.facter.reportPath = facterReport; }
+  ++ nixpkgs.lib.optional (facterReport == null) self.nixosModules.generic-hardware
   ++ extraModules;
 }

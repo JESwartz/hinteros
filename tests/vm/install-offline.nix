@@ -164,7 +164,7 @@ in
 
     with subtest("/etc/hinteros and its snapshot"):
         files = target.succeed("ls /etc/hinteros").split()
-        for f in ("flake.nix", "flake.lock", "state.json", "facter.json"):
+        for f in ("flake.nix", "flake.lock", "state.json", "facter.json", "facter.deferred"):
             assert f in files, files
         state = json.loads(target.succeed("cat /etc/hinteros/state.json"))
         assert state["schemaVersion"] == 1, state

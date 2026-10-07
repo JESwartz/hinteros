@@ -126,13 +126,29 @@ stderr and `/var/log/hinteros-install.log`.
 ext4 root, found by partition label `hinteros-esp` / `hinteros-root`, no encryption; ext4 because
 nothing here needs snapshots, it is the best-tested NixOS root and copes with power cuts at the
 TV); `nixos-facter` writes `facter.json` (a failure only warns: the box then boots with generic
-drivers); write `/etc/hinteros` (`flake.nix` from `nixos/templates/device-flake.nix.in`,
+drivers). An **offline install applies no hardware report**: it installs exactly the generic system
+that is prebuilt on the ISO (`nixos/modules/generic-hardware.nix`: common storage, USB, NVMe and card
+reader modules in the initrd, redistributable firmware, both CPU microcodes) so it builds nothing
+big whatever the machine is, and leaves `facter.deferred` next to `facter.json`; the device flake
+ignores the report while that marker exists, `hinteros-facter-release` removes it once the box is
+online, and the next rebuild or update applies the report. Online installs apply it at once; write `/etc/hinteros` (`flake.nix` from `nixos/templates/device-flake.nix.in`,
 `flake.lock`, `state.json`); write the admin password hash to
 `/var/lib/hinteros/admin-password-hash` (0600, referenced by the config, never in `state.json` or
 the store); `nixos-install --no-root-passwd`; check that `/etc/hinteros` equals the generation's
 snapshot; unmount.
 
 ### Offline installs
+
+Tested by `install-offline-hw`: the installer is fed the report of an Intel mini PC (bare metal, i915,
+NVMe, Realtek and Intel NICs, `tests/vm/fixtures/facter-intel-minipc.json`) through the
+`HINTEROS_INSTALL_FACTER` hook and the install must succeed offline building only configuration
+assemblies (no `bash`, kernel, firmware or microcode builds). A VM's own report changes nothing,
+which is how this bug once passed.
+
+The ISO also has: wired DHCP without any UI action (an Ethernet profile for NetworkManager, no
+dhcpcd), firmware, cage with `-s` so Ctrl+Alt+F2 reaches a root console on tty2 (motd with
+`hinteros-save-log /dev/sdX1`, which copies the install log, `nmcli`, `lspci -nnk`, the journal and
+dmesg to a second USB stick); `installer-ui` tests keys reaching the UI and the VT switch.
 
 The ISO carries the closure of a default system (the base plus the four `onIso` apps in
 `nixos/lib/app-ids.nix`), the sources of this repository and of every flake input it locks, and a
