@@ -271,13 +271,29 @@ let
       dev=$arg
       type=$(lsblk -ndo TYPE "$arg" | head -n1)
       fs=$(blkid -p -o value -s TYPE "$arg" 2>/dev/null || true)
-      if [ "$type" = disk ] && [ -z "$fs" ]; then
+      usable_fs() { case "$1" in vfat | exfat | ntfs | ext4 | ext3 | ext2) return 0 ;; *) return 1 ;; esac; }
+      if [ "$type" = disk ] && ! usable_fs "$fs"; then
+        # A whole stick: the largest writable partition with a filesystem we can write to.
+        # Image filesystems (a stick that once held an ISO) and read-only partitions are skipped.
         dev=""
-        for part in $(lsblk -J -o PATH,TYPE "$arg" | jq -r '.blockdevices[] | select(.type == "part") | .path'); do
-          if [ -n "$(blkid -p -o value -s TYPE "$part" 2>/dev/null)" ]; then dev=$part; break; fi
-        done
-        [ -n "$dev" ] || die "no partition with a filesystem on $arg. Format the stick as FAT32 or exFAT on another computer and try again." 1
-        echo "Using $dev (the first partition of $arg with a filesystem)."
+        best=0
+        seen=""
+        [ -z "$fs" ] || seen="$arg: $fs (whole disk); "
+        while read -r part size; do
+          pfs=$(blkid -p -o value -s TYPE "$part" 2>/dev/null || true)
+          plabel=$(lsblk -ndo LABEL "$part" | head -n1)
+          ro=$(blockdev --getro "$part" 2>/dev/null || echo 0)
+          note=""
+          if [ -z "$pfs" ]; then note="no filesystem"
+          elif ! usable_fs "$pfs"; then note="not supported"
+          elif [ "$ro" = 1 ]; then note="read-only"
+          elif [ "$plabel" = HINTEROS ]; then note="the installer"
+          fi
+          seen="$seen$part: ''${pfs:-none}''${note:+ ($note)}; "
+          if [ -z "$note" ] && [ "$size" -gt "$best" ]; then dev=$part; best=$size; fi
+        done < <(lsblk -b -J -o PATH,TYPE,SIZE "$arg" | jq -r '.blockdevices[] | select(.type == "part") | "\(.path) \(.size)"')
+        [ -n "$dev" ] || die "no usable partition on $arg (needs a writable FAT32, exFAT, NTFS or ext4 partition). Saw: ''${seen:-no partitions}. Format the stick as FAT32 or exFAT on another computer and try again." 1
+        echo "Using $dev, the largest writable partition of $arg (saw: $seen)"
       fi
       fs=$(blkid -p -o value -s TYPE "$dev" 2>/dev/null || true)
       case "$fs" in iso9660 | squashfs) die "$dev is an installer or read-only image ($fs). Use a SECOND USB stick." 2 ;; esac
@@ -331,7 +347,7 @@ let
         die "could not mount $dev as $mtype: $err.$hint" 1
       fi
       if findmnt -no OPTIONS "$mp" | tr ',' '\n' | grep -qx ro; then
-        die "$dev is mounted read-only (a write-protected stick, or a damaged filesystem). Use another stick." 1
+        die "$dev ($fs) was mounted read-only: the stick is write-protected, or its filesystem is marked dirty or damaged. Run a check/repair on it on another computer (Windows: chkdsk), or format it as FAT32 or exFAT." 1
       fi
       probe="$mp/.hinteros-write-test"
       if ! : >"$probe" 2>/dev/null; then
@@ -467,7 +483,13 @@ in
 
     # Firmware for network cards, Wi-Fi, GPUs and the like (linux-firmware is redistributable, not
     # an app, so `forbidUnfree` does not concern it).
-    hardware.enableRedistributableFirmware = lib.mkForce true;
+    # Early microcode (prepended to the initrd) for both CPU vendors: without it some CPUs run with
+    # known errata (e.g. "TSC_DEADLINE disabled due to Errata: please update microcode").
+    hardware = {
+      enableRedistributableFirmware = lib.mkForce true;
+      cpu.intel.updateMicrocode = lib.mkForce true;
+      cpu.amd.updateMicrocode = lib.mkForce true;
+    };
     assertions = [
       {
         assertion = config.hardware.enableRedistributableFirmware;

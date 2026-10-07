@@ -21,6 +21,7 @@
           64 # vdg: FAT labelled HINTEROS
           64 # vdh: swap
           64 # vdi: nothing on it
+          64 # vdj: two partitions, the larger one is picked
         ];
         memorySize = lib.mkForce 3072;
         cores = lib.mkForce 2;
@@ -43,6 +44,11 @@
       mkfs.vfat -n TINY /dev/vdf
       mkfs.vfat -n HINTEROS /dev/vdg
       mkswap /dev/vdh
+      parted -s /dev/vdj mklabel gpt mkpart small 1MiB 10MiB mkpart big 10MiB 100%
+      udevadm settle
+      mkfs.vfat /dev/vdj1
+      mkfs.ext4 -q /dev/vdj2
+      udevadm settle
       udevadm settle
       echo 'fake install log line' > /var/log/hinteros-install.log
       mkdir -p /fill
@@ -71,7 +77,7 @@
         return out
 
     def nothing_mounted():
-        installer.fail("findmnt -rno SOURCE | grep -E '^/dev/vd[c-i]'")
+        installer.fail("findmnt -rno SOURCE | grep -E '^/dev/vd[c-j]'")
 
     # A whole disk: the first partition with a filesystem (exFAT).
     out = run("/dev/vdc")
@@ -91,6 +97,11 @@
     nothing_mounted()
     saved("/dev/vde1", "ntfs3")
 
+    # Two partitions: the larger writable one is used.
+    out = run("/dev/vdj")
+    assert "/dev/vdj2" in out, out
+    nothing_mounted()
+
     # Failures: the message says what is wrong, nothing stays mounted.
     def refused(dev, *words):
         status, out = installer.execute(f"hinteros-save-log {dev} 2>&1")
@@ -100,8 +111,8 @@
         nothing_mounted()
 
     refused("/dev/nope", "no such device")
-    refused("/dev/vdi", "no partition with a filesystem")
-    refused("/dev/vdh", "unsupported filesystem 'swap'", "vfat, exfat, ntfs, ext4")
+    refused("/dev/vdi", "no usable partition")
+    refused("/dev/vdh", "swap (whole disk)", "FAT32, exFAT, NTFS or ext4")
     refused("/dev/vdg", "HINTEROS", "SECOND USB stick")
     refused("/dev/vdf", "not enough space")
     # The disk being installed to is refused (vdb is the target; hinteros-install links it).
@@ -109,6 +120,7 @@
     refused("/dev/vdb", "installer stick or the disk being installed to")
     # A write-protected stick.
     installer.succeed("blockdev --setro /dev/vdd")
+    refused("/dev/vdd", "no usable partition", "/dev/vdd1: vfat (read-only)")
     status, out = installer.execute("hinteros-save-log /dev/vdd1 2>&1")
     assert status != 0 and ("read-only" in out or "could not mount" in out or "cannot write" in out), out
     nothing_mounted()

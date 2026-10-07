@@ -60,11 +60,18 @@ let
         drv=$(printf '%s\n' "$info" | awk -F': ' '/^driver:/{print $2}')
         fw=$(printf '%s\n' "$info" | awk -F': ' '/^firmware-version:/{print $2}')
         bus=$(printf '%s\n' "$info" | awk -F': ' '/^bus-info:/{print $2}')
+        an=$(printf '%s\n' "$et" | awk -F': ' '/Auto-negotiation:/{print $2}')
         eee=$(ethtool --show-eee "$i" 2>/dev/null | awk -F': ' '/EEE status:/{print $2}')
-        echo "$i: state=''${state:-?} carrier=$carrier link=''${link:-?} speed=''${speed:-?}"
+        echo "$i: state=''${state:-?} carrier=$carrier link=''${link:-?} speed=''${speed:-?} autoneg=''${an:-?}"
         echo "    driver=''${drv:-?} fw=''${fw:--} bus=''${bus:--}''${eee:+ EEE=$eee}"
       done
       echo "PCIe ASPM policy: $(sed 's/.*\[\(.*\)\].*/\1/' /sys/module/pcie_aspm/parameters/policy 2>/dev/null)"
+
+      section "Machine and firmware"
+      for f in sys_vendor product_name product_version bios_version bios_date; do
+        printf "%s=%s  " "$f" "$(cat "/sys/class/dmi/id/$f" 2>/dev/null || echo "?")"
+      done
+      echo
 
       section "PCI network devices (lspci -nnk)"
       { lspci -nnk -d ::0200; lspci -nnk -d ::0280; } 2>&1 | grep -v '^$' | fit

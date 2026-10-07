@@ -57,7 +57,7 @@
         installer.succeed(f"modinfo {drv}")
     # The wired profile turns EEE off; Wi-Fi power saving is off.
     installer.succeed("grep -rq 'eee-enabled=0' /etc/NetworkManager/system-connections/ /run/NetworkManager/system-connections/")
-    installer.succeed("grep -rq 'wifi.powersave=2' /etc/NetworkManager/")
+    installer.succeed("grep -q 'wifi.powersave=2' /etc/NetworkManager/NetworkManager.conf")
     # The report runs and fits two screens.
     report = installer.succeed("hinteros-diagnose")
     for want in ["== Links", "== NetworkManager ==", "== Wi-Fi and rfkill ==", "PCI network devices"]:
