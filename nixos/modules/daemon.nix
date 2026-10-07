@@ -221,6 +221,31 @@ in
         };
       };
 
+      osk.autoShow = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          `[osk] auto_show`: show the keyboard when a text field gets focus in a keyboard-profile
+          app. It only has an effect when the Firefox extension is installed
+          (`hinteros.firefoxKiosk.oskExtension`); the daemon always listens on its internal
+          `osk.sock`.
+        '';
+      };
+
+      input.xboxLabelSwap = lib.mkOption {
+        type = lib.types.enum [
+          "auto"
+          "on"
+          "off"
+        ];
+        default = "auto";
+        description = ''
+          `[input] xbox_label_swap`: InputPlumber maps Xbox (xpad) pads positionally, so physical Y
+          arrives as `ui_action` and X as `ui_context`; the daemon swaps them so Y is always the
+          chord button. `auto` detects xpad pads; `on`/`off` force it.
+        '';
+      };
+
       logLevel = lib.mkOption {
         type = lib.types.str;
         default = "info";
@@ -244,8 +269,10 @@ in
       };
       osk = {
         inherit (cfg.osk) enable summon;
+        auto_show = cfg.osk.autoShow;
         command = lib.mkDefault [ "${cfg.osk.package}/bin/hinteros-osk" ];
       };
+      input.xbox_label_swap = lib.mkDefault cfg.input.xboxLabelSwap;
       steam = {
         # Steam's own windows get STEAM_GAME=769 so gamescope can show them (needs gamescope).
         tag_windows = lib.mkDefault true;
