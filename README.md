@@ -147,9 +147,30 @@ assemblies (no `bash`, kernel, firmware or microcode builds). A VM's own report 
 which is how this bug once passed.
 
 The ISO also has: wired DHCP without any UI action (an Ethernet profile for NetworkManager, no
-dhcpcd), firmware, cage with `-s` so Ctrl+Alt+F2 reaches a root console on tty2 (motd with
-`hinteros-save-log /dev/sdX1`, which copies the install log, `nmcli`, `lspci -nnk`, the journal and
-dmesg to a second USB stick); `installer-ui` tests keys reaching the UI and the VT switch.
+dhcpcd), firmware, cage with `-s` so Ctrl+Alt+F2 reaches a root console on tty2 (HinterOS motd;
+sshd is off) and a blank cursor theme for the UI session; `installer-ui` tests keys reaching the UI,
+the tools, the motd and the VT switch.
+
+### Diagnosing a box
+
+Every HinterOS system (devices and the ISO) has `pciutils`, `usbutils`, `ethtool`, `iw`, `lshw`,
+`nixos-facter` and:
+
+- `hinteros-diagnose [--full]`: a report that fits one or two TV screens (photograph it): `ip -br
+  link`, carrier, speed, EEE, driver and firmware per interface (`ethtool`), PCI network devices
+  (`lspci -nnk`), kernel log lines for NIC drivers and firmware loading, `nmcli device` and
+  `general`, Wi-Fi and `rfkill`.
+- `hinteros-save-log /dev/sdX` (ISO): saves the install log, journal, dmesg, the `hinteros-diagnose`
+  output, nmcli, lspci, lsusb, lsblk and a `nixos-facter` report in a timestamped folder on a second
+  USB stick. Give the whole stick or one partition (a whole stick uses its first partition with a
+  filesystem); FAT32, exFAT, NTFS (kernel `ntfs3`) and ext4 work. It refuses the installer stick and
+  the target disk, and says what is wrong when the stick is read-only, full or has another
+  filesystem. Tested by `installer-save-log`.
+
+An Ethernet port that `nmcli device` shows as `unavailable` has no carrier: check the cable and LEDs
+first (`hinteros-diagnose` shows `carrier=0 link=no`). The wired profile turns EEE off and Wi-Fi
+power saving is off (`nixos/modules/network-hardware.nix`); the NIC drivers are all in-tree (r8169
+including RTL8125, igc, e1000e, igb, r8152, ax88179_178a, cdc_ncm, cdc_ether).
 
 The ISO carries the closure of a default system (the base plus the four `onIso` apps in
 `nixos/lib/app-ids.nix`), the sources of this repository and of every flake input it locks, and a
@@ -179,7 +200,7 @@ scripts/dev-override build .#vm
 
 | Path | Contents |
 |---|---|
-| `nixos/modules/` | HinterOS NixOS modules (session, input, daemon, apps, firefox-kiosk, unfree, state, fake-steam, device-config, runtime, maintenance, hardening, disk) |
+| `nixos/modules/` | HinterOS NixOS modules (session, input, daemon, apps, firefox-kiosk, unfree, state, fake-steam, device-config, runtime, maintenance, hardening, disk, diagnostics, network-hardware) |
 | `nixos/lib/` | `mkDevice`, `device-lock.nix` (the offline flake.lock), `app-ids.nix` (app ids and which are on the ISO) |
 | `nixos/installer/`, `nixos/templates/` | The installer environment and ISO config; the `/etc/hinteros/flake.nix` template |
 | `devices/` | Checked-in devices (`devbox`) |

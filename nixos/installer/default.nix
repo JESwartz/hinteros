@@ -208,47 +208,168 @@ let
     nix = config.nix.package;
   };
 
-  # Copies the install log and what is needed to diagnose a failed install (network, hardware,
-  # journal) to a USB stick's partition.
+  # Copies the install log and what is needed to diagnose a failed install or a network/hardware
+  # problem (journal, dmesg, the hinteros-diagnose report, nmcli, lspci, lsusb, a facter report) to
+  # a second USB stick: a whole disk (its first partition with a filesystem is used) or a partition.
   saveLog = pkgs.writeShellApplication {
     name = "hinteros-save-log";
     runtimeInputs = [
       pkgs.util-linux
       pkgs.coreutils
+      pkgs.findutils
+      pkgs.gnugrep
+      pkgs.jq
       pkgs.networkmanager
       pkgs.iproute2
       pkgs.pciutils
       pkgs.usbutils
       pkgs.systemd
       pkgs.kmod
+      pkgs.nixos-facter
+      config.hinteros.diagnostics.package
     ];
     text = ''
-      if [ $# -ne 1 ] || [ ! -b "$1" ]; then
-        echo "usage: hinteros-save-log /dev/sdX1   (a partition of a second USB stick, not the installer)" >&2
+      usage() {
+        echo "usage: hinteros-save-log /dev/sdX    (a whole second USB stick, or one partition: /dev/sdX1)" >&2
+        echo "The stick must not be the installer and not the disk being installed to." >&2
         lsblk -o NAME,SIZE,FSTYPE,LABEL,MODEL,TRAN >&2
-        exit 2
+      }
+      die() { echo "hinteros-save-log: $1" >&2; exit "''${2:-1}"; }
+
+      if [ $# -ne 1 ]; then usage; exit 2; fi
+      arg=$1
+      [ -e "$arg" ] || { usage; die "no such device: $arg" 2; }
+      [ -b "$arg" ] || { usage; die "$arg is not a block device (use /dev/sdX or /dev/sdX1)" 2; }
+      arg=$(readlink -f "$arg")
+
+      # The whole disk a device belongs to.
+      disk_of() {
+        local p
+        p=$(lsblk -ndo PKNAME "$1" 2>/dev/null | head -n1)
+        if [ -n "$p" ]; then echo "/dev/$p"; else echo "$1"; fi
+      }
+
+      argdisk=$(disk_of "$arg")
+      # Refuse the installer stick (where the live system is mounted from, or an ISO filesystem)
+      # and the disk being installed to.
+      refuse_disks=""
+      for m in /iso /run/initramfs/live /nix/.ro-store /nix/store; do
+        src=$(findmnt -no SOURCE "$m" 2>/dev/null | head -n1 | sed 's/\[.*//' || true)
+        if [ -n "$src" ] && [ -b "$src" ]; then refuse_disks="$refuse_disks $(disk_of "$src")"; fi
+      done
+      if [ -e /dev/hinteros-target ]; then refuse_disks="$refuse_disks $(readlink -f /dev/hinteros-target)"; fi
+      for src in $(findmnt -rno SOURCE | grep '^/dev/' || true); do
+        mp=$(findmnt -rno TARGET "$src" | head -n1 || true)
+        case "$mp" in /mnt|/mnt/*) refuse_disks="$refuse_disks $(disk_of "$src")" ;; esac
+      done
+      for r in $refuse_disks; do
+        if [ "$r" = "$argdisk" ]; then die "$argdisk is the installer stick or the disk being installed to. Use a SECOND USB stick." 2; fi
+      done
+
+      # Pick the partition: the device itself when it is a partition (or holds a filesystem), else
+      # the first partition of the disk that has a filesystem.
+      dev=$arg
+      type=$(lsblk -ndo TYPE "$arg" | head -n1)
+      fs=$(blkid -p -o value -s TYPE "$arg" 2>/dev/null || true)
+      if [ "$type" = disk ] && [ -z "$fs" ]; then
+        dev=""
+        for part in $(lsblk -J -o PATH,TYPE "$arg" | jq -r '.blockdevices[] | select(.type == "part") | .path'); do
+          if [ -n "$(blkid -p -o value -s TYPE "$part" 2>/dev/null)" ]; then dev=$part; break; fi
+        done
+        [ -n "$dev" ] || die "no partition with a filesystem on $arg. Format the stick as FAT32 or exFAT on another computer and try again." 1
+        echo "Using $dev (the first partition of $arg with a filesystem)."
       fi
+      fs=$(blkid -p -o value -s TYPE "$dev" 2>/dev/null || true)
+      case "$fs" in iso9660 | squashfs) die "$dev is an installer or read-only image ($fs). Use a SECOND USB stick." 2 ;; esac
+      if [ "$(lsblk -ndo LABEL "$dev" | head -n1)" = HINTEROS ]; then
+        die "$dev is labelled HINTEROS: it is the installer stick. Use a SECOND USB stick." 2
+      fi
+      mounted=$(findmnt -rno TARGET "$dev" 2>/dev/null | head -n1 || true)
+      [ -z "$mounted" ] || die "$dev is already mounted at $mounted. Unmount it first." 2
+
+      case "$fs" in
+        vfat) mtype=vfat ;;
+        exfat) mtype=exfat ;;
+        ntfs) mtype=ntfs3 ;;
+        ext4 | ext3 | ext2) mtype=$fs ;;
+        "") die "no filesystem found on $dev. Format the stick as FAT32 or exFAT on another computer." 1 ;;
+        *) die "unsupported filesystem '$fs' on $dev (supported: vfat, exfat, ntfs, ext4). Format the stick as FAT32 or exFAT on another computer." 1 ;;
+      esac
+
+      # Collect everything in RAM first, so the space needed is known before the stick is touched.
+      st=$(mktemp -d)
       mp=$(mktemp -d)
-      mount "$1" "$mp"
-      trap 'umount "$mp"; rmdir "$mp"' EXIT
-      d="$mp/hinteros-diagnostics-$(date +%Y%m%d-%H%M%S)"
-      mkdir -p "$d"
-      cp /var/log/hinteros-install.log "$d/" 2>/dev/null || echo "no install log yet" >"$d/no-install-log"
+      cleanup() {
+        if mountpoint -q "$mp"; then umount "$mp" 2>/dev/null || { sleep 1; umount "$mp"; } || true; fi
+        rmdir "$mp" 2>/dev/null || true
+        rm -rf "$st"
+      }
+      trap cleanup EXIT
+
+      echo "Collecting diagnostics..."
+      cp /var/log/hinteros-install.log "$st/" 2>/dev/null || echo "no install log yet" >"$st/no-install-log"
+      hinteros-diagnose --full >"$st/hinteros-diagnose.txt" 2>&1 || true
       {
         echo "## nmcli device status"; nmcli device status
+        echo "## nmcli general"; nmcli general
         echo "## nmcli connection show"; nmcli connection show
         echo "## ip -s link"; ip -s link
-        echo "## lspci -nnk"; lspci -nnk
-        echo "## lsusb"; lsusb
         echo "## lsblk"; lsblk -o NAME,SIZE,FSTYPE,LABEL,MODEL,TRAN
         echo "## lsmod"; lsmod
-      } >"$d/hardware-network.txt" 2>&1 || true
-      journalctl -b --no-pager >"$d/journal.txt" 2>&1 || true
-      dmesg >"$d/dmesg.txt" 2>&1 || true
-      sync
-      echo "Saved to $d on $1; it is safe to remove the stick."
+      } >"$st/network-storage.txt" 2>&1 || true
+      lspci -nnk >"$st/lspci.txt" 2>&1 || true
+      lsusb >"$st/lsusb.txt" 2>&1 || true
+      nmcli device status >"$st/nmcli-device.txt" 2>&1 || true
+      journalctl -b --no-pager >"$st/journal.txt" 2>&1 || true
+      dmesg >"$st/dmesg.txt" 2>&1 || true
+      timeout 120 nixos-facter -o "$st/facter.json" >"$st/facter.log" 2>&1 || echo "facter failed or timed out, see facter.log" >&2
+
+      echo "Mounting $dev ($fs)..."
+      if ! err=$(mount -t "$mtype" -o rw,nosuid,nodev,noexec "$dev" "$mp" 2>&1); then
+        hint=""
+        [ "$fs" = ntfs ] && hint=" A stick that Windows did not eject cleanly (or has fast startup on) cannot be mounted: run chkdsk on it, or use another stick."
+        die "could not mount $dev as $mtype: $err.$hint" 1
+      fi
+      if findmnt -no OPTIONS "$mp" | tr ',' '\n' | grep -qx ro; then
+        die "$dev is mounted read-only (a write-protected stick, or a damaged filesystem). Use another stick." 1
+      fi
+      probe="$mp/.hinteros-write-test"
+      if ! : >"$probe" 2>/dev/null; then
+        die "cannot write to $dev (read-only or write-protected stick, or the filesystem is full)." 1
+      fi
+      rm -f "$probe"
+
+      need=$(du -sk "$st" | cut -f1)
+      avail=$(df -Pk "$mp" | awk 'NR==2{print $4}')
+      if [ "$need" -gt "$avail" ]; then
+        die "not enough space on $dev: need $((need / 1024 + 1)) MiB, only $((avail / 1024)) MiB free. Delete files on the stick or use a bigger one." 1
+      fi
+
+      d="$mp/hinteros-diagnostics-$(date +%Y%m%d-%H%M%S)"
+      if ! { mkdir -p "$d" && cp -r "$st"/. "$d"/ && sync; }; then
+        die "writing to $dev failed (no space left, or a failing stick)." 1
+      fi
+      echo "Saved to $(basename "$d") on $dev ($(du -sk "$d" | cut -f1) KiB); unmounting."
+      cleanup
+      trap - EXIT
+      echo "Done: it is safe to remove the stick."
     '';
   };
+
+  # An Xcursor theme whose every cursor is a single transparent pixel.
+  blankCursors = pkgs.runCommand "hinteros-blank-cursors" { nativeBuildInputs = [ pkgs.perl ]; } ''
+    d=$out/share/icons/hinteros-blank
+    mkdir -p $d/cursors
+    perl -e 'print "Xcur", pack("V*", 16, 0x10000, 1, 0xfffd0002, 1, 28, 36, 0xfffd0002, 1, 1, 1, 1, 0, 0, 0, 0)' > $d/cursors/left_ptr
+    printf '[Icon Theme]\nName=hinteros-blank\n' > $d/index.theme
+    for n in default arrow pointer hand hand1 hand2 text xterm ibeam crosshair cross wait watch progress \
+      help question_arrow move grab grabbing fleur not-allowed no-drop forbidden context-menu \
+      all-scroll col-resize row-resize ew-resize ns-resize nesw-resize nwse-resize e-resize w-resize \
+      n-resize s-resize ne-resize nw-resize se-resize sw-resize sb_h_double_arrow sb_v_double_arrow \
+      top_left_arrow left_ptr_watch pointing_hand; do
+      ln -s left_ptr $d/cursors/$n
+    done
+  '';
 
   examplePlan = pkgs.writeText "plan.example.json" (
     builtins.toJSON {
@@ -315,13 +436,16 @@ in
     environment.systemPackages = [
       hinteros-install
       pkgs.disko
-      pkgs.nixos-facter
       pkgs.jq
-      pkgs.pciutils
-      pkgs.usbutils
-      pkgs.ethtool
       saveLog
     ];
+
+    # Mounting a second stick to save logs: FAT32 (vfat) is always there; exFAT and NTFS (the
+    # kernel ntfs3 driver, plus ntfs-3g tools) are what Windows-formatted sticks use.
+    boot.supportedFilesystems = {
+      exfat = true;
+      ntfs = true;
+    };
 
     nix.settings.experimental-features = [
       "nix-command"
@@ -329,22 +453,12 @@ in
     ];
 
     # Wired networking needs no UI action: NetworkManager brings up DHCP on any Ethernet link by
-    # itself (this profile matches every Ethernet device and has no interface name), the wired
+    # itself (network-hardware.nix: a profile that matches every Ethernet device and has no interface name), the wired
     # status the UI shows comes from `nmcli device status`. No second DHCP client (dhcpcd) may
     # take interfaces away from NetworkManager, which would show them as "connected (externally)".
     networking = {
       networkmanager = {
         enable = true;
-        ensureProfiles.profiles.hinteros-wired = {
-          connection = {
-            id = "Wired";
-            type = "ethernet";
-            autoconnect = "true";
-            autoconnect-priority = "-10";
-          };
-          ipv4.method = "auto";
-          ipv6.method = "auto";
-        };
       };
       wireless.enable = lib.mkForce false;
       dhcpcd.enable = lib.mkForce false;
@@ -384,41 +498,59 @@ in
       "hinteros-installer/plan.example.json".source = examplePlan;
     };
 
+    # What the console says (tty2, and tty1 once the installer screens have exited). The stock
+    # installation-device text (empty passwords, ssh) does not apply: sshd is off.
     users.motd = ''
 
       HinterOS installer (revision ${lib.substring 0 8 isoRev})
 
-      No installer screen is running yet. To install from this console, write a plan and run
+      The installer screens are on tty1 (Ctrl+Alt+F1); this console is tty2 (Ctrl+Alt+F2),
+      logged in as root. Remote login is off.
 
-        sudo hinteros-install --plan plan.json
+      Network or hardware problem (for example the wired network says "unavailable")?
 
-      An example plan is in /etc/hinteros-installer/plan.example.json. Connect to Wi-Fi with
-      `nmtui` first if you want an online install. The disk named in the plan is erased.
-      The log is /var/log/hinteros-install.log.
+        hinteros-diagnose              network and hardware report; it fits one or two screens,
+                                       photograph it
+        hinteros-save-log /dev/sdX     save the report, the install log, the journal and a
+                                       hardware report to a SECOND USB stick (not the installer);
+                                       find it with `lsblk`; whole stick or partition, FAT32,
+                                       exFAT, NTFS or ext4
 
-      Something wrong? Press Ctrl+Alt+F2 for a root console (Ctrl+Alt+F1 goes back). To keep the log
-      and what is needed to diagnose a network or hardware problem, plug a SECOND USB stick in
-      (not the installer), find its partition with `lsblk`, and run
+      Wi-Fi: run `nmtui`. Other tools: lspci -nnk, lsusb, ethtool, iw, lshw, nixos-facter.
 
-        hinteros-save-log /dev/sdX1
+      Without the installer screens (they have exited or are not running) install from this
+      console: write a plan (an example is in /etc/hinteros-installer/plan.example.json) and run
 
-      It writes a folder with the install log, `nmcli`, `lspci -nnk`, the journal and dmesg.
+        hinteros-install --plan plan.json
+
+      The disk named in the plan is erased. The log is /var/log/hinteros-install.log.
 
     '';
 
-    services.cage = lib.mkIf (cfg.ui.command != null) {
-      enable = true;
-      user = "root";
-      program = lib.escapeShellArgs cfg.ui.command;
-      # -s: Ctrl+Alt+F2 etc. switch VTs (cage has a logind session on seat0), so a root console on
-      # tty2 is reachable while the UI runs.
-      extraArguments = [ "-s" ];
-      environment = {
-        # The launcher runs on native Wayland (as on the box); software GL is allowed for machines
-        # whose GPU cage cannot use. The fonts are bundled in the launcher.
-        GDK_BACKEND = "wayland";
-        XKB_DEFAULT_LAYOUT = "us";
-        WLR_RENDERER_ALLOW_SOFTWARE = "1";
+    services = {
+      getty.helpLine = lib.mkForce ''
+        HinterOS installer. `hinteros-diagnose` prints a network and hardware report.
+      '';
+      openssh.enable = lib.mkForce false;
+      cage = lib.mkIf (cfg.ui.command != null) {
+        enable = true;
+        user = "root";
+        program = lib.escapeShellArgs cfg.ui.command;
+        # -s: Ctrl+Alt+F2 etc. switch VTs (cage has a logind session on seat0), so a root console on
+        # tty2 is reachable while the UI runs.
+        extraArguments = [ "-s" ];
+        environment = {
+          # The launcher runs on native Wayland (as on the box); software GL is allowed for machines
+          # whose GPU cage cannot use. The fonts are bundled in the launcher.
+          GDK_BACKEND = "wayland";
+          XKB_DEFAULT_LAYOUT = "us";
+          WLR_RENDERER_ALLOW_SOFTWARE = "1";
+          # No visible mouse pointer: a cursor theme whose cursors are one transparent pixel (the
+          # launcher hides its own pointer; this is the backstop for cage and the toolkit).
+          XCURSOR_THEME = "hinteros-blank";
+          XCURSOR_PATH = "${blankCursors}/share/icons";
+          XCURSOR_SIZE = "1";
+        };
       };
     };
 

@@ -42,7 +42,29 @@
     # Firmware is on the installer (NICs, Wi-Fi), and a root console is offered on tty2.
     installer.succeed("ls /run/current-system/firmware | grep -q rtl_nic")
     installer.succeed("systemctl cat getty@tty2.service | grep -q -- '--autologin root'")
-    installer.succeed("grep -q 'Ctrl+Alt+F2' $(grep -o '/nix/store/[^ ]*-motd' /etc/pam.d/login | head -1) && command -v hinteros-save-log")
+    installer.succeed("command -v hinteros-save-log hinteros-diagnose lspci lsusb ethtool iw lshw nixos-facter")
+    motd = installer.succeed("cat $(grep -o '/nix/store/[^ ]*-motd' /etc/pam.d/login | head -1)")
+    for want in ["Ctrl+Alt+F2", "hinteros-diagnose", "hinteros-save-log", "tty1"]:
+        assert want in motd, (want, motd)
+    for stale in ["empty passwords", "No installer screen is running yet", "set a password"]:
+        assert stale not in motd, (stale, motd)
+    installer.fail("grep -q 'empty passwords' /etc/issue")
+    # sshd is off (the ISO's installation-device profile turns it on, the installer module turns
+    # it off again; tests/eval/installer-iso.nix checks the real ISO configuration).
+    installer.fail("systemctl is-active sshd.service")
+    # The NIC drivers a mini PC is likely to have, and the filesystems of a log stick, exist.
+    for drv in ["r8169", "igc", "e1000e", "igb", "r8152", "ax88179_178a", "cdc_ncm", "cdc_ether", "exfat", "ntfs3", "vfat"]:
+        installer.succeed(f"modinfo {drv}")
+    # The wired profile turns EEE off; Wi-Fi power saving is off.
+    installer.succeed("grep -rq 'eee-enabled=0' /etc/NetworkManager/system-connections/ /run/NetworkManager/system-connections/")
+    installer.succeed("grep -rq 'wifi.powersave=2' /etc/NetworkManager/")
+    # The report runs and fits two screens.
+    report = installer.succeed("hinteros-diagnose")
+    for want in ["== Links", "== NetworkManager ==", "== Wi-Fi and rfkill ==", "PCI network devices"]:
+        assert want in report, (want, report)
+    assert len(report.splitlines()) < 110, len(report.splitlines())
+    # No visible pointer in the UI session: cage runs with the blank cursor theme.
+    installer.succeed("tr '\\0' '\\n' < /proc/$(pgrep -u root -f 'hinteros-launcher.*--installer' | head -1)/environ | grep -qx XCURSOR_THEME=hinteros-blank")
 
     installer.wait_for_text("HinterOS", timeout=timedelta(seconds=180))
     installer.screenshot("installer-welcome")

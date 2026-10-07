@@ -175,6 +175,7 @@
         runtime = import ./tests/vm/runtime.nix { inherit self pkgs; };
         runtime-settings = import ./tests/vm/runtime-settings.nix { inherit self pkgs; };
         installer-ui = import ./tests/vm/installer-ui.nix { inherit self pkgs; };
+        installer-save-log = import ./tests/vm/installer-save-log.nix { inherit self pkgs; };
         hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
@@ -192,6 +193,7 @@
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
         hardening-eval = import ./tests/eval/hardening.nix { inherit self pkgs; };
         daemon-eval = import ./tests/eval/daemon.nix { inherit self pkgs; };
+        installer-iso-eval = import ./tests/eval/installer-iso.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {

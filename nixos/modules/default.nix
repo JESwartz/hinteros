@@ -15,5 +15,7 @@
     ./disk.nix
     ./hardening.nix
     ./branding.nix
+    ./diagnostics.nix
+    ./network-hardware.nix
   ];
 }
