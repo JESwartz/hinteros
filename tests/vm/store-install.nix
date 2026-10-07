@@ -1,4 +1,4 @@
-# The Store backend, session API 0.8 / system API 0.3, through the real chain: a client of the
+# The Store backend, session API 0.9 / system API 0.3, through the real chain: a client of the
 # session socket (as the launcher would be) -> the session daemon's relay -> hinteros-system
 # (seat0 owner, polkit `org.hinteros.system.apps` granted to the hinteros group, rate limit,
 # audit) -> a job unit as root -> state.json, terms-accepted.json, the switch, and the removal of
@@ -96,11 +96,16 @@ in
     machine.succeed(f"nix-env -p /nix/var/nix/profiles/system --set {orig}")
     machine.succeed(f"echo {variant} > /run/stub/toplevel")
 
+    with subtest("no Steam tile while Steam is not installed (steam is not in state.json)"):
+        assert "steam" not in json.loads((machine.succeed("cat /etc/hinteros/state.json"))).get("apps", []), "fixture has steam"
+        ids = [a["id"] for a in ok("apps.list")["apps"]]
+        assert "steam" not in ids, ids
+
     with subtest("store.list shows the catalog with terms texts on this box"):
         r = ok("store.list")
         assert r["index_version"] == 2 and r["more_after_update"] is False, r
         apps = {a["id"]: a for a in r["apps"]}
-        assert set(apps) == {"crunchyroll", "firefox", "jellyfin", "moonlight", "plex-htpc", "steam", "youtube"}, list(apps)
+        assert set(apps) == {"crunchyroll", "firefox", "jellyfin", "moonlight", "plex-htpc", "steam", "vacuum-tube", "youtube"}, list(apps)
         assert all(a["state"] == "available" for a in apps.values()), apps
         t = apps["plex-htpc"]["terms"]
         assert t["version"] == "2025-10-30" and t["file"].startswith("/run/current-system/sw/share/hinteros/terms/"), t

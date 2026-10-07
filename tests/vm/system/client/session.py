@@ -1,4 +1,4 @@
-"""Client for the session daemon's socket (API 0.8), run inside the test VMs as the session user.
+"""Client for the session daemon's socket (API 0.9), run inside the test VMs as the session user.
 
 Library: Session(name) says hello, `send` starts a request without waiting (responses may come
 out of order, and `system.ssh.set` waits for the admin password), `response(id)` and `event(name)`
@@ -13,7 +13,7 @@ import socket
 import sys
 import time
 
-VERSION = "0.8"
+VERSION = "0.9"
 
 
 def sock_path():

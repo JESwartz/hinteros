@@ -61,17 +61,16 @@
     machine.wait_for_text("HinterOS", timeout=timedelta(seconds=120))
     machine.screenshot("launcher")
 
-    # The real launcher reached the real daemon: the home screen shows the built-in Steam tile
-    # and the Games row (not the connecting, unreachable or version-mismatch notices), and the
-    # daemon logged a successful 0.8 handshake from the launcher.
-    machine.wait_for_text("Steam", timeout=timedelta(seconds=120))
+    # The real launcher reached the real daemon: the home screen shows the Games row
+    # (not the connecting, unreachable or version-mismatch notices), and the
+    # daemon logged a successful 0.9 handshake from the launcher.
     machine.wait_for_text("Games", timeout=timedelta(seconds=60))
     screen = machine.get_screen_text()
     for bad in ("Can't reach", "versions don't match", "Connecting to the"):
         assert bad.lower() not in screen.lower(), f"launcher shows a connection notice ({bad}): {screen}"
     machine.wait_until_succeeds(
         "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
-        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.8'"
+        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.9'"
     )
 
     # System service: socket in /run/hinteros, root:hinteros 0660, answers the API.
@@ -86,6 +85,13 @@
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros"
-    assert rpc(sock, "0.8", as_user="hinteros") == "hinteros-session"
+    assert rpc(sock, "0.9", as_user="hinteros") == "hinteros-session"
+
+    # Steam is not installed in this VM: the daemon lists no built-in Steam tile.
+    apps_call = {"jsonrpc": "2.0", "id": 3, "method": "apps.list", "params": {}}
+    payload = "".join(json.dumps(m) + "\n" for m in (hello_msg("0.9"), apps_call))
+    out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(f'(printf %s {shlex.quote(payload)}; sleep 1) | socat -t2 - UNIX-CONNECT:{sock}')}")
+    listed = next(r for r in map(json.loads, out.splitlines()) if r.get("id") == 3)
+    assert "steam" not in [a["id"] for a in listed["result"]["apps"]], listed
   '';
 }

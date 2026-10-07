@@ -1,11 +1,12 @@
 # End-to-end typing under cage (no network, loopback only): the session daemon's uinput
 # keyboard types into a real Firefox kiosk, the way the on-screen keyboard and the launcher's
 # text entry will. Spike 5's test page (a text and a password field that POST every input to a
-# local server) is served from loopback; over the session socket at API 0.8 the test calls
+# local server) is served from loopback; over the session socket at API 0.9 the test calls
 # keys.type "https://example.com/a?b=1", keys.action tab, keys.type "P@ss-w0rd!" and
 # keys.action enter, then checks that the page received exactly those values. Also checks that
 # the daemon started the on-screen keyboard process (hinteros-osk, a second launcher
-# entrypoint) and that osk.show / osk.hide answer.
+# entrypoint), that osk.show / osk.hide answer, and that the OSK Firefox extension is active in
+# the kiosk profile and a focused text field makes the daemon show the keyboard (osk_visibility).
 # Not covered here (the daemon's own tests do): keyboard-profile arrow keys from a fake
 # InputPlumber, gamescope's input method, the overlay (cage has neither).
 { self, pkgs }:
@@ -72,7 +73,10 @@ in
         serviceConfig.ExecStart = "${lib.getExe pkgs.python3} ${server}";
       };
 
-      environment.systemPackages = [ pkgs.socat ];
+      environment.systemPackages = [
+        pkgs.socat
+        pkgs.jq
+      ];
       virtualisation.memorySize = lib.mkForce 4096;
     };
 
@@ -91,7 +95,7 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.8", "client": {"name": "typing-test", "version": "0"}}}
+                 "params": {"api_version": "0.9", "client": {"name": "typing-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
         out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
@@ -112,7 +116,7 @@ in
     machine.wait_until_succeeds("pgrep -u hinteros -x hinteros-osk || pgrep -u hinteros -f -- ' --osk'", timeout=60)
     machine.wait_until_succeeds(
         "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
-        "| grep -E 'handshake done client=hinteros-osk .*api_version=0.8'",
+        "| grep -E 'handshake done client=hinteros-osk .*api_version=0.9'",
         timeout=120,
     )
     # It is summoned over the API (the controller chord needs a pad). cage has no overlay, so
@@ -120,12 +124,34 @@ in
     assert call("osk.show") == {"visible": True}
     assert call("osk.hide") == {"visible": False}
 
+    # A subscriber for osk_visibility, to see the automatic keyboard (Firefox extension -> native
+    # host -> osk.sock -> daemon; Firefox ESR with the extension force-installed by policy).
+    sub = [
+        {"jsonrpc": "2.0", "id": 0, "method": "hello",
+         "params": {"api_version": "0.9", "client": {"name": "typing-test-events", "version": "0"}}},
+        {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"events": ["osk_visibility"]}},
+    ]
+    sub_payload = "".join(json.dumps(m) + "\n" for m in sub)
+    machine.succeed(
+        f"runuser -u hinteros -- sh -c {shlex.quote(f'(printf %s {shlex.quote(sub_payload)}; sleep 3000) | socat - UNIX-CONNECT:{sock} > /tmp/osk-events.log 2>&1 &')}"
+        " ; sleep 1"
+    )
+
     # Firefox on the test page (the firefox app: kiosk profile, fullscreen by the compositor), text field focused.
     call("apps.launch", {"id": "firefox"})
     machine.wait_until_succeeds("pgrep -u hinteros -f -- '--profile'", timeout=60)
     machine.wait_for_text("typing test", timeout=timedelta(seconds=180))
     machine.wait_until_succeeds("grep -F '\"focus\"' /tmp/posted.log | grep -F '\"t\"'", timeout=60)
     machine.screenshot("typing-before")
+
+    # The extension is installed and active in the kiosk profile (policy force-install on ESR)...
+    machine.wait_until_succeeds(
+        "jq -e '.addons[] | select(.id == \"hinteros-osk@hinteros\" and .active == true)' "
+        "/home/hinteros/.local/share/hinteros/firefox/firefox/extensions.json",
+        timeout=120,
+    )
+    # ...and the text field's focus reached the daemon, which showed the keyboard by itself.
+    machine.wait_until_succeeds("grep -F '\"visible\":true' /tmp/osk-events.log", timeout=120)
 
     # Type a URL, Tab to the password field, type a password with symbols, press Enter.
     URL = "https://example.com/a?b=1"
