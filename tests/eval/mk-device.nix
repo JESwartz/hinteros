@@ -45,7 +45,43 @@ let
   c = (mk good).config;
   minimal = (mk { schemaVersion = 1; }).config;
 
+  # A device with a real hardware report: facter must not add a second DHCP client.
+  withFixture =
+    f:
+    (self.lib.mkDevice {
+      state = good;
+      facterReport = f;
+      extraModules = [ { system.stateVersion = "25.11"; } ];
+    }).config;
+  noDhcp =
+    f:
+    let
+      cfg = withFixture f;
+    in
+    [
+      cfg.networking.networkmanager.enable
+      cfg.networking.useDHCP
+      cfg.networking.dhcpcd.enable
+      (cfg.systemd.services ? dhcpcd)
+      (lib.filterAttrs (_: i: i.useDHCP != null) cfg.networking.interfaces)
+    ];
+  noDhcpExpected = [
+    true
+    false
+    false
+    false
+    { }
+  ];
+
   results = lib.runTests {
+    testFacterM900NoSecondDhcp = {
+      expr = noDhcp (self + "/tests/vm/fixtures/facter-lenovo-m900.json");
+      expected = noDhcpExpected;
+    };
+    testFacterIntelMinipcNoSecondDhcp = {
+      expr = noDhcp (self + "/tests/vm/fixtures/facter-intel-minipc.json");
+      expected = noDhcpExpected;
+    };
     testGoodHasNoFailures = {
       expr = failures good;
       expected = "";

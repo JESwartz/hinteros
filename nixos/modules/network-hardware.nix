@@ -17,6 +17,18 @@
     { hardware.enableRedistributableFirmware = lib.mkDefault true; }
 
     (lib.mkIf config.networking.networkmanager.enable {
+      # NetworkManager owns all networking. nixos-facter's networking module (nixpkgs
+      # hardware/facter/networking) would otherwise set `networking.useDHCP = true` and
+      # `networking.interfaces.<detected>.useDHCP = true`, which starts dhcpcd (and per-interface
+      # network-link/network-addresses units) next to NetworkManager: two DHCP clients on one
+      # interface. Its own switch, `hardware.facter.detected.dhcp.enable`, drops both; the
+      # globals are forced off too, so nothing else can bring a second client back.
+      hardware.facter.detected.dhcp.enable = lib.mkForce false;
+      networking = {
+        useDHCP = lib.mkForce false;
+        dhcpcd.enable = lib.mkForce false;
+      };
+
       networking.networkmanager = {
         wifi.powersave = lib.mkDefault false;
         ensureProfiles.profiles.hinteros-wired = {

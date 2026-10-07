@@ -193,6 +193,9 @@ in
                   print("M900-CONTROL:   ", n[33:])
               print("M900-CONTROL: not built with the marker but in the generic system's closure:", sorted(set(b0))[:40])
               assert applied != with_marker
+              # NetworkManager owns networking: facter must not add dhcpcd or per-interface units.
+              dhcp = [n for n in b1 + extra if re.search(r"dhcpcd|eno1|network-link|network-addresses", n)]
+              assert not dhcp, dhcp
               assert extra, applied[-2000:]
         ''
       else
