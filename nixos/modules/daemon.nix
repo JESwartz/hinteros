@@ -307,8 +307,11 @@ in
       # The cage fallback (VM) has no gamescope to drive.
       gamescope = {
         enable = lib.mkDefault (config.hinteros.session.compositor == "gamescope");
-        # gamescope's Xwayland and Wayland socket; a user service does not inherit them.
-        display = lib.mkDefault ":0";
+        # gamescope's Xwayland and Wayland socket; a user service does not inherit them. "auto": the
+        # session user's lowest live X display (a switch can leave :0 to the previous session).
+        display = lib.mkDefault (
+          if config.hinteros.session.compositor == "gamescope" then "auto" else ":0"
+        );
         wayland_display = lib.mkDefault (
           if config.hinteros.session.compositor == "gamescope" then "gamescope-0" else "wayland-0"
         );
