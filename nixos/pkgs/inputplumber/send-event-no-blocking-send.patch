@@ -1,0 +1,42 @@
+CompositeDevice.SendEvent: await the command instead of blocking_send
+
+InputPlumber 0.81.0 (and master as of 2026-10, ea60d87) handles the D-Bus
+method SendEvent, an async zbus method running on a tokio worker, with
+CompositeDeviceClient::blocking_write_send_event, i.e. tokio's
+mpsc::Sender::blocking_send. That panics inside a runtime:
+
+  thread 'tokio-runtime-worker' panicked at
+  src/input/composite_device/client.rs:463:14:
+  Cannot block the current thread from within a runtime
+
+zbus runs each method call in its own task, so the panic kills only that
+call, which never gets a reply: every SendEvent (HinterOS: the RT left
+click in keyboard-mode web apps) hangs its caller. Introduced upstream by
+7e76eb5 "fix(CompositeDevice): migrate to using composite device client"
+(2024-06-27); not fixed upstream yet. The async write_send_event that this
+uses already exists (it sends the same CompositeCommand::WriteSendEvent).
+Upstream: https://github.com/ShadowBlip/InputPlumber
+(src/dbus/interface/composite_device.rs, fn send_event).
+
+--- a/src/dbus/interface/composite_device.rs
++++ b/src/dbus/interface/composite_device.rs
+@@ -281,7 +281,8 @@
+         let event = NativeEvent::new(cap, val);
+ 
+         self.composite_device
+-            .blocking_write_send_event(event)
++            .write_send_event(event)
++            .await
+             .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+ 
+         Ok(())
+--- a/src/input/composite_device/client.rs
++++ b/src/input/composite_device/client.rs
+@@ -458,6 +458,7 @@
+ 
+     /// Write the given event to the appropriate target device, bypassing intercept
+     /// logic. (blocking)
++    #[allow(dead_code)]
+     pub fn blocking_write_send_event(&self, event: NativeEvent) -> Result<(), ClientError> {
+         self.tx
+             .blocking_send(CompositeCommand::WriteSendEvent(event))?;

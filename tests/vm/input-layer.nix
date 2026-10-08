@@ -119,6 +119,31 @@
     r, sig = window("Microsoft X-Box 360", ["press BTN_Y", "release BTN_Y", "press BTN_X", "release BTN_X"])
     assert "ui_action" in sig and "ui_context" in sig and sig.index("ui_action") < sig.index("ui_context"), sig
 
+    # The keyboard-profile pointer, as the session daemon drives it: a profile loaded at runtime,
+    # GAMEPAD_ONLY, and RT clicks through SendEvent. Unpatched, InputPlumber 0.81 panics in
+    # SendEvent ("Cannot block the current thread from within a runtime",
+    # composite_device/client.rs:463) and never answers: busctl times out. nixos/overlay.nix
+    # patches it; the click must answer at once and reach the virtual mouse.
+    yaml = "version: 1\nkind: DeviceProfile\nname: HinterOS pointer\nmapping: []\n"
+    bc(f"--timeout=5 call {IP} {CD} {CDI} LoadProfileFromYaml s {shlex.quote(yaml)}")
+    assert "HinterOS pointer" in bc(f"get-property {IP} {CD} {CDI} ProfileName")
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 3")
+    machine.execute("rm -f /tmp/r.txt")
+    machine.execute("(python3 /etc/reader.py 'InputPlumber Mouse' 30 > /tmp/r.txt 2>&1 &)")
+    machine.sleep(2)
+    bc(f"--timeout=5 call {IP} {CD} {CDI} SendEvent sv Mouse:Button:Left b true")
+    bc(f"--timeout=5 call {IP} {CD} {CDI} SendEvent sv Mouse:Button:Left b false")
+    machine.sleep(2)
+    r = machine.succeed("cat /tmp/r.txt; pkill -f '[r]eader.py'; true")
+    assert "InputPlumber Mouse" in r.splitlines()[0], r
+    assert "BTN_MOUSE 1" in r and "BTN_MOUSE 0" in r, r
+    # Still alive and answering: the profile goes back, ALL again, Guide still a signal.
+    bc(f"--timeout=5 call {IP} {CD} {CDI} LoadProfileFromYaml s {shlex.quote(yaml.replace('HinterOS pointer', 'Default'))}")
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 2")
+    r, sig = window("Microsoft X-Box 360", ["press BTN_MODE", "release BTN_MODE"])
+    assert "ui_guide" in sig, sig
+    machine.fail("journalctl -u inputplumber.service | grep -q panicked")
+
     # InputPlumber restarts reset ManageAllDevices (the daemon re-applies it; see its tests).
     machine.succeed("systemctl restart inputplumber.service")
     machine.wait_until_succeeds(f"busctl tree {IP}")
