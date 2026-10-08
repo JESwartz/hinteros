@@ -10,8 +10,22 @@
   # hook (a real machine's report; a VM's own report changes nothing), and the test name.
   facterFixture ? null,
   name ? "hinteros-install-offline",
+  # The plan's apps, the ones expected to fail in the apps stage (the rest must be installed), and
+  # whether the apps stage is told it is online (HINTEROS_INSTALL_ONLINE_APPS: there is no network
+  # here, so an online-only app cannot be downloaded).
+  apps ? [
+    "youtube"
+    "firefox"
+  ],
+  failedApps ? [ ],
+  onlineAppsHook ? false,
+  # An earlier HinterOS install (labelled partitions, a file system with files) on the target
+  # disk before the installer runs.
+  staleTarget ? false,
 }:
 let
+  hookEnv = pkgs.lib.optionalString onlineAppsHook "HINTEROS_INSTALL_ONLINE_APPS=1 ";
+  installedApps = builtins.filter (a: !(builtins.elem a failedApps)) apps;
   withReport = facterFixture != null;
   facterStub = pkgs.writeShellScript "facter-stub" ''
     [ "$1" = -o ] && cp ${facterFixture} "$2"
@@ -59,10 +73,7 @@ let
       ssh.enable = true;
       channel = "stable";
       base = "unstable";
-      apps = [
-        "youtube"
-        "firefox"
-      ];
+      inherit apps;
       acceptedTerms = { };
     }
   );
@@ -126,9 +137,29 @@ in
     installer.copy_from_host("${plan}", "/tmp/plan.json")
     installer.copy_from_host("${extraModule}", "/tmp/extra-module.nix")
 
+    ${
+      if staleTarget then
+        ''
+          with subtest("an old HinterOS install is on the target disk"):
+              installer.succeed(
+                  "parted -s /dev/vdc mklabel gpt mkpart hinteros-esp fat32 1MiB 1GiB set 1 esp on mkpart hinteros-root ext4 1GiB 100%",
+                  "udevadm settle",
+                  "mkfs.vfat -n HINTEROSESP /dev/vdc1",
+                  "mkfs.ext4 -q -L oldroot /dev/vdc2",
+                  "mkdir -p /tmp/old && mount /dev/vdc2 /tmp/old",
+                  "mkdir -p /tmp/old/etc/hinteros /tmp/old/nix/store/stale-path",
+                  "echo old-box > /tmp/old/etc/hostname; echo stale > /tmp/old/stale-marker",
+                  "echo '{\"stale\": true}' > /tmp/old/etc/hinteros/state.json",
+                  "umount /tmp/old",
+              )
+        ''
+      else
+        ""
+    }
+
     with subtest("hinteros-install runs and reports progress"):
         installer.succeed(
-            "(HINTEROS_INSTALL_ALLOW_BIOS=1 ${facterEnv}HINTEROS_INSTALL_EXTRA_MODULE=/tmp/extra-module.nix "
+            "(HINTEROS_INSTALL_ALLOW_BIOS=1 ${hookEnv}${facterEnv}HINTEROS_INSTALL_EXTRA_MODULE=/tmp/extra-module.nix "
             "timeout 1500 hinteros-install --plan /tmp/plan.json >/tmp/install.out 2>/tmp/install.stderr; "
             "echo $? >/tmp/install.rc) </dev/null >/dev/null 2>&1 &"
         )
@@ -140,7 +171,8 @@ in
             installer.sleep(30)
             print(installer.execute("tail -n 3 /tmp/install.out; tail -n 2 /var/log/hinteros-install.log | cut -c1-300")[1])
         out = installer.succeed("cat /tmp/install.out")
-        status = 0 if '"stage":"done"' in out.splitlines()[-1] else 1
+        rc = int(installer.succeed("cat /tmp/install.rc").strip())
+        status = 0 if rc == 0 and '"stage":"done"' in out.splitlines()[-1] else 1
         lines = [json.loads(l) for l in out.splitlines() if l.strip()]
         for l in lines:
             print(l)
@@ -156,7 +188,30 @@ in
         for l in lines:
             if l["stage"] not in stages:
                 stages.append(l["stage"])
-        assert stages == ["validate", "partition", "facter", "config", "install", "snapshot", "finalize", "done"], stages
+        assert stages == ["validate", "partition", "facter", "config", "install", "snapshot", ${
+          if apps != [ ] then ''"apps", '' else ""
+        }"finalize", "done"], stages
+        # Two phases: up to the snapshot is the system stage, then the apps stage.
+        assert all(l["phase"] in ("system", "apps") for l in lines), lines
+        assert all(l["phase"] == "system" for l in lines if l["stage"] in ("validate", "partition", "facter", "config", "install", "snapshot")), lines
+        ${
+          if apps != [ ] then
+            ''assert any(l["phase"] == "apps" and l["stage"] == "apps" for l in lines), lines''
+          else
+            "pass"
+        }
+        expected_failed = json.loads('${builtins.toJSON failedApps}')
+        assert lines[-1]["failed_apps"] == expected_failed, lines[-1]
+        warned = [l["app"] for l in lines if l.get("code") == "app-failed"]
+        assert warned == expected_failed, (warned, lines)
+        assert all(l["level"] == "warn" and l["phase"] == "apps" and l.get("message") for l in lines if l.get("code") == "app-failed"), lines
+        # A failed build leaves its nix error messages and build log in the install log.
+        ${
+          if failedApps != [ ] then
+            ''assert "=== nix error messages" in installer.succeed("cat /var/log/hinteros-install.log"), "no failure log"''
+          else
+            "pass"
+        }
         assert any("Offline install" in l["message"] for l in lines), lines
 
     ${
@@ -227,6 +282,17 @@ in
         target.succeed("pgrep -u hinteros -f hinteros-launcher")
         target.screenshot("installed-session")
 
+    ${
+      if staleTarget then
+        ''
+          with subtest("nothing of the old install is left"):
+              target.fail("test -e /stale-marker")
+              target.fail("test -e /nix/store/stale-path")
+              assert target.succeed("hostname").strip() == "livingroom"
+        ''
+      else
+        ""
+    }
     with subtest("accepted terms are recorded (none for these apps)"):
         assert target.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
         assert json.loads(target.succeed("cat /var/lib/hinteros/terms-accepted.json")) == {}
@@ -243,7 +309,7 @@ in
         }
         state = json.loads(target.succeed("cat /etc/hinteros/state.json"))
         assert state["schemaVersion"] == 1, state
-        assert state["apps"] == ["youtube", "firefox"], state
+        assert state["apps"] == json.loads('${builtins.toJSON installedApps}'), state
         assert state["settings"]["ssh"]["enable"] is True, state
         assert state["settings"]["admin"] == {"user": "james"}, state
         assert state["settings"]["hostname"] == "livingroom", state
@@ -321,8 +387,9 @@ in
         apps = next(r for r in replies if r.get("id") == 1)["result"]["apps"]
         ids = [a["id"] for a in apps]
         print(ids)
-        assert "youtube" in ids and "firefox" in ids, ids
-        for absent in ("jellyfin", "crunchyroll", "plex-htpc", "moonlight"):
+        for present in json.loads('${builtins.toJSON installedApps}'):
+            assert present in ids, (present, ids)
+        for absent in [a for a in ("jellyfin", "youtube", "crunchyroll", "firefox", "plex-htpc", "moonlight", "steam") if a not in json.loads('${builtins.toJSON installedApps}')]:
             assert absent not in ids, ids
 
     target.shutdown()

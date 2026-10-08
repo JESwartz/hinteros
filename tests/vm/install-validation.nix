@@ -173,6 +173,20 @@ in
         refused("in-use-disk", "disk-in-use")
         installer.succeed("umount /tmp/target")
 
+    with subtest("another disk with HinterOS partition labels is refused"):
+        # The system finds its disks by partition label; a second disk with the same labels (an old
+        # install, a USB stick) would be ambiguous, also for the partitioning script.
+        installer.succeed("parted -s /dev/vdc mklabel gpt mkpart hinteros-root ext4 1MiB 100%")
+        installer.succeed("udevadm settle")
+        refused("ok", "other-hinteros-disk")
+        installer.succeed("wipefs -a /dev/vdc")
+        installer.succeed("udevadm settle")
+        status, lines = run("ok", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+        assert status == 0, lines
+        # Every line says which phase it is in; validation is the system stage.
+        assert all(l.get("phase") == "system" for l in lines), lines
+        assert lines[-1]["failed_apps"] == [], lines[-1]
+
     with subtest("malformed fields"):
         refused("bad-hostname", "hostname-invalid")
         refused("bad-user", "admin-user-reserved")

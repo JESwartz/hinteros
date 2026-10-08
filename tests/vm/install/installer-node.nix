@@ -40,6 +40,7 @@
   environment.systemPackages = [
     pkgs.util-linux
     pkgs.parted
+    pkgs.dosfstools
     pkgs.e2fsprogs
   ];
 

@@ -33,7 +33,7 @@ one consistent system.
 | `nixosConfigurations.devbox` | Mini PC #1, from `devices/devbox/` (checked-in `state.json`, Intel iGPU, PipeWire, gamescope on DRM, Steam). Deploy: `nixos-rebuild switch --flake .#devbox --target-host deploy@<box> --sudo` (the `deploy` user from `hinteros.dev`; the session user has no sudo); see `tests/couch/m0-spikes.md`. Steam and Plex HTPC (`hinteros.apps.plex-htpc`) are unfree and allowed only by name (derived from the enabled catalog entries into `hinteros.unfreeAllowlist`). Unfree policy: the ISO is fully free (`forbidUnfree` with no `unfreeExceptions`, Steam included); the cache job sets `forbidUnfree` and `unfreeExceptions = config.hinteros.catalog.cacheableUnfree` (Steam, `cache = true` in the catalog); Plex is never cached |
 | `checks.x86_64-linux` | `pre-commit` (nixfmt, statix, deadnix), `apps` (eval tests: app registry from the catalog, every catalog entry evaluating in a device, the ISO and the cache job config, icon fields, gamescope mode files, input keys, OSK settings, US layout, cage socket defaults, the gamescope version pin, unfree allowlist), `tv-apps` (VM test: Firefox kiosk profiles, YouTube TV User-Agent, daemon `apps.list` and `apps.launch`, Jellyfin starts), `typing` (VM test: the daemon's uinput keyboard types a URL and a password into Firefox over session API 0.8, and starts the OSK), `hardening` (VM test: unprivileged session user, admin sudo password, password SSH for the admin only, SSH off listens nowhere, dev deploy user), `hardening-eval` (eval tests for the dev assertions), `runtime-eval` (eval tests: scoped polkit rules, BlueZ/NetworkManager/systemd-boot hardening, snapshot wiring, boot counting, GC), `config-sync` (VM test: /etc/hinteros restored from the snapshot at boot, skipped without it), `runtime` (VM test: NetworkManager, BlueZ config, PipeWire socket, pkcheck allows/denies for the session user, boot-complete gate, low-disk warning), `installer-ui` (VM test: the installer environment boots into the launcher in `--installer` mode under cage as root, OCR sees the welcome screen, the catalog index and terms are in the profile, the console is the fallback), `runtime-settings` (VM test: session API 0.7 against the real NetworkManager, PipeWire (null sink), logind/polkit and BlueZ's bus policy: `network.status`, `bluetooth.status` unavailable cleanly, the session user reaches org.bluez and another user does not, `audio.outputs`, `power.capabilities`, `display.modes` under cage), `mk-device` (eval tests for mkDevice and the state translation), `daemon-eval` (eval and build test: the system service sandbox, the job unit template, polkit actions and rules, `release.json`, `channels.json` and `allowed_signers` contents, the signer format check, the device flake template's input line), VM tests of the privileged service, which run the real daemon, polkit, logind and systemd (`tests/vm/system/`): `system-escalation` (as the session user, hostile input straight at `system.sock`: unknown fields, forged `uid`/paths/URLs, wrong types, bad framing, non-UTF-8, oversize, nesting bombs, a connection flood; every request refused, same service process, `/etc/hinteros` untouched, no job started, rate limiting, audit entries, the sandbox it runs in), `system-authz` (read-only for members; non-members cannot connect; a member that does not own seat0 gets `permission_denied`/`seat`; the session user passes; `ssh.set` gives `authentication_required`; a rules file returning NO is honored; `pkcheck` per action; audit decisions) and `polkit-agent` (VM test, real polkitd and PAM: the launcher path over the session socket, `system.ssh.set` -> `authentication_requested`, wrong passwords, a client not named `hinteros-launcher` refused, cancel, the right admin password -> job -> sshd on; **the build is a stub**), `session-restart` (VM test: `session.restart` replaces the greetd session, launcher and session daemon, twice; greetd has `Restart=always`), `store-install` (VM test: `store.list`, `system.apps.install`/`remove` through the session socket, terms refusal and `terms-accepted.json`, `delete_data` that never follows symlinks out of the home, hostile `apps.*` input; **the build is a stub**), `install-offline-m900` (the install-offline VM test with the real report of a Lenovo M900), `install-offline-hw` (VM test: an offline install with an Intel mini PC hardware report builds no package, the report is deferred), and `system-jobs` (`job_busy`, cancel before activation, failing build, job events, `base.set` with a real switch that restarts `hinteros-system` during its own job, `rollback` restoring the previous generation and the `/etc/hinteros` snapshot; **the build is a stub**: see the test header), `boot`, `install-offline` and the others below. `update-verify` (git server and cache VMs) is not implemented yet.
  `fake-steam` (the stub `steam` logs a `steam://rungameid` launch, a "Fake game" window shows, the fake Steam home with its 3 games and 3 tools is installed) and VM tests: `boot` (autologin, cage and the launcher up, OCR finds "HinterOS", both daemon sockets answer hello and ping), `gamescope` (headless gamescope in Steam mode plus the session daemon: base-layer property via xprop, over session API 0.8: `games.list` (tools filtered), fake game launch, Home, `apps.close`, Big Picture as app 769, a Steam Guard pop-up with `steam_attention` and `steam.focus`, all checked by OCR), `gamescope-size` (headless gamescope at 1920x1080 and at 1280x1024 with a smaller nested size: the home app and a daemon-launched X11 app that never ask for fullscreen fill the output edge to edge in a screenshot, their windows, the Xwayland `:0` root and the first `wl_output` equal the output size, `GDK_BACKEND=x11`, gamescope output in the journal; see `nixos/README.md` "Display size") and `input-layer` (InputPlumber with a fake pad: virtual target, intercept modes, DBus events) |
-| `checks.x86_64-linux.install-validation`, `install-offline` | VM tests of the installer. `install-validation`: bad plans (no admin password, an app that needs a network while offline, a missing, mounted, system or too small disk, BIOS boot, malformed fields) are refused before the disk is touched. `install-offline`: a VM with no network and an empty second disk installs a plan (YouTube and Firefox, ssh on, an admin account), then the installed disk is booted via UEFI and checked: session up, `/etc/hinteros` and its snapshot, the pinned lock, sshd with the admin's password, no password for the session user or root, the daemon's `apps.list` |
+| `checks.x86_64-linux.install-validation`, `install-offline`, `install-app-failure`, `offline-inputs` | VM tests of the installer. `install-validation`: bad plans (no admin password, an app that needs a network while offline, a missing, mounted, system or too small disk, another disk with HinterOS partition labels, BIOS boot, malformed fields) are refused before the disk is touched. `install-app-failure`: the same install onto a disk that already holds an old HinterOS install, with one online-only app (`moonlight`, test hook `HINTEROS_INSTALL_ONLINE_APPS`) that cannot be downloaded in the VM: exit 0, `failed_apps` lists it, the box boots, `state.json` excludes it, the other apps are installed. `offline-inputs`: every build-time input of what an offline install builds is on the ISO (`nixos/lib/offline-inputs.nix`). The install VMs have only the installer's own store and no network interface. `install-offline`: a VM with no network and an empty second disk installs a plan (YouTube and Firefox, ssh on, an admin account), then the installed disk is booted via UEFI and checked: session up, `/etc/hinteros` and its snapshot, the pinned lock, sshd with the admin's password, no password for the session user or root, the daemon's `apps.list` |
 | `devShells.default`, `formatter` | Dev shell with the lint tools and git hooks; `nix fmt` |
 
 `nix flake check` runs everything above, including the VM test (needs `/dev/kvm`).
@@ -115,28 +115,65 @@ The plan may hold a plain-text password: keep it on tmpfs and delete it afterwar
 reads it from stdin). `--validate-only` checks the plan and the machine and touches nothing.
 
 **Progress.** stdout is one JSON object per line, for example
-`{"stage":"install","percent":57,"level":"info","message":"..."}`. Stages in order: `validate`
-(0-8), `partition` (10-20), `facter` (22-26), `config` (28-30), `install` (32-90, from nix's own
-progress), `snapshot` (92-95), `finalize` (97), `done` (100). `level` is `info`, `warn` or `error`.
-An `error` line also has a `code` (`admin-password-missing`, `app-needs-network`, `disk-not-found`,
-`disk-in-use`, `disk-too-small`, `not-uefi`, `install-failed`, ...) and the exit status is 2 (the
-plan or the machine was refused, nothing was touched) or 1 (failed part-way). Tool output goes to
-stderr and `/var/log/hinteros-install.log`.
+`{"phase":"system","stage":"install","percent":57,"level":"info","message":"..."}`. `phase` is
+`system` or `apps` (see below); during the apps stage a line may also carry `app` (a catalog id).
+Stages in order: `validate` (0-8), `partition` (10-20), `facter` (22-26), `config` (28-30),
+`install` (32-70, from nix's own progress), `snapshot` (72-73) - all phase `system` - then, if the
+plan has apps, `apps` (74-96, phase `apps`), `finalize` (97), `done` (100). Percentages never go
+backwards. `level` is `info`, `warn` or `error`. An `error` line also has a `code`
+(`admin-password-missing`, `app-needs-network`, `disk-not-found`, `disk-in-use`, `disk-too-small`,
+`other-hinteros-disk`, `not-uefi`, `install-failed`, ...) and the exit status is 2 (the plan or the
+machine was refused, nothing was touched) or 1 (the base system could not be installed). Tool
+output goes to stderr and `/var/log/hinteros-install.log`; when a build fails the log also holds
+nix's error messages in full and the build log (`nix log`) of every derivation that failed.
 
-**What it does.** Validate the plan and the machine; partition with disko (GPT, a 1 GiB ESP and an
-ext4 root, found by partition label `hinteros-esp` / `hinteros-root`, no encryption; ext4 because
-nothing here needs snapshots, it is the best-tested NixOS root and copes with power cuts at the
-TV); `nixos-facter` writes `facter.json` (a failure only warns: the box then boots with generic
+**Two stages.** Installing HinterOS and installing the apps are separate, so a broken app can
+never cost the user the system:
+
+1. **System stage** (phase `system`): the base system with no catalog apps (`state.json`
+   `apps: []`), offline from the ISO's store if need be. It ends with a bootable box. If it fails
+   online (a download, or the hardware report does not build), it is retried once as the generic
+   offline system from the ISO; if it still fails the run exits 1.
+2. **Apps stage** (phase `apps`, only if the plan lists apps): the selected apps are built into the
+   installed system (`nix build` of the full config against the new root; offline for the `onIso`
+   apps, downloading for the others) and made the next boot's generation with
+   `nixos-install --system`, which writes the boot entry last; the base generation stays in the
+   boot menu. If building all apps together fails, they are tried one at a time and the ones that
+   build are installed; each failure gets a line
+   `{"phase":"apps","level":"warn","code":"app-failed","app":"<id>","message":"..."}`. If activating
+   fails, the base system is put back. `state.json` and `terms-accepted.json` list only the apps
+   that were actually installed. The run still exits **0** when the system stage succeeded, and
+   ends with `{"stage":"done","percent":100,"failed_apps":["<id>",...]}` (empty if none).
+
+**What it does.** Validate the plan and the machine (including: no other disk may carry the
+partition labels `hinteros-esp` / `hinteros-root`, because the system finds its disks by label;
+`other-hinteros-disk`); erase old signatures on the target and partition with disko (GPT, a 1 GiB
+ESP and an ext4 root, found by partition label `hinteros-esp` / `hinteros-root`, no encryption; ext4
+because nothing here needs snapshots, it is the best-tested NixOS root and copes with power cuts at
+the TV), then check that both file systems are on the target disk and the new root is empty;
+`nixos-facter` writes `facter.json` (a failure only warns: the box then boots with generic
 drivers). An **offline install applies no hardware report**: it installs exactly the generic system
 that is prebuilt on the ISO (`nixos/modules/generic-hardware.nix`: common storage, USB, NVMe and card
 reader modules in the initrd, redistributable firmware, both CPU microcodes) so it builds nothing
 big whatever the machine is, and leaves `facter.deferred` next to `facter.json`; the device flake
 ignores the report while that marker exists, `hinteros-facter-release` removes it once the box is
-online, and the next rebuild or update applies the report. Online installs apply it at once; write `/etc/hinteros` (`flake.nix` from `nixos/templates/device-flake.nix.in`,
-`flake.lock`, `state.json`); write the admin password hash to
-`/var/lib/hinteros/admin-password-hash` (0600, referenced by the config, never in `state.json` or
-the store); `nixos-install --no-root-passwd`; check that `/etc/hinteros` equals the generation's
-snapshot; unmount.
+online, and the next rebuild or update applies the report. Online installs apply it at once; write
+`/etc/hinteros` (`flake.nix` from `nixos/templates/device-flake.nix.in`, `flake.lock`,
+`state.json`); write the admin password hash to `/var/lib/hinteros/admin-password-hash` (0600,
+referenced by the config, never in `state.json` or the store); `nixos-install --no-root-passwd`;
+check that `/etc/hinteros` equals the generation's snapshot; the apps stage; unmount. Where EFI
+variables cannot be written (efivarfs missing or read-only, or the boot loader step failed once)
+the config gets `boot.loader.efi.canTouchEfiVariables = false` and the box boots through the
+fallback path `EFI/BOOT/BOOTX64.EFI`.
+
+**nix and the network.** nix switches substitution off as soon as the machine has no network
+interface with an address ("you don't have Internet access; disabling some network-dependent
+features"), local-store substituters included. An offline install on a box without a cable therefore
+substituted nothing and tried to build the whole system from source, ending in "Reason: 1
+dependency failed" after a failed download of `bash-5.3.tar.gz`. Every nix call of the installer
+passes `--option substitute true`. NixOS test VMs always have a user-mode `eth0`, which is why this
+went unnoticed: the install tests now run the installer with only its own store image and no NIC at
+all.
 
 ### Offline installs
 

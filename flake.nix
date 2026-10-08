@@ -188,6 +188,20 @@
         store-install = import ./tests/vm/store-install.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
         install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
+        install-app-failure = import ./tests/vm/install-offline.nix {
+          inherit self pkgs;
+          name = "hinteros-install-app-failure";
+          # One online-only app that cannot be downloaded here, between two that are on the ISO;
+          # onto a disk that already holds an old install.
+          apps = [
+            "youtube"
+            "moonlight"
+            "firefox"
+          ];
+          failedApps = [ "moonlight" ];
+          onlineAppsHook = true;
+          staleTarget = true;
+        };
         install-offline-m900 = import ./tests/vm/install-offline.nix {
           inherit self pkgs;
           name = "hinteros-install-offline-m900";
