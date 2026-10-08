@@ -150,6 +150,8 @@
       packages.${system} = {
         vm = self.nixosConfigurations.vm.config.system.build.vm;
         iso = self.nixosConfigurations.installer.config.system.build.isoImage;
+        # The release tool (scripts/promote.sh), run by the owner: `nix run .#promote -- beta`.
+        promote = pkgs.callPackage ./scripts/promote.nix { };
         default = self.packages.${system}.vm;
       };
 
@@ -158,6 +160,11 @@
           type = "app";
           program = "${self.packages.${system}.vm}/bin/run-hinteros-vm-vm";
           meta.description = "Run the HinterOS test VM in a window";
+        };
+        promote = {
+          type = "app";
+          program = pkgs.lib.getExe self.packages.${system}.promote;
+          meta.description = "Sign and move the HinterOS beta and stable channels";
         };
         default = self.apps.${system}.vm;
       };
@@ -220,6 +227,7 @@
         installer-iso-eval = import ./tests/eval/installer-iso.nix { inherit self pkgs; };
         offline-inputs = import ./tests/eval/offline-inputs.nix { inherit self pkgs; };
         state-check = import ./tests/eval/state-check.nix { inherit self pkgs; };
+        promote = import ./tests/scripts/promote.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {
