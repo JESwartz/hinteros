@@ -60,7 +60,8 @@ in
       enable = lib.mkEnableOption ''
         systemd-boot automatic boot assessment (NixOS' `boot.loader.systemd-boot.bootCounting`)
         gated on the launcher and daemon being up, so a broken update falls back to the previous
-        generation by itself. Needs systemd-boot''; # enable it on the box, not in VMs
+        generation by itself. Needs systemd-boot; mkDevice turns it on by default
+        wherever systemd-boot is enabled (every installed box), not in VMs or on the ISO'';
       tries = lib.mkOption {
         type = lib.types.ints.positive;
         default = 3;

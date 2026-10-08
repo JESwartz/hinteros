@@ -292,6 +292,29 @@ let
           true
         ];
       };
+    # Boot counting (automatic fallback after a failed boot) is on for every installed box:
+    # systemd-boot (the disk layout) turns it on, with the boot-health gate.
+    testInstalledBoxBootCounting =
+      let
+        i = (mk (good // { disk.layout = "gpt-esp-ext4"; })).config;
+        v = (mk good).config;
+      in
+      {
+        expr = [
+          i.boot.loader.systemd-boot.bootCounting.enable
+          i.hinteros.maintenance.bootCounting.enable
+          i.systemd.targets.boot-complete.requires
+          v.boot.loader.systemd-boot.enable
+          v.boot.loader.systemd-boot.bootCounting.enable
+        ];
+        expected = [
+          true
+          true
+          [ "hinteros-boot-health.service" ]
+          false
+          false
+        ];
+      };
     testUnknownDiskLayout = {
       expr = lib.hasInfix "unsupported disk.layout" (failures (good // { disk.layout = "zfs"; }));
       expected = true;

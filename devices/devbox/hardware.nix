@@ -10,8 +10,6 @@
     apps.plex-htpc.enable = true;
     # Start Steam (-silent, never under a reaper) with the session daemon.
     daemon.session.settings.steam.autostart = true;
-    # A broken deploy falls back to the previous generation by itself.
-    maintenance.bootCounting.enable = true;
   };
 
   # The session user is unprivileged here too (no wheel, no sudo, not a nix trusted user); deploys

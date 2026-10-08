@@ -37,10 +37,19 @@ nixpkgsFor.${base}.lib.nixosSystem {
       system.tools.nixos-generate-config.enable = nixpkgs.lib.mkDefault false;
     }
     (nixpkgs.lib.optionalAttrs (configDir != null) { hinteros.deviceConfig.configDir = configDir; })
-    {
-      hinteros.session.enable = true;
-      hinteros.daemon.enable = true;
-    }
+    (
+      { config, lib, ... }:
+      {
+        hinteros = {
+          session.enable = true;
+          daemon.enable = true;
+          # Every installed box (systemd-boot) counts its boots: a generation that never reaches
+          # the boot-health gate (launcher and daemon up) is skipped after a few tries and the
+          # previous one boots. Machines without systemd-boot (VMs, the ISO) cannot count.
+          maintenance.bootCounting.enable = lib.mkDefault config.boot.loader.systemd-boot.enable;
+        };
+      }
+    )
   ]
   ++ nixpkgs.lib.optional (facterReport != null) { hardware.facter.reportPath = facterReport; }
   ++ nixpkgs.lib.optional (facterReport == null) self.nixosModules.generic-hardware
