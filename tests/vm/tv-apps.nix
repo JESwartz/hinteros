@@ -1,7 +1,8 @@
 # M4 TV apps under cage (no network in the sandbox): the Firefox kiosk wrapper with a
 # per-app profile, the User-Agent override that only the YouTube profile gets, the app
 # registry as the daemon reports it (apps.list over the session socket, API 0.9) and launching
-# apps through apps.launch. The YouTube and Crunchyroll URLs point at local pages. Firefox runs
+# apps through apps.launch (also the Store-only streaming apps Netflix and Spotify). The YouTube,
+# Crunchyroll and Netflix URLs point at local pages. Firefox runs
 # on Xwayland (MOZ_ENABLE_WAYLAND=0), as under gamescope.
 { self, pkgs }:
 let
@@ -31,11 +32,18 @@ in
         youtube.kiosk.url = "file:///etc/hinteros-test/youtube.html";
         crunchyroll.kiosk.url = "file:///etc/hinteros-test/crunchyroll.html";
         firefox.kiosk.url = "file:///etc/hinteros-test/firefox.html";
+        # Store-only streaming apps, as if installed from the Store.
+        netflix = {
+          enable = true;
+          kiosk.url = "file:///etc/hinteros-test/netflix.html";
+        };
+        spotify.enable = true;
       };
       environment.etc = {
         "hinteros-test/youtube.html".text = page "YOUTUBE TEST PAGE";
         "hinteros-test/crunchyroll.html".text = page "CRUNCHYROLL TEST PAGE";
         "hinteros-test/firefox.html".text = page "PLAIN FIREFOX PAGE";
+        "hinteros-test/netflix.html".text = page "NETFLIX TEST PAGE";
       };
 
       environment.systemPackages = [ pkgs.socat ];
@@ -86,6 +94,12 @@ in
     by_id = {a["id"]: a for a in apps}
     assert by_id["youtube"]["kind"] == "web" and by_id["jellyfin"]["kind"] == "native", by_id
     assert by_id["youtube"]["name"] == "YouTube", by_id["youtube"]
+    # Store-only streaming apps that were installed show up like the other web apps.
+    for want in ("netflix", "spotify"):
+        assert want in ids, ids
+        assert by_id[want]["kind"] == "web", by_id[want]
+    assert by_id["netflix"]["name"] == "Netflix", by_id["netflix"]
+    assert "disney-plus" not in ids, ids
     # Icons are found by the daemon at runtime (no network here): session.toml carries the catalog's fields.
     toml = machine.succeed("cat $(ps -u hinteros -o args= | grep -o '/nix/store/[^ ]*hinteros-session.toml' | head -n1)")
     for want in ("desktop_id = \"org.jellyfin.JellyfinDesktop\"", "firefox_profile = ", "site_url = "):
@@ -123,6 +137,19 @@ in
     # Separate profile directories.
     machine.succeed(f"test -d {ytprofile} && test -d {crprofile}")
     ok("apps.close", {"id": "crunchyroll"})
+
+    # Netflix (a Store-only streaming app): its own profile, no UA override, no first-run screen.
+    ok("apps.launch", {"id": "netflix"})
+    nfprofile = f"{home}/.local/share/hinteros/firefox/netflix"
+    machine.wait_until_succeeds(f"pgrep -u hinteros -af firefox | grep -F -- '--profile {nfprofile}' | grep -F -- '--kiosk'", timeout=60)
+    machine.wait_for_text("NETFLIX", timeout=timedelta(seconds=180))
+    screen = machine.get_screen_text().lower()
+    assert "playstation" not in screen, screen
+    for bad in ("welcome to firefox", "get started", "import"):
+        assert bad not in screen, screen
+    machine.succeed(f"! grep -q useragent {nfprofile}/user.js")
+    machine.succeed(f"test -d {nfprofile} && test -d {crprofile}")
+    ok("apps.close", {"id": "netflix"})
 
     # Jellyfin: the desktop client starts and stays up (no server to log in to here).
     ok("apps.launch", {"id": "jellyfin"})

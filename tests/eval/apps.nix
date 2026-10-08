@@ -91,6 +91,31 @@ let
   oskFailures = c: lib.filter (lib.hasInfix "oskExtension") (failedAssertions c);
   hasSub = s: sub: lib.hasInfix sub (toString s);
 
+  # The Store-only streaming apps (Firefox ESR kiosk entries; not offered by the installer, not on the ISO).
+  streaming = [
+    "netflix"
+    "disney-plus"
+    "apple-tv"
+    "prime-video"
+    "hbo-max"
+    "hulu"
+    "paramount-plus"
+    "tubi"
+    "pluto-tv"
+    "twitch"
+    "spotify"
+  ];
+  appIds = import ../../nixos/lib/app-ids.nix catalogEntries;
+  stream2 = mkApps [
+    "netflix"
+    "spotify"
+    "youtube"
+  ] { };
+  streamAll = mkApps streaming { };
+  # Launched through the shared Firefox kiosk wrapper: `wrapper <id> <url>`.
+  isKiosk =
+    id: e: lib.hasSuffix "/bin/hinteros-firefox-kiosk" (lib.head e.command) && lib.elem id e.command;
+
   results = lib.runTests {
     testDefaultApps = {
       expr = appsOf base;
@@ -278,6 +303,84 @@ let
         [ ]
         true
         false
+      ];
+    };
+    # Streaming apps are Store apps: known to the catalog, never in the installer's lists.
+    testStreamingStoreOnly = {
+      expr = [
+        (lib.all (id: catalogEntries ? ${id}) streaming)
+        (lib.filter (id: lib.elem id appIds.all) streaming)
+        (lib.filter (id: lib.elem id appIds.onIso) streaming)
+        (lib.filter (id: lib.elem id appIds.preselected) streaming)
+        (lib.filter (id: catalogEntries.${id}.installer || catalogEntries.${id}.onIso) streaming)
+      ];
+      expected = [
+        true
+        [ ]
+        [ ]
+        [ ]
+        [ ]
+      ];
+    };
+    # Not installed: not in the registry (the default device has the four default apps only).
+    testStreamingAbsentUntilInstalled = {
+      expr = lib.filter (id: lib.elem id (appsOf base)) streaming;
+      expected = [ ];
+    };
+    # Installed: listed by apps.list (session.toml), as Firefox kiosk entries with their own
+    # profile, controller as keyboard, and no User-Agent override (that is YouTube's alone).
+    testStreamingListedWhenInstalled = {
+      expr = [
+        (lib.sort (a: b: a < b) (appsOf stream2))
+        (lib.all
+          (
+            id:
+            let
+              e = entry stream2 id;
+            in
+            isKiosk id e
+            && !(lib.elem "--user-agent" e.command)
+            && e.firefox_profile == "~/.local/share/hinteros/firefox/${id}"
+            && e.input == "keyboard"
+            && e.back_key == "escape"
+          )
+          [
+            "netflix"
+            "spotify"
+          ]
+        )
+        (entry stream2 "netflix").name
+        (lib.elem "--user-agent" (entry stream2 "youtube").command)
+      ];
+      expected = [
+        [
+          "netflix"
+          "spotify"
+          "youtube"
+        ]
+        true
+        "Netflix"
+        true
+      ];
+    };
+    # All of them at once: every one is a listed kiosk entry with its own profile directory, the
+    # profile policies (OSK extension, ESR) are the shared ones, and nothing unfree is pulled in.
+    testStreamingAllKiosk = {
+      expr = [
+        (lib.sort (a: b: a < b) (appsOf streamAll))
+        (lib.all (id: isKiosk id (entry streamAll id)) streaming)
+        (lib.length (lib.unique (map (id: (entry streamAll id).firefox_profile) streaming)))
+        streamAll.config.hinteros.unfreeAllowlist
+        (lib.hasSuffix "esr" (fx streamAll).finalPackage.version)
+        ((fx streamAll).policies.ExtensionSettings ? "${extId}")
+      ];
+      expected = [
+        (lib.sort (a: b: a < b) streaming)
+        true
+        (lib.length streaming)
+        [ ]
+        true
+        true
       ];
     };
     testEveryEntryEnabled = {

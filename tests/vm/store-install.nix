@@ -105,7 +105,9 @@ in
         r = ok("store.list")
         assert r["index_version"] == 2 and r["more_after_update"] is False, r
         apps = {a["id"]: a for a in r["apps"]}
-        assert set(apps) == {"crunchyroll", "firefox", "jellyfin", "moonlight", "plex-htpc", "steam", "vacuum-tube", "youtube"}, list(apps)
+        streaming = {"netflix", "disney-plus", "apple-tv", "prime-video", "hbo-max", "hulu", "paramount-plus", "tubi", "pluto-tv", "twitch", "spotify"}
+        assert set(apps) == {"crunchyroll", "firefox", "jellyfin", "moonlight", "plex-htpc", "steam", "vacuum-tube", "youtube"} | streaming, list(apps)
+        assert all(apps[i]["free"] is True and apps[i]["terms"] is None for i in streaming), apps
         assert all(a["state"] == "available" for a in apps.values()), apps
         t = apps["plex-htpc"]["terms"]
         assert t["version"] == "2025-10-30" and t["file"].startswith("/run/current-system/sw/share/hinteros/terms/"), t
