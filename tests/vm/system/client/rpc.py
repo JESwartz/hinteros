@@ -8,12 +8,13 @@ Library: Conn(...) for the other scripts (hostile.py, events.py).
 
 import errno
 import json
+import os
 import socket
 import sys
 import time
 
 SOCK = "/run/hinteros/system.sock"
-VERSION = "0.3"
+VERSION = os.environ.get("HINTEROS_SYSTEM_API", "0.3")
 
 
 class Conn:

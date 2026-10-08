@@ -64,7 +64,7 @@
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("greetd.service")
-    machine.wait_until_succeeds("pgrep -u hinteros -x cage")
+    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
 
     with subtest("accounts"):
         assert machine.succeed("id -u hinteros-p2").strip() == "20002"
@@ -92,10 +92,12 @@
         assert e["ids"] == [] and e["apps"] == [], e
 
     with subtest("the session command puts the profile's env on PATH and XDG_DATA_DIRS"):
-        pid = machine.succeed("pgrep -u hinteros -x cage | head -n1").strip()
+        pid = machine.succeed("pgrep -u hinteros -o -f '/bin/cage '").strip()
         env = dict(l.split("=", 1) for l in machine.succeed(f"tr '\\0' '\\n' < /proc/{pid}/environ").splitlines() if "=" in l)
-        assert env["PATH"].startswith(LINK + "/bin:"), env["PATH"]
-        assert env["XDG_DATA_DIRS"].startswith(LINK + "/share:"), env["XDG_DATA_DIRS"]
+        # (cage's own wrapper puts Xwayland in front)
+        path = env["PATH"].split(":")
+        assert LINK + "/bin" in path and path.index(LINK + "/bin") < path.index("/run/current-system/sw/bin"), path
+        assert LINK + "/share" in env["XDG_DATA_DIRS"].split(":"), env["XDG_DATA_DIRS"]
 
     with subtest("Firefox policies box-wide, no Firefox in the system"):
         pol = json.loads(machine.succeed("cat /etc/firefox/policies/policies.json"))["policies"]

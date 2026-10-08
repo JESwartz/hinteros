@@ -9,11 +9,12 @@ CLI: session.py [--name NAME] METHOD [PARAMS_JSON]   one connection, one call, p
 
 import glob
 import json
+import os
 import socket
 import sys
 import time
 
-VERSION = "0.9"
+VERSION = os.environ.get("HINTEROS_SESSION_API", "0.9")
 
 
 def sock_path():
