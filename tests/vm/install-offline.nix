@@ -74,7 +74,7 @@ let
       channel = "stable";
       base = "unstable";
       inherit apps;
-      acceptedTerms = { };
+      acceptedTerms = pkgs.lib.optionalAttrs (builtins.elem "steam" apps) { steam = "2026-09-10"; };
     }
   );
 in

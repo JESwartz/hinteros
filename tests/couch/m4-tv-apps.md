@@ -9,7 +9,7 @@ The daemon is on session API 0.4: controller-to-key translation (`input = "keybo
 
 ## Home screen
 
-- [ ] The launcher lists Jellyfin, Plex (dev box only), YouTube, Crunchyroll and Firefox, each with its generated letter icon.
+- [ ] The launcher lists Jellyfin, Plex (dev box only), YouTube and Firefox, plus Crunchyroll once installed from the Store, each with its generated letter icon.
 - [ ] `/dev/uinput` is usable by the session user (`id` shows `uinput`; the daemon logs no uinput error).
 - [ ] Guide+Y (hold Guide, press Y) summons the OSK over any app without taking focus; it shows over Firefox and Jellyfin, d-pad/A/B drive it, Guide or Home hides it. Record: its size and position at 4K and 1080p, and any flicker.
 - [ ] Home now fires on Guide *release* (so a Guide+Y chord does not go Home): a plain tap of Guide still goes Home promptly; holding Guide and pressing Y does not. Record: any lag felt.

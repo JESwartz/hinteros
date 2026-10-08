@@ -63,8 +63,8 @@ let
     terms-invalid = plan { acceptedTerms.steam = 5; };
     steam-forced-offline = plan {
       network = "offline";
-      apps = [ "plex-htpc" ];
-      acceptedTerms.plex-htpc = "2025-10-30";
+      apps = [ "steam" ];
+      acceptedTerms.steam = "2026-09-10";
     };
     forced-online = plan { network = "online"; };
     missing-disk = plan { disk = "/dev/vdz"; };

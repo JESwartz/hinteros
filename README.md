@@ -106,7 +106,7 @@ An example is in `/etc/hinteros-installer/plan.example.json` on the ISO:
 | `ssh.enable` | sshd from the first boot, password login for the admin only. Default false |
 | `channel` | `stable` or `beta`: the `ref` in the generated flake's input URL. Default `stable` |
 | `base` | nixpkgs base; only `unstable` exists. Default `unstable` |
-| `apps` | Catalog ids, listed from the catalog: the `onIso` apps (`jellyfin`, `youtube`, `crunchyroll`, `firefox`; on the ISO, work offline) and the other `installer` ones (`steam`, `plex-htpc`, `moonlight`; downloaded, online only; nothing unfree is on the ISO). The installer UI pre-selects `youtube` and `firefox` |
+| `apps` | Catalog ids, listed from the catalog: the `onIso` apps (`jellyfin`, `youtube`, `firefox`; on the ISO, work offline) and `steam` (downloaded, online only; nothing unfree is on the ISO). The installer offers exactly these four; Crunchyroll, Moonlight, Plex and the streaming apps are Store-only. The installer UI pre-selects `youtube` and `firefox` |
 | `acceptedTerms` | Optional `{"<id>": "<terms version>"}`. An app whose catalog entry has vendor terms (Steam, Plex) is refused (`terms-not-accepted`) unless the accepted version equals the version in the catalog index on this installer. The accepted ones are recorded on the box in `/var/lib/hinteros/terms-accepted.json` (root, 0600): `{"<id>": [{"version", "accepted_at", "by": "installer"}]}` |
 | `wifi` | Optional `{ssid, psk}`: connects before the install and keeps the connection on the installed box |
 | `network` | Optional: `auto` (default; online if cache.nixos.org answers), `online` (fail if not) or `offline` |
@@ -241,7 +241,7 @@ lock, so every transitive input is pinned too). Nix resolves a locked input whos
 in the store without fetching, so `nixos-install --flake path:/mnt/etc/hinteros#hinteros` evaluates
 and substitutes from the ISO's store. Online installs use the same lock, so the installed system is
 the ISO's revision and nixpkgs (only extra apps are downloaded); the first `nix flake update
-hinteros` on the box moves it to the channel. Steam, Plex and Moonlight are not on the ISO: they are
+hinteros` on the box moves it to the channel. Steam is not on the ISO: it is
 refused offline (`app-needs-network`) and downloaded during an online install. Nothing unfree is
 ever on the ISO (`hinteros.forbidUnfree`).
 

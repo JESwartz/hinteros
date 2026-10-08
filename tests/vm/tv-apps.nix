@@ -30,6 +30,8 @@ in
 
       hinteros.apps = {
         youtube.kiosk.url = "file:///etc/hinteros-test/youtube.html";
+        # Store-only: installed from the Store, not on the ISO.
+        crunchyroll.enable = true;
         crunchyroll.kiosk.url = "file:///etc/hinteros-test/crunchyroll.html";
         firefox.kiosk.url = "file:///etc/hinteros-test/firefox.html";
         # Store-only streaming apps, as if installed from the Store.
@@ -84,7 +86,7 @@ in
         assert "error" not in reply, reply
         return reply["result"]
 
-    # Registry: the four default apps, Plex absent (not a default app).
+    # Registry: the three ISO apps and Crunchyroll (a Store app, enabled above), Plex absent.
     apps = ok("apps.list")["apps"]
     ids = [a["id"] for a in apps]
     print(ids)

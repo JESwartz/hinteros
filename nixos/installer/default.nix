@@ -4,7 +4,7 @@
 # lock to this very revision.
 #
 # Offline installs. The ISO carries (1) the closure of a default HinterOS system (the base plus
-# the four apps with `onIso`), (2) the sources of this repo and of every flake input it locks,
+# the three apps with `onIso`), (2) the sources of this repo and of every flake input it locks,
 # and (3) a flake.lock for the generated /etc/hinteros flake whose `hinteros` input points at the
 # revision the ISO was built from, with the same narHash. Nix resolves a locked input whose
 # narHash is already in the store without fetching, so `nixos-install --flake` evaluates and

@@ -21,6 +21,29 @@ let
       wiredEeeOff =
         c.networking.networkmanager.ensureProfiles.profiles.hinteros-wired.ethtool.eee-enabled == "0";
       firmware = c.hardware.enableRedistributableFirmware;
+      # The installer offers exactly YouTube, Jellyfin, Firefox and Steam; YouTube and Firefox are
+      # pre-selected; Crunchyroll, Moonlight and Plex are Store-only.
+      installerApps =
+        let
+          ids = import ../../nixos/lib/app-ids.nix c.hinteros.catalog.entries;
+        in
+        lib.sort (a: b: a < b) ids.all == [
+          "firefox"
+          "jellyfin"
+          "steam"
+          "youtube"
+        ]
+        &&
+          lib.sort (a: b: a < b) ids.preselected == [
+            "firefox"
+            "youtube"
+          ]
+        &&
+          lib.sort (a: b: a < b) ids.onIso == [
+            "firefox"
+            "jellyfin"
+            "youtube"
+          ];
       # The UI's stderr (the launcher's hinteros-focus: lines) reaches the journal, so it is in
       # `journalctl` and in hinteros-save-log's journal.txt.
       uiLogsToJournal =

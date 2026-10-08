@@ -191,14 +191,14 @@
         install-app-failure = import ./tests/vm/install-offline.nix {
           inherit self pkgs;
           name = "hinteros-install-app-failure";
-          # One online-only app that cannot be downloaded here, between two that are on the ISO;
+          # One online-only app (Steam, offered by the installer) that cannot be downloaded here, between two that are on the ISO;
           # onto a disk that already holds an old install.
           apps = [
             "youtube"
-            "moonlight"
+            "steam"
             "firefox"
           ];
-          failedApps = [ "moonlight" ];
+          failedApps = [ "steam" ];
           onlineAppsHook = true;
           staleTarget = true;
         };
