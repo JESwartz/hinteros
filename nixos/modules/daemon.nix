@@ -107,6 +107,12 @@ let
     });
   '';
 
+  # `sudo hinteros-bootstrap-channel <channel> <rev>`: moves a box onto a channel outside the
+  # update UI (a box that does not trust the release key yet, or whose keys are out of date).
+  bootstrapChannel = pkgs.callPackage ../pkgs/hinteros-bootstrap-channel {
+    nix = config.nix.package;
+  };
+
   # What the job unit needs on PATH (hinteros-system job runs nix, git, ssh-keygen, nixos-facter).
   jobPath = [
     config.nix.package
@@ -335,6 +341,7 @@ in
         cfg.session.package
         cfg.system.package
         share
+        bootstrapChannel
       ];
       pathsToLink = [
         "/share/hinteros"

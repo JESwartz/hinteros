@@ -257,8 +257,12 @@ let
   share = shareOf c;
   shareKey = shareOf withKey;
   shareNoKey = shareOf noKey;
+  bootstrapChannel = lib.findFirst (
+    p: lib.getName p == "hinteros-bootstrap-channel"
+  ) null c.environment.systemPackages;
 in
 assert share != null;
+assert bootstrapChannel != null;
 pkgs.runCommand "hinteros-daemon-eval"
   {
     nativeBuildInputs = [ pkgs.jq ];
@@ -266,6 +270,7 @@ pkgs.runCommand "hinteros-daemon-eval"
       share
       shareKey
       shareNoKey
+      bootstrapChannel
       channelLine
       releaseVersion
       ;
@@ -294,5 +299,7 @@ pkgs.runCommand "hinteros-daemon-eval"
     # With a key: the principal, the pinned namespace, the key, and dev in release.json.
     grep -qx 'owner namespaces="git" ssh-ed25519 .* owner@hinteros' $shareKey/share/hinteros/update/allowed_signers
     [ "$(jq .dev $shareKey/share/hinteros/release.json)" = true ]
+    # The channel bootstrap script is on PATH (and passed shellcheck to get built).
+    [ -x $bootstrapChannel/bin/hinteros-bootstrap-channel ]
     echo "$channelLine" > $out
   ''
