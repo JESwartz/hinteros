@@ -8,11 +8,10 @@ let
     self.lib.mkDevice {
       state = {
         schemaVersion = 1;
-        # A state selects its default apps; this test wants all four.
+        # A state selects its default apps; this test wants the three on the ISO.
         apps = [
           "jellyfin"
           "youtube"
-          "crunchyroll"
           "firefox"
         ];
         profiles = [
@@ -31,6 +30,8 @@ let
 
   appsOf = c: map (a: a.id) (c.config.hinteros.daemon.session.settings.apps or [ ]);
   base = mk { };
+  # Crunchyroll is a Store app: not on the ISO, but installable.
+  crunchy = mkApps [ "crunchyroll" ] { };
   noOsk = mk {
     hinteros.daemon.osk.enable = false;
     hinteros.daemon.osk.summon = "none";
@@ -122,7 +123,6 @@ let
       expected = [
         "jellyfin"
         "youtube"
-        "crunchyroll"
         "firefox"
       ];
     };
@@ -197,12 +197,60 @@ let
       );
       expected = false;
     };
+    # Daemon README, "Pointer and on-screen keyboard": plain Firefox gets address_bar, kiosk apps do not.
+    testAddressBar = {
+      expr = [
+        (entry base "firefox").address_bar or false
+        (entry base "youtube").address_bar or false
+        (entry base "jellyfin").address_bar or false
+        (entry crunchy "crunchyroll").address_bar or false
+      ];
+      expected = [
+        true
+        false
+        false
+        false
+      ];
+    };
+    # gamescope hides the pointer after the daemon's idle_ms; gamescopectl is an absolute store path.
+    testPointerSettings =
+      let
+        p = (settings gs).pointer;
+      in
+      {
+        expr = [
+          p.idle_ms
+          (lib.hasInfix "--hide-cursor-delay 3000" (sessionCmd gs))
+          (lib.hasSuffix "/bin/gamescopectl" (lib.head p.hide_command))
+          (lib.tail p.hide_command)
+          (lib.tail p.show_command)
+          (settings cage).pointer.hide_command
+          (settings gs).osk.auto_show
+          ((settings gs).osk ? field_summon)
+        ];
+        expected = [
+          3000
+          true
+          true
+          [
+            "paint_cursor_plane"
+            "0"
+          ]
+          [
+            "paint_cursor_plane"
+            "1"
+          ]
+          [ ]
+          false
+          false
+        ];
+      };
     testYoutubeKioskUserAgent = {
       expr = lib.elem "--user-agent" (entry base "youtube").command;
       expected = true;
     };
     testCrunchyrollNoUserAgent = {
-      expr = lib.elem "--user-agent" (entry base "crunchyroll").command;
+      expr = lib.elem "--user-agent" (entry crunchy "crunchyroll").command;
       expected = false;
     };
     testPlexAllowlisted = {
@@ -215,7 +263,6 @@ let
           "jellyfin"
           "plex-htpc"
           "youtube"
-          "crunchyroll"
           "firefox"
         ]
         true
@@ -228,7 +275,7 @@ let
         (entry base "youtube").firefox_profile
         (entry base "youtube").site_url
         (lib.hasPrefix "https://" (entry base "youtube").icon_url)
-        (entry base "crunchyroll" ? icon_url)
+        (entry crunchy "crunchyroll" ? icon_url)
         (lib.any (a: a ? icon) (settings base).apps)
       ];
       expected = [
@@ -322,7 +369,7 @@ let
         [ ]
       ];
     };
-    # Not installed: not in the registry (the default device has the four default apps only).
+    # Not installed: not in the registry (the default device has the ISO apps only).
     testStreamingAbsentUntilInstalled = {
       expr = lib.filter (id: lib.elem id (appsOf base)) streaming;
       expected = [ ];
@@ -461,7 +508,7 @@ let
         ""
         false
         [ "hinteros-session" ]
-        true
+        false
         "auto"
       ];
     };

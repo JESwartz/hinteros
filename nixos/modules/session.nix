@@ -38,6 +38,10 @@ let
       "--xwayland-count"
       "2"
       "--force-windows-fullscreen"
+      # The pointer (right stick in keyboard-profile apps) fades after this many ms; equal to the
+      # daemon's `[pointer] idle_ms` (daemon README, "Pointer").
+      "--hide-cursor-delay"
+      (toString cfg.pointerIdleMs)
     ]
     ++ cfg.gamescope.extraArgs
     ++ [ "--" ];
@@ -153,6 +157,15 @@ in
       default = pkgs.hinteros-session;
       defaultText = lib.literalExpression "pkgs.hinteros-session";
       description = "Package providing `hinteros-session reaper`, which wraps the home app under gamescope.";
+    };
+
+    pointerIdleMs = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 3000;
+      description = ''
+        gamescope `--hide-cursor-delay` (gamescope's default is 10000) and the session daemon's
+        `[pointer] idle_ms`, which must be equal.
+      '';
     };
 
     environment = lib.mkOption {

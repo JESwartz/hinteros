@@ -3,7 +3,7 @@
 # icon fields; see the hinteros-daemon README) and its package is installed.
 #
 # The apps themselves come from the catalog (catalog.nix: one `hinteros.apps.<id>` per entry,
-# with the entry's settings as defaults). The `onIso` apps (jellyfin, youtube, crunchyroll,
+# with the entry's settings as defaults). The `onIso` apps (jellyfin, youtube,
 # firefox) are enabled whenever the session is, until a state.json selects the apps; a device
 # enables any other catalog id with `hinteros.apps.<id>.enable = true` (Plex and Steam are unfree:
 # allowed by name from the entry, see unfree.nix).
@@ -131,6 +131,17 @@ let
           '';
         };
 
+        addressBar = lib.mkOption {
+          type = lib.types.bool;
+          default = config.kiosk.fullscreenOnly;
+          defaultText = lib.literalExpression "kiosk.fullscreenOnly";
+          description = ''
+            Plain Firefox with a toolbar (not a kiosk): the daemon maps View to Ctrl+L plus the
+            on-screen keyboard (session.toml `address_bar`, see the hinteros-daemon README). On
+            for `fullscreenOnly` apps (the catalog's Firefox), off for kiosk apps.
+          '';
+        };
+
         backKey = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
@@ -179,6 +190,7 @@ let
       firefox_profile = "~/.local/share/hinteros/firefox/${name}";
     }
     // lib.optionalAttrs (value.input != null) { inherit (value) input; }
+    // lib.optionalAttrs value.addressBar { address_bar = true; }
     // lib.optionalAttrs (value.backKey != null) { back_key = value.backKey; };
 in
 {

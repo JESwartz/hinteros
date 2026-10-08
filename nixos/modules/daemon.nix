@@ -189,7 +189,7 @@ in
         description = ''
           Contents of the session daemon's `session.toml` (see the hinteros-daemon README), as a
           Nix attribute set. The file is generated into the store and passed with `--config`.
-          The module already sets `launcher.app_id`, `gamescope.*`, `osk.*`, `steam.path`, `steam.tag_windows`,
+          The module already sets `launcher.app_id`, `gamescope.*`, `osk.*`, `pointer.*`, `steam.path`, `steam.tag_windows`,
           `steam.library_poll_s`, `steam.library_debounce_ms` and `close.timeout_ms` (all with
           `mkDefault`; `steam.dir` is left to the daemon's default unless a test sets it).
         '';
@@ -223,10 +223,11 @@ in
 
       osk.autoShow = lib.mkOption {
         type = lib.types.bool;
-        default = true;
+        default = false;
         description = ''
           `[osk] auto_show`: show the keyboard when a text field gets focus in a keyboard-profile
-          app. It only has an effect when the Firefox extension is installed
+          app. Off by default (the daemon's default): with `[osk] field_summon = "accept"` A on a focused
+          field shows the keyboard. It only has an effect when the Firefox extension is installed
           (`hinteros.firefoxKiosk.oskExtension`); the daemon always listens on its internal
           `osk.sock`.
         '';
@@ -272,6 +273,26 @@ in
         auto_show = cfg.osk.autoShow;
         command = lib.mkDefault [ "${cfg.osk.package}/bin/hinteros-osk" ];
       };
+      # Pointer (right stick in keyboard-profile apps). idle_ms equals gamescope's
+      # --hide-cursor-delay (session.nix). The daemon hides/shows the cursor plane with
+      # gamescopectl, by absolute store path (the user unit's PATH does not carry it). Under cage
+      # there is no gamescope: the timeout alone has to do.
+      pointer =
+        let
+          ctl = lib.getExe' config.hinteros.session.gamescope.package "gamescopectl";
+          cursor =
+            on:
+            lib.optionals (config.hinteros.session.compositor == "gamescope") [
+              ctl
+              "paint_cursor_plane"
+              on
+            ];
+        in
+        {
+          idle_ms = lib.mkDefault config.hinteros.session.pointerIdleMs;
+          hide_command = lib.mkDefault (cursor "0");
+          show_command = lib.mkDefault (cursor "1");
+        };
       input.xbox_label_swap = lib.mkDefault cfg.input.xboxLabelSwap;
       steam = {
         # Steam's own windows get STEAM_GAME=769 so gamescope can show them (needs gamescope).

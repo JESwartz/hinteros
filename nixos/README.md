@@ -115,8 +115,8 @@ repaints at the nested size).
 - `hardening.nix`: on with the session (threat-model.md). Session user never in `wheel`, `trusted-users = ["root"]`, `allowed-users = ["root"]`, no sudo (`security.sudo.enable` only with `hinteros.admin` or dev), polkit admin identities = root + the admin, persistent capped journal, `systemd-boot.editor = false` (set only here). `hinteros.admin.{enable,user,hashedPasswordFile}`: optional admin account (wheel, sudo always asks its password, password file required, never committed; the M9 wizard sets it). `hinteros.ssh.enable` (from state.json `settings.ssh.enable`, off by default) runs sshd with username + password, `PermitRootLogin no`, `AllowUsers` = the admin only (never the session user), and requires `hinteros.admin`; the polkit action `org.hinteros.system.ssh` (`auth_admin`, defined in `daemon.nix`) is what the privileged service checks before flipping it (the session user gets `authentication_required`). Key-only SSH, key import, a LAN-only firewall and rate limiting are backlog. `hinteros.dev.enable` (default off, set by the devbox) adds a separate key-based `deploy` user (wheel, passwordless sudo, nix trusted, keys from `hinteros.dev.deployKeys`) and a build warning; with it off, evaluation fails on any wheel member besides the admin, NOPASSWD rule or extra trusted user. The session user is unprivileged in dev too.
 - `maintenance.nix`: `hinteros.maintenance.*`. Boot counting uses NixOS' native
   `boot.loader.systemd-boot.bootCounting`; `hinteros-boot-health` gates `boot-complete.target`
-  on the daemon and launcher, so a broken generation falls back by itself. Off by default
-  (needs systemd-boot); on for the devbox. GC keeps the last `keepGenerations` (5) system
+  on the daemon and launcher, so a broken generation falls back by itself. On for every installed box
+  (mkDevice enables it wherever systemd-boot is on); not in VMs or on the ISO. GC keeps the last `keepGenerations` (5) system
   generations (and boot entries), `nix.optimise`, and `hinteros-disk-check` logs a warning
   (identifier `hinteros-disk-check`, priority 4) below `diskCheck.minFreeGiB`.
 
