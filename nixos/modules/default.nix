@@ -2,6 +2,7 @@
 {
   imports = [
     ./daemon.nix
+    ./cache.nix
     ./input.nix
     ./session.nix
     ./state.nix

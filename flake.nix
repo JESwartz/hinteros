@@ -11,15 +11,19 @@
 
     # Component repos. Their packages come in through their overlays (see overlays.default).
     # scripts/dev-override picks these up by input name.
+    # M7: the launcher and daemon follow their m7 branches and the catalog its format-3 branch;
+    # these refs revert (back to main) when M7 merges.
     hinteros-launcher = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git";
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git?ref=m7";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
+        # The launcher's schema check and integration tests use the same daemon as the box.
+        hinteros-daemon.follows = "hinteros-daemon";
       };
     };
     hinteros-daemon = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git";
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git?ref=m7";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -28,7 +32,7 @@
     # The App Store catalog (design/catalog.md): app entries, Store index and vendor terms, locked
     # per release like the other inputs.
     hinteros-catalog = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git";
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git?ref=format-3";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -111,8 +115,12 @@
           overlayModule
           catalogModule
           ./nixos/modules
+          # The vendor's trust (signing keys, cache keys) and version from release/: only here,
+          # so configs that pick individual modules start out trusting nobody.
+          ./nixos/modules/release.nix
         ];
         overlay = overlayModule;
+        cache = ./nixos/modules/cache.nix;
         session = ./nixos/modules/session.nix;
         generic-hardware = ./nixos/modules/generic-hardware.nix;
         daemon = ./nixos/modules/daemon.nix;
@@ -153,6 +161,11 @@
       packages.${system} = {
         vm = self.nixosConfigurations.vm.config.system.build.vm;
         iso = self.nixosConfigurations.installer.config.system.build.isoImage;
+        # The release tool (scripts/promote.sh), run by the owner: `nix run .#promote -- beta`.
+        promote = pkgs.callPackage ./scripts/promote.nix { };
+        # The same script devices ship, for a box whose running system predates it:
+        # `sudo nix run "git+<repo>?ref=beta&rev=<rev>#hinteros-bootstrap-channel" -- beta <rev>`.
+        hinteros-bootstrap-channel = pkgs.callPackage ./nixos/pkgs/hinteros-bootstrap-channel { };
         default = self.packages.${system}.vm;
       };
 
@@ -161,6 +174,11 @@
           type = "app";
           program = "${self.packages.${system}.vm}/bin/run-hinteros-vm-vm";
           meta.description = "Run the HinterOS test VM in a window";
+        };
+        promote = {
+          type = "app";
+          program = pkgs.lib.getExe self.packages.${system}.promote;
+          meta.description = "Sign and move the HinterOS beta and stable channels";
         };
         default = self.apps.${system}.vm;
       };
@@ -227,6 +245,7 @@
         offline-inputs = import ./tests/eval/offline-inputs.nix { inherit self pkgs; };
         state-check = import ./tests/eval/state-check.nix { inherit self pkgs; };
         profiles-eval = import ./tests/eval/profiles.nix { inherit self pkgs; };
+        promote = import ./tests/scripts/promote.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {

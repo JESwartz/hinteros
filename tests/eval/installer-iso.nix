@@ -21,6 +21,11 @@ let
       wiredEeeOff =
         c.networking.networkmanager.ensureProfiles.profiles.hinteros-wired.ethtool.eee-enabled == "0";
       firmware = c.hardware.enableRedistributableFirmware;
+      # The ISO is a stable-channel installer: the offline lock follows `stable`.
+      channelStable =
+        c.hinteros.installer.channel == "stable"
+        && c.hinteros.installer.offlineLock.nodes.hinteros.original.ref == "stable"
+        && c.hinteros.installer.offlineLock.nodes.hinteros.locked.ref == "refs/heads/stable";
       # The installer offers exactly YouTube, Jellyfin, Firefox and Steam; YouTube and Firefox are
       # pre-selected; Crunchyroll, Moonlight and Plex are Store-only.
       installerApps =

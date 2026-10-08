@@ -34,6 +34,8 @@
   stateVersion,
   repoUrl ? "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git",
   isoRev ? "unknown",
+  # The channel of a plan that names none (hinteros.installer.channel).
+  defaultChannel ? "stable",
 }:
 let
   script = replaceVars ./hinteros-install.sh {
@@ -48,6 +50,7 @@ let
       stateVersion
       repoUrl
       isoRev
+      defaultChannel
       ;
   };
 in

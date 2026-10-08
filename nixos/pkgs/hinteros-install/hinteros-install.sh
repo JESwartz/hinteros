@@ -32,6 +32,8 @@ CATALOG_INDEX=@catalogIndex@
 STATE_VERSION=@stateVersion@
 REPO_URL=@repoUrl@
 ISO_REV=@isoRev@
+# The channel a plan without one gets (hinteros.installer.channel).
+DEFAULT_CHANNEL=@defaultChannel@
 LOG=${HINTEROS_INSTALL_LOG:-/var/log/hinteros-install.log}
 MNT=/mnt
 TARGET_LINK=/dev/hinteros-target
@@ -166,10 +168,10 @@ printf '%s' "$PLAN" | jq -e 'type == "object"' >/dev/null 2>&1 \
   || fail 2 plan-invalid "the plan is not a JSON object"
 
 # The plan with defaults filled in; every later read goes through this.
-PLAN=$(printf '%s' "$PLAN" | jq -c '{
+PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   disk, hostname, admin, wifi,
   ssh: (.ssh // {enable: false}),
-  channel: (.channel // "stable"),
+  channel: (.channel // $default_channel),
   base: (.base // "unstable"),
   network: (.network // "auto"),
   apps: (.apps // []),

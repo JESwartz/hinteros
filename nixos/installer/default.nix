@@ -35,7 +35,7 @@ let
     locked = {
       type = "git";
       url = repoUrl;
-      ref = "refs/heads/stable";
+      ref = "refs/heads/${cfg.channel}";
       rev = isoRev;
       inherit (self) narHash lastModified;
     }
@@ -43,7 +43,7 @@ let
     original = {
       type = "git";
       url = repoUrl;
-      ref = "stable";
+      ref = cfg.channel;
     };
   };
 
@@ -296,6 +296,7 @@ let
     catalogIndex = "${config.hinteros.catalog.index}/share/hinteros/catalog.json";
     stateVersion = config.system.nixos.release;
     inherit repoUrl isoRev;
+    defaultChannel = cfg.channel;
     nix = config.nix.package;
   };
 
@@ -518,7 +519,7 @@ let
         password = "change-me-now";
       };
       ssh.enable = false;
-      channel = "stable";
+      inherit (cfg) channel;
       base = "unstable";
       apps = appIds.preselected;
       acceptedTerms = { };
@@ -527,6 +528,20 @@ let
 in
 {
   options.hinteros.installer = {
+    channel = lib.mkOption {
+      type = lib.types.enum [
+        "stable"
+        "beta"
+      ];
+      default = "stable";
+      description = ''
+        The channel this installer is built for: the branch the offline lock's `hinteros` input
+        follows (`ref`) and the default `channel` of a plan that names none. Build an ISO from a
+        commit on this channel (CI builds the stable ISO from `stable` and the beta ISO from
+        `beta`), so the locked revision is on it and the first update is a fast-forward.
+      '';
+    };
+
     package = lib.mkOption {
       type = lib.types.package;
       readOnly = true;
