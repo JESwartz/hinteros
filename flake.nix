@@ -152,6 +152,9 @@
         iso = self.nixosConfigurations.installer.config.system.build.isoImage;
         # The release tool (scripts/promote.sh), run by the owner: `nix run .#promote -- beta`.
         promote = pkgs.callPackage ./scripts/promote.nix { };
+        # The same script devices ship, for a box whose running system predates it:
+        # `sudo nix run "git+<repo>?ref=beta&rev=<rev>#hinteros-bootstrap-channel" -- beta <rev>`.
+        hinteros-bootstrap-channel = pkgs.callPackage ./nixos/pkgs/hinteros-bootstrap-channel { };
         default = self.packages.${system}.vm;
       };
 

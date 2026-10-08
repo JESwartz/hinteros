@@ -52,7 +52,7 @@ a key listed in `release/allowed_signers` of the generation they are running (de
 | `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. The very first one needs `--bootstrap` |
 | `nix run .#promote -- stable [--rev <beta release>]` | Fast-forwards `stable` to a beta release commit after the dogfood confirmation (`--expedite` for high/critical security releases) |
 | `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable` (patch version bump, `Security:` severity required); then merge `stable` into `main` |
-| `sudo hinteros-bootstrap-channel <stable\|beta> <rev>` | On a box, over SSH: move it onto a channel at a rev once, outside the update UI (boxes installed before they trusted the release key) |
+| `sudo hinteros-bootstrap-channel <stable\|beta> <rev>` | On a box, over SSH: move it onto a channel at a rev once, outside the update UI (boxes installed before they trusted the release key). A box whose system predates the script runs it from that very rev: `sudo nix run "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros.git?ref=beta&rev=<rev>#hinteros-bootstrap-channel" -- beta <rev>` |
 
 `promote` works on a temporary clone of `origin`, prints every check, signs with
 `~/.ssh/hinteros/release_ed25519` (or `--key`, `$HINTEROS_RELEASE_KEY`) without ssh-agent, so
