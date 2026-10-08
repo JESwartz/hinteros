@@ -77,7 +77,7 @@ let
     hinteros.forbidUnfree = true;
     hinteros.unfreeExceptions = cacheable;
   };
-  sessionCmd = c: c.config.services.greetd.settings.initial_session.command;
+  sessionCmd = c: c.config.hinteros.session.command;
   gs = mk { hinteros.session.compositor = "gamescope"; };
 
   fx = c: c.config.programs.firefox;

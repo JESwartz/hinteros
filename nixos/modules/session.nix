@@ -158,6 +158,12 @@ in
   options.hinteros.session = {
     enable = lib.mkEnableOption "the HinterOS console session";
 
+    command = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      description = "The session command (compositor and home app) that greetd runs through \`/run/current-system/hinteros-console/session\`.";
+    };
+
     user = lib.mkOption {
       type = lib.types.str;
       default = "hinteros";
@@ -381,6 +387,8 @@ in
       Restart = lib.mkForce "always";
       RestartSec = 1;
     };
+
+    hinteros.session.command = sessionCommand;
 
     environment.systemPackages = [ cfg.gamescope.package ];
 
