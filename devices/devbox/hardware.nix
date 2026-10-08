@@ -6,8 +6,6 @@
 
   hinteros = {
     session.gamescope.backend = "drm";
-    # Plex HTPC (unfree, never cached or on the ISO): enabled here until the App Store (M8).
-    apps.plex-htpc.enable = true;
     # Start Steam (-silent, never under a reaper) with the session daemon.
     daemon.session.settings.steam.autostart = true;
   };

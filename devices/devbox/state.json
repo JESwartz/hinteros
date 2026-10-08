@@ -4,6 +4,6 @@
   "settings": {
     "ssh": { "enable": false }
   },
-  "apps": ["jellyfin", "youtube", "crunchyroll", "firefox", "steam"],
+  "apps": ["jellyfin", "youtube", "crunchyroll", "firefox", "steam", "plex-htpc"],
   "profiles": [{ "id": "p1", "name": "Dev", "user": "hinteros" }]
 }
