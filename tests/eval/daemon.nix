@@ -182,7 +182,10 @@ let
         (lib.elem c.services.inputplumber.package c.services.udev.packages)
       ];
       expected = [
-        [ "send-event-no-blocking-send.patch" ]
+        [
+          "send-event-no-blocking-send.patch"
+          "pointer-response-curve.patch"
+        ]
         "0.81.0"
         true
       ];

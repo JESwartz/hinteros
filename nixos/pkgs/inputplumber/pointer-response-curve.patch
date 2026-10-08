@@ -1,0 +1,141 @@
+Stick -> mouse motion: apply a response curve (speed = speed_pps * m^k)
+
+InputPlumber 0.81.0 maps a stick to mouse motion linearly: a per-axis 0.20
+deadzone, then speed_pps * deflection. That makes small pointer adjustments
+hard. This replaces it with a radial deadzone (0.20 of the vector magnitude),
+the magnitude rescaled past it to m in [0, 1], and speed_pps * m^k with the
+direction kept. Full deflection is still exactly speed_pps (the magnitude is
+clamped to 1, so square-gate diagonals are not faster); k = 1 is linear.
+
+k comes from the environment variable INPUTPLUMBER_POINTER_CURVE, read once
+at first use (default 2.5; invalid or non-positive values are ignored with a
+warning). The math is the pure function pointer_curve(), with unit tests.
+
+Slow speeds stay smooth without a change: MouseDevice::poll already
+accumulates the sub-pixel remainder (MouseMotionState::mouse_remainder) and
+only emits whole-pixel REL_X/REL_Y deltas.
+
+Not upstream: HinterOS-specific behaviour.
+
+--- a/src/input/event/value.rs
++++ b/src/input/event/value.rs
+@@ -20,6 +20,85 @@
+     InvalidTargetConfig(String),
+ }
+ 
++/// Deadzone applied to stick axes that drive mouse motion.
++const MOUSE_MOTION_DEADZONE: f64 = 0.20;
++
++/// Exponent of the stick->mouse speed curve when `INPUTPLUMBER_POINTER_CURVE` is unset or
++/// invalid. 1.0 is linear.
++const DEFAULT_POINTER_CURVE: f64 = 2.5;
++
++/// The pointer curve exponent: `INPUTPLUMBER_POINTER_CURVE`, read once at first use.
++fn pointer_curve_exponent() -> f64 {
++    static EXPONENT: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
++    *EXPONENT.get_or_init(|| {
++        let exponent = match std::env::var("INPUTPLUMBER_POINTER_CURVE") {
++            Ok(raw) => match raw.trim().parse::<f64>() {
++                Ok(k) if k.is_finite() && k > 0.0 => k,
++                _ => {
++                    log::warn!("Ignoring invalid INPUTPLUMBER_POINTER_CURVE {raw:?}");
++                    DEFAULT_POINTER_CURVE
++                }
++            },
++            Err(_) => DEFAULT_POINTER_CURVE,
++        };
++        log::info!("Pointer response curve exponent: {exponent}");
++        exponent
++    })
++}
++
++/// Map a stick deflection to a mouse speed factor in [0, 1] per axis (still to be multiplied
++/// by the full-deflection speed). The magnitude is rescaled past the deadzone to m in [0, 1]
++/// and raised to `exponent`; the direction is kept. Full deflection stays at factor 1, and an
++/// exponent of 1.0 gives a linear response.
++fn pointer_curve(x: f64, y: f64, exponent: f64) -> (f64, f64) {
++    let magnitude = x.hypot(y);
++    if magnitude <= MOUSE_MOTION_DEADZONE {
++        return (0.0, 0.0);
++    }
++    let m = ((magnitude.min(1.0) - MOUSE_MOTION_DEADZONE) / (1.0 - MOUSE_MOTION_DEADZONE))
++        .clamp(0.0, 1.0);
++    let scale = m.powf(exponent) / magnitude;
++    (x * scale, y * scale)
++}
++
++#[cfg(test)]
++mod pointer_curve_tests {
++    use super::*;
++
++    #[test]
++    fn deadzone_and_full_deflection() {
++        assert_eq!(pointer_curve(0.1, 0.1, 2.5), (0.0, 0.0));
++        assert_eq!(pointer_curve(0.2, 0.0, 2.5), (0.0, 0.0));
++        let (x, y) = pointer_curve(1.0, 0.0, 2.5);
++        assert!((x - 1.0).abs() < 1e-9 && y == 0.0);
++        // Square-gate corners exceed 1.0 in magnitude but never exceed full speed.
++        let (x, y) = pointer_curve(1.0, 1.0, 2.5);
++        assert!((x.hypot(y) - 1.0).abs() < 1e-9);
++        let (x, _) = pointer_curve(-1.0, 0.0, 2.5);
++        assert!((x + 1.0).abs() < 1e-9);
++    }
++
++    #[test]
++    fn slow_at_small_deflection() {
++        // Halfway between deadzone edge and full: m = 0.5, 0.5^2.5 = 0.177 of full speed.
++        let (x, _) = pointer_curve(0.6, 0.0, 2.5);
++        assert!((x - 0.5f64.powf(2.5)).abs() < 1e-9);
++        assert!(x < 0.2);
++    }
++
++    #[test]
++    fn keeps_direction() {
++        let (x, y) = pointer_curve(0.6, 0.3, 2.5);
++        assert!((y / x - 0.5).abs() < 1e-9);
++    }
++
++    #[test]
++    fn exponent_one_is_linear_after_deadzone() {
++        let (x, _) = pointer_curve(0.6, 0.0, 1.0);
++        assert!((x - 0.5).abs() < 1e-9);
++    }
++}
++
+ /// InputValue represents different ways to represent a value from an input event.
+ #[derive(Debug, Clone)]
+ pub enum InputValue {
+@@ -710,25 +789,15 @@
+                     _ => (None, None),
+                 };
+ 
+-                // Check to see if the value is below a given threshold to prevent
+-                // mouse movements for axes that don't recenter to 0.
+-                if let Some(value) = x {
+-                    if value.abs() < 0.20 {
+-                        x = Some(0.0);
+-                    }
+-                }
+-                if let Some(value) = y {
+-                    if value.abs() < 0.20 {
+-                        y = Some(0.0);
+-                    }
+-                }
+-
+-                // Multiply the value by the speed
+-                if let Some(value) = x {
+-                    x = Some(value * speed_pps as f64);
++                // Apply the deadzone and response curve (speed grows with deflection^k,
++                // full deflection is still full speed), then scale by the speed.
++                let (cx, cy) =
++                    pointer_curve(x.unwrap_or(0.0), y.unwrap_or(0.0), pointer_curve_exponent());
++                if x.is_some() {
++                    x = Some(cx * speed_pps as f64);
+                 }
+-                if let Some(value) = y {
+-                    y = Some(value * speed_pps as f64);
++                if y.is_some() {
++                    y = Some(cy * speed_pps as f64);
+                 }
+ 
+                 // If a direction is defined, map only the selected directions to
