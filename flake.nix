@@ -89,17 +89,22 @@
         (import ./nixos/overlay.nix)
       ];
 
-      # The catalog's ids with the little the update check needs to say which apps a new
-      # revision adds or retires: `{ <id> = { name; status; statusReason; }; }`. hinteros-system
-      # evaluates it against a target revision (`nix eval --json --option allow-import-from-derivation
-      # false "<input url>&rev=<rev>#lib.catalogIds"`), so it must stay a plain attribute set that
-      # needs no build.
-      lib.catalogIds = nixpkgs.lib.mapAttrs (_: e: {
-        inherit (e) name status statusReason;
-      }) hinteros-catalog.catalog;
+      lib = {
+        # The catalog's ids with the little the update check needs to say which apps a new
+        # revision adds or retires: `{ <id> = { name; kind; status; statusReason; }; }`.
+        # hinteros-system evaluates it against a target revision (`nix eval --json --option
+        # allow-import-from-derivation false "<input url>&rev=<rev>#lib.catalogIds"`), so it must
+        # stay a plain attribute set that needs no build.
+        catalogIds = nixpkgs.lib.mapAttrs (_: e: {
+          inherit (e) name status statusReason;
+        }) hinteros-catalog.catalog;
 
-      # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
-      lib.mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
+        # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
+        mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
+
+        # Checked-in devices as functions of their state (mkDevice `selfFlake`).
+        devices.devbox = import ./devices/devbox { inherit self; };
+      };
 
       nixosModules = {
         default.imports = [
@@ -131,7 +136,9 @@
         # Same VM with the real compositor; needs a Vulkan GPU (e.g. virtio-gpu venus).
         vm-gamescope = mkVm [ { hinteros.session.compositor = "gamescope"; } ];
         # Dev box (mini PC #1), deployed with nixos-rebuild --target-host. See devices/devbox.
-        devbox = import ./devices/devbox { inherit self; };
+        devbox = self.lib.devices.devbox {
+          state = builtins.fromJSON (builtins.readFile ./devices/devbox/state.json);
+        };
         # The installer ISO: `nix build .#iso`. See nixos/installer.
         installer = nixpkgs.lib.nixosSystem {
           inherit system;
@@ -186,6 +193,7 @@
         polkit-agent = import ./tests/vm/polkit-agent.nix { inherit self pkgs; };
         session-restart = import ./tests/vm/session-restart.nix { inherit self pkgs; };
         store-install = import ./tests/vm/store-install.nix { inherit self pkgs; };
+        profile-apps-system = import ./tests/vm/profile-apps-system.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
         install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
         install-app-failure = import ./tests/vm/install-offline.nix {
@@ -216,6 +224,7 @@
         installer-iso-eval = import ./tests/eval/installer-iso.nix { inherit self pkgs; };
         offline-inputs = import ./tests/eval/offline-inputs.nix { inherit self pkgs; };
         state-check = import ./tests/eval/state-check.nix { inherit self pkgs; };
+        profiles-eval = import ./tests/eval/profiles.nix { inherit self pkgs; };
       };
 
       devShells.${system}.default = pkgs.mkShell {

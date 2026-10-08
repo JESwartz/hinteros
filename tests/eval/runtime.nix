@@ -97,8 +97,9 @@ let
         false
       ];
     };
-    testPolkitScopedToSessionUser = {
-      expr = has ''subject.user == "tester" && subject.local && subject.active'' polkit;
+    # Profiles (any member of `hinteros`), only in an active local session.
+    testPolkitScopedToProfiles = {
+      expr = has ''subject.isInGroup("hinteros") && subject.local && subject.active'' polkit;
       expected = true;
     };
     testPolkitNotBlanket = {

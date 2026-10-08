@@ -43,6 +43,25 @@ let
   report = builtins.toFile "facter.json" "{}";
 
   c = (mk good).config;
+  good2 = {
+    schemaVersion = 2;
+    settings.ssh.enable = false;
+    settings.guest.enable = true;
+    profiles = [
+      {
+        id = "p1";
+        user = "hinteros";
+      }
+      {
+        id = "p3";
+        user = "hinteros-p3";
+      }
+    ];
+    requirements = [ "graphics32" ];
+    services = [ ];
+  };
+  c2 = (mk good2).config;
+  c2nog = (mk (good2 // { settings.guest.enable = false; })).config;
   minimal = (mk { schemaVersion = 1; }).config;
 
   # A device with a real hardware report: facter must not add a second DHCP client.
@@ -74,6 +93,223 @@ let
   ];
 
   results = lib.runTests {
+    testSchema2Good = {
+      expr = failures good2;
+      expected = "";
+    };
+    testSchema2Bad = {
+      expr = map (s: lib.hasInfix s.msg (failures (good2 // s.patch))) [
+        {
+          msg = "unknown field(s) in state: apps";
+          patch.apps = [ "youtube" ];
+        }
+        {
+          msg = "p3 must be user hinteros-p3";
+          patch.profiles = [
+            {
+              id = "p1";
+              user = "hinteros";
+            }
+            {
+              id = "p3";
+              user = "sam";
+            }
+          ];
+        }
+        {
+          msg = "bad id";
+          patch.profiles = [
+            {
+              id = "admin";
+              user = "hinteros-admin";
+            }
+          ];
+        }
+        {
+          msg = "duplicate ids";
+          patch.profiles = [
+            {
+              id = "p1";
+              user = "hinteros";
+            }
+            {
+              id = "p1";
+              user = "hinteros";
+            }
+          ];
+        }
+        {
+          msg = "1 to 8 accounts";
+          patch.profiles = map (n: {
+            id = "p${toString n}";
+            user = if n == 1 then "hinteros" else "hinteros-p${toString n}";
+          }) (lib.range 1 9);
+        }
+        {
+          msg = "1 to 8 accounts";
+          patch.profiles = [ ];
+        }
+        {
+          msg = "unknown field(s) in profiles[]: name";
+          patch.profiles = [
+            {
+              id = "p1";
+              user = "hinteros";
+              name = "Dev";
+            }
+          ];
+        }
+        {
+          msg = "unknown box feature(s) in requirements: opengl";
+          patch.requirements = [ "opengl" ];
+        }
+        {
+          msg = "unknown service id(s): youtube";
+          patch.services = [ "youtube" ];
+        }
+        {
+          msg = "unknown field(s) in settings.guest: pin";
+          patch.settings.guest.pin = "1234";
+        }
+      ];
+      expected = lib.genList (_: true) 10;
+    };
+    # Schema 2: accounts, the guest, box features from `requirements`, apps per profile.
+    testSchema2Accounts = {
+      expr = [
+        (map (a: a.user) c2.hinteros.profiles.accounts)
+        c2.users.users.hinteros-p3.uid
+        (c2.users.users.hinteros.uid or null)
+        c2.users.users.hinteros-p3.extraGroups
+        c2.users.users.hinteros-p3.homeMode
+        c2.users.users.hinteros-guest.uid
+        c2.hinteros.profiles.users
+        c2.hinteros.session.user
+        (lib.elem "D! /home/hinteros-guest 0700 hinteros-guest users -" c2.systemd.tmpfiles.rules)
+        (c2nog.users.users ? hinteros-guest)
+      ];
+      expected = [
+        [
+          "hinteros"
+          "hinteros-p3"
+        ]
+        20003
+        null
+        [ "hinteros" ]
+        "700"
+        20000
+        [
+          "hinteros"
+          "hinteros-p3"
+          "hinteros-guest"
+        ]
+        "hinteros"
+        true
+        false
+      ];
+    };
+    testSchema2Apps = {
+      expr = [
+        c2.hinteros.appEnv.perProfile
+        c2.hinteros.daemon.session.settings.apps
+        (c2.hinteros.daemon.session.settings ? steam && c2.hinteros.daemon.session.settings.steam ? path)
+        c2.hinteros.boxFeatures
+        c2.hardware.graphics.enable32Bit
+        c2.hardware.steam-hardware.enable
+        c2.hinteros.unfreeAllowlist
+        # No app package in the system (the OSK and the session's own packages are not apps).
+        (lib.filter (
+          n:
+          lib.elem n [
+            "jellyfin-desktop"
+            "firefox"
+            "firefox-esr"
+            "steam"
+            "hinteros-firefox-kiosk"
+          ]
+        ) (map lib.getName c2.environment.systemPackages))
+        (lib.hasInfix "hinteros-profile-env" c2.hinteros.session.command)
+        (lib.hasInfix "hinteros-profile-env" c.hinteros.session.command)
+        # Firefox policies stay box-wide.
+        (c2.environment.etc ? "firefox/policies/policies.json")
+        c2.programs.firefox.enable
+      ];
+      expected = [
+        true
+        { profile = "/run/hinteros/apps/%u"; }
+        false
+        [ "graphics32" ]
+        true
+        false
+        [ ]
+        [ ]
+        true
+        false
+        true
+        false
+      ];
+    };
+    # Schema 1 with `profiles: []` (the installer, every pre-M7 box) is p1 = hinteros.
+    testSchema1EmptyProfiles = {
+      expr = [
+        minimal.hinteros.profiles.accounts
+        minimal.hinteros.session.user
+        minimal.hinteros.appEnv.perProfile
+      ];
+      expected = [
+        [
+          {
+            id = "p1";
+            user = "hinteros";
+          }
+        ]
+        "hinteros"
+        false
+      ];
+    };
+    # Every flake input's source stays with the system (offline env evaluation after a GC).
+    testFlakeSourcesKept = {
+      expr = map (s: lib.elem s c.system.extraDependencies) [
+        self.outPath
+        self.inputs.nixpkgs.outPath
+        self.inputs.hinteros-catalog.outPath
+        self.inputs.hinteros-daemon.outPath
+        self.inputs.hinteros-launcher.outPath
+      ];
+      expected = [
+        true
+        true
+        true
+        true
+        true
+      ];
+    };
+    # The dev box embeds a device flake (flake.nix and flake.lock naming this repo by store path).
+    testDevboxEmbeddedFlake =
+      let
+        d = self.nixosConfigurations.devbox.config.hinteros.deviceConfig;
+        lock = builtins.fromJSON (builtins.unsafeDiscardStringContext d.embeddedFlake.lock);
+      in
+      {
+        expr = [
+          (lib.hasInfix "hinteros.lib.devices.devbox" d.embeddedFlake.flake)
+          (lib.hasInfix "path:${builtins.unsafeDiscardStringContext self.outPath}" (
+            builtins.unsafeDiscardStringContext d.embeddedFlake.flake
+          ))
+          lock.nodes.hinteros.locked.type
+          lock.nodes.hinteros.locked.narHash
+          (lock.nodes ? hinteros-catalog)
+          (c.hinteros.deviceConfig.embeddedFlake == null)
+        ];
+        expected = [
+          true
+          true
+          "path"
+          self.narHash
+          true
+          true
+        ];
+      };
     testFacterM900NoSecondDhcp = {
       expr = noDhcp (self + "/tests/vm/fixtures/facter-lenovo-m900.json");
       expected = noDhcpExpected;
@@ -86,9 +322,29 @@ let
       expr = failures good;
       expected = "";
     };
+    # Schema 1, box-wide Steam: stock pkgs.steam installed, its box features on, no programs.steam.
     testSteamEnabled = {
-      expr = c.programs.steam.enable;
-      expected = true;
+      expr = [
+        c.programs.steam.enable
+        c.hinteros.boxFeatures
+        c.hardware.graphics.enable32Bit
+        c.hardware.steam-hardware.enable
+        c.services.pipewire.alsa.support32Bit
+        (lib.any (p: lib.getName p == "steam") c.environment.systemPackages)
+        (lib.hasSuffix "/bin/steam" c.hinteros.daemon.session.settings.steam.path)
+      ];
+      expected = [
+        false
+        [
+          "graphics32"
+          "steam-devices"
+        ]
+        true
+        true
+        true
+        true
+        true
+      ];
     };
     testSessionUser = {
       expr = c.hinteros.session.user;
@@ -119,7 +375,7 @@ let
       ];
     };
     testBadSchemaVersion = {
-      expr = lib.hasInfix "unsupported schemaVersion 2" (failures (good // { schemaVersion = 2; }));
+      expr = lib.hasInfix "unsupported schemaVersion 3" (failures (good // { schemaVersion = 3; }));
       expected = true;
     };
     testMissingSchemaVersion = {

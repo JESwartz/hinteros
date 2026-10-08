@@ -40,11 +40,34 @@ let
     ) null cfg.environment.systemPackages;
 
   sys = c.systemd.services.hinteros-system.serviceConfig;
+  rules = c.environment.etc."polkit-1/rules.d/50-hinteros.rules".text;
   job = c.systemd.services."hinteros-job@";
   channelLine = "git+${c.hinteros.update.repo}?ref=stable";
   template = builtins.readFile ../../nixos/templates/device-flake.nix.in;
 
   results = lib.runTests {
+    # Profiles (DECISIONS D5): the session daemon runs for every account, the usage scan, and
+    # the polkit grant that leaves ssh and the admin PIN reset to the admin password.
+    testProfileUnits = {
+      expr = [
+        c.systemd.user.services.hinteros-session.unitConfig.ConditionGroup
+        (c.systemd.user.services.hinteros-session.unitConfig ? ConditionUser)
+        (lib.hasSuffix " usage" c.systemd.services.hinteros-usage.serviceConfig.ExecStart)
+        c.systemd.services.hinteros-usage.serviceConfig.ProtectHome
+        (lib.hasInfix ''action.id !== "org.hinteros.system.profiles.recover"'' rules)
+        (lib.hasInfix "hinteros-greeter" rules)
+        sys.SupplementaryGroups
+      ];
+      expected = [
+        "hinteros"
+        false
+        true
+        "read-only"
+        true
+        false
+        [ ]
+      ];
+    };
     testSystemService = {
       expr = [
         sys.RuntimeDirectoryPreserve
@@ -60,7 +83,10 @@ let
       expected = [
         "yes"
         "strict"
-        [ "/run/hinteros" ]
+        [
+          "/run/hinteros"
+          "/var/lib/hinteros"
+        ]
         [ "CAP_SYS_PTRACE" ]
         [ "AF_UNIX" ]
         true
@@ -230,17 +256,18 @@ pkgs.runCommand "hinteros-daemon-eval"
   ''
     if [ -n "$failures" ]; then echo "$failures" >&2; exit 1; fi
     cd $share/share
-    [ "$(jq -c . hinteros/release.json)" = '{"dev":false,"version":"0.1.0-dev"}' ]
+    [ "$(jq -c . hinteros/release.json)" = '{"dev":false,"stateSchema":2,"version":"0.1.0-dev"}' ]
     [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://justsomeshed.com/JSwartz/HinterOS/hinteros.git"}' ]
     # No signers by default: only comments, so nothing verifies.
     ! grep -v '^#' hinteros/update/allowed_signers | grep -q .
     grep -q 'update verifies' hinteros/update/allowed_signers
     # polkit: every action is "no" except ssh (the admin password, with a message the launcher shows).
-    for a in settings rebuild update.check update.apply rollback channel jobs.cancel apps; do
+    for a in settings rebuild update.check update.apply rollback channel jobs.cancel apps profiles profiles.create starter services ssh profiles.recover; do
       grep -q "org.hinteros.system.$a\"" polkit-1/actions/org.hinteros.system.policy
     done
-    [ "$(grep -c '<allow_any>no</allow_any>' polkit-1/actions/org.hinteros.system.policy)" = 8 ]
-    [ "$(grep -c '<allow_active>auth_admin</allow_active>' polkit-1/actions/org.hinteros.system.policy)" = 1 ]
+    [ "$(grep -c '<allow_any>no</allow_any>' polkit-1/actions/org.hinteros.system.policy)" = 12 ]
+    # ssh and profiles.recover (the admin profile's PIN reset) need the admin account's password.
+    [ "$(grep -c '<allow_active>auth_admin</allow_active>' polkit-1/actions/org.hinteros.system.policy)" = 2 ]
     grep -q '<message>Authentication is required to turn remote login (SSH) on or off</message>' polkit-1/actions/org.hinteros.system.policy
     ! grep -q 'org.hinteros.system.ssh.admin' polkit-1/actions/org.hinteros.system.policy
     # With a key: the principal, the pinned namespace, the key, and dev in release.json.

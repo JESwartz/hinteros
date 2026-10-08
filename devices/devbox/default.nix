@@ -4,14 +4,21 @@
 # here either). It goes through mkDevice with a checked-in state file, like boxes #2 and #3 do
 # with /etc/hinteros. Add your SSH public key to hinteros.dev.deployKeys below before the first
 # deploy. See tests/couch/m0-spikes.md.
+#
+# A function of the state (`self.lib.devices.devbox`): `nixosConfigurations.devbox` passes the
+# checked-in state.json, and the device flake embedded in every generation's snapshot
+# (`selfFlake`) passes /etc/hinteros/state.json, so hinteros-system can evaluate app envs and
+# apply a state it rewrote (the v1 -> v2 migration) on this box like on any other.
 { self }:
+{ state }:
 self.lib.mkDevice {
-  state = builtins.fromJSON (builtins.readFile ./state.json);
+  inherit state;
   # TODO(M1): generate on the box with `nixos-facter` and check it in as facter.json,
   # then pass `facterReport = ./facter.json;`.
   facterReport = null;
-  # The snapshot embedded in every generation (state.json; there is no flake.nix here).
-  configDir = ./.;
+  # The snapshot: a generated flake.nix and flake.lock naming this repo by store path, plus the
+  # state.
+  selfFlake = "devbox";
   extraModules = [
     ./hardware.nix
     {

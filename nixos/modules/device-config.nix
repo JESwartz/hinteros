@@ -31,6 +31,25 @@ let
           ''
         ) managed}
       ''
+    else if cfg.embeddedFlake != null && config.hinteros.state != null then
+      # A checked-in device (the dev box): a generated device flake naming the system repo by
+      # store path, so `path:/etc/hinteros` evaluates like on any box (spike 8 item 6).
+      pkgs.runCommand "hinteros-config-snapshot"
+        {
+          inherit (cfg.embeddedFlake) flake lock;
+          state = builtins.toJSON config.hinteros.state;
+          passAsFile = [
+            "flake"
+            "lock"
+            "state"
+          ];
+        }
+        ''
+          mkdir $out
+          cp "$flakePath" $out/flake.nix
+          cp "$lockPath" $out/flake.lock
+          cp "$statePath" $out/state.json
+        ''
     else if config.hinteros.state != null then
       # No config dir (e.g. a checked-in device): snapshot the state it was built from.
       pkgs.writeTextDir "state.json" (builtins.toJSON config.hinteros.state)
@@ -118,6 +137,29 @@ in
         Config dir this system is built from (`flake.nix`, `flake.lock`, `state.json`, copied
         into the store by the flake build). Set by `hinteros.lib.mkDevice`. When null, the
         snapshot holds just `state.json`, generated from `hinteros.state` if that is set.
+      '';
+    };
+
+    embeddedFlake = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options = {
+            flake = lib.mkOption {
+              type = lib.types.str;
+              description = "flake.nix text.";
+            };
+            lock = lib.mkOption {
+              type = lib.types.str;
+              description = "flake.lock text.";
+            };
+          };
+        }
+      );
+      default = null;
+      description = ''
+        For a checked-in device without a config dir (the dev box): the generated `flake.nix` and
+        `flake.lock` of a device flake, snapshotted with `state.json` (set by mkDevice's
+        `selfFlake`), so hinteros-system can evaluate app envs from `path:/etc/hinteros`.
       '';
     };
 

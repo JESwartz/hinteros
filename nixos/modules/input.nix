@@ -8,6 +8,9 @@
 }:
 let
   cfg = config.hinteros.input;
+  group = config.hinteros.daemon.group or "hinteros";
+  greeterOn = config.hinteros.profiles.greeter.enable or false;
+  greeterUser = config.hinteros.profiles.greeter.user or "hinteros-greeter";
 in
 {
   options.hinteros.input = {
@@ -39,9 +42,22 @@ in
     # The stock module omits these: uaccess rules for hidraw pads and device setup rules.
     services.udev.packages = [ config.services.inputplumber.package ];
 
-    # InputPlumber's shipped polkit rule grants its actions to this group (or wheel).
+    # Autologin: InputPlumber's shipped polkit rule grants its actions to this group (or wheel).
+    # With the greeter no account is in it: the active local session of a profile (or the
+    # greeter) gets the actions instead (profiles.md, "Device access per seat"; spike 7: polkit
+    # sees the profile's user service as active and local, a system service as that user not).
     users.groups.inputplumber = { };
-    users.users.${config.hinteros.session.user}.extraGroups = [ "inputplumber" ];
+    users.users.${config.hinteros.session.user}.extraGroups = lib.optionals (!greeterOn) [
+      "inputplumber"
+    ];
+    security.polkit.extraConfig = lib.mkIf greeterOn ''
+      polkit.addRule(function (action, subject) {
+        if (action.id.indexOf("org.shadowblip.") === 0 && subject.local && subject.active &&
+            (subject.isInGroup("${group}") || subject.user == "${greeterUser}")) {
+          return polkit.Result.YES;
+        }
+      });
+    '';
 
     # ManageAllDevices (off by default, reset on every InputPlumber restart) is set by the
     # session daemon (hinteros.daemon), which also re-applies it after restarts.

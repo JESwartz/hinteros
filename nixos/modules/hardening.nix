@@ -27,6 +27,26 @@ let
     )
     ++ lib.filter (n: n != "root") config.users.groups.wheel.members;
 
+  # Every account that may be on screen (profiles.nix), and the session user.
+  profileUsers = lib.unique ([ sessionUser ] ++ (cfg.profiles.users or [ ]));
+  greeterOn = cfg.profiles.greeter.enable or false;
+  # With the greeter, devices follow the active session (uaccess); nobody holds them by group.
+  deviceGroups = [
+    "video"
+    "input"
+    "uinput"
+    "inputplumber"
+  ];
+  groupsOf =
+    u:
+    (config.users.users.${u}.extraGroups or [ ])
+    ++ lib.filter (g: lib.elem u (config.users.groups.${g}.members or [ ])) (
+      lib.attrNames config.users.groups
+    );
+  inDeviceGroups = lib.filter (u: lib.intersectLists deviceGroups (groupsOf u) != [ ]) (
+    lib.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users)
+  );
+
   sudoRuleOptions = lib.concatMap (
     r: lib.concatMap (c: c.options or [ ]) r.commands
   ) config.security.sudo.extraRules;
@@ -92,8 +112,8 @@ in
             message = "hinteros hardening: SSH is enabled but hinteros.admin is not (enable it with hashedPasswordFile); the admin is the only SSH login.";
           }
           {
-            assertion = adminUser != sessionUser;
-            message = "hinteros hardening: the admin account must not be the session user.";
+            assertion = !(lib.elem adminUser profileUsers);
+            message = "hinteros hardening: the admin account must not be a profile's account.";
           }
           {
             assertion = dev || config.security.sudo.wheelNeedsPassword;
@@ -112,16 +132,20 @@ in
             message = "hinteros hardening: nix trusted-users is ${builtins.toJSON config.nix.settings.trusted-users}; only root without hinteros.dev.enable (trusted users are root-equivalent).";
           }
           {
-            assertion = !(lib.elem sessionUser config.nix.settings.trusted-users);
-            message = "hinteros hardening: the session user must not be a nix trusted user, even in dev.";
+            assertion = lib.intersectLists profileUsers config.nix.settings.trusted-users == [ ];
+            message = "hinteros hardening: no profile account may be a nix trusted user, even in dev.";
           }
           {
-            assertion = !(lib.elem sessionUser wheelUsers);
-            message = "hinteros hardening: the session user must not be in wheel, even in dev; deploy as `deploy`.";
+            assertion = lib.intersectLists profileUsers wheelUsers == [ ];
+            message = "hinteros hardening: no profile account may be in wheel, even in dev; deploy as `deploy`.";
           }
           {
-            assertion = !(lib.elem "systemd-journal" config.users.users.${sessionUser}.extraGroups);
-            message = "hinteros hardening: the session user must not read the system journal (audit trail).";
+            assertion = lib.all (u: !(lib.elem "systemd-journal" (groupsOf u))) profileUsers;
+            message = "hinteros hardening: no profile account may read the system journal (audit trail).";
+          }
+          {
+            assertion = dev || !greeterOn || inDeviceGroups == [ ];
+            message = "hinteros hardening: users in device groups (${lib.concatStringsSep ", " inDeviceGroups}) with the greeter; devices follow the active session (uaccess).";
           }
           {
             assertion = lib.all (k: !lib.hasPrefix "/nix/store" k.path) config.services.openssh.hostKeys;

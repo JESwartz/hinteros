@@ -96,18 +96,23 @@ let
   # learns the app id of its windows. Started here rather than by the daemon's
   # launcher.command: gamescope needs a child to run anyway, and the home app then comes up
   # (and lives and dies with the session) whether or not the daemon is alive.
-  homeCommand =
-    if cfg.compositor == "gamescope" then
-      [
-        (lib.getExe cfg.reaperPackage)
-        "reaper"
-        "SteamLaunch"
-        "AppId=${toString cfg.launcherAppId}"
-        "--"
-        homeLoop
-      ]
-    else
-      [ homeLoop ];
+  homeCommandWith =
+    args:
+    (
+      if cfg.compositor == "gamescope" then
+        [
+          (lib.getExe cfg.reaperPackage)
+          "reaper"
+          "SteamLaunch"
+          "AppId=${toString cfg.launcherAppId}"
+          "--"
+        ]
+      else
+        [ ]
+    )
+    ++ [ homeLoop ]
+    ++ args;
+  homeCommand = homeCommandWith [ ];
 
   # Runs its arguments with gamescope's display mode files set (runtime settings, API 0.7):
   # `GAMESCOPE_PATCHED_EDID_FILE` (gamescope writes the connector's modes next to it, as
@@ -123,6 +128,19 @@ let
     exec "$@"
   '';
 
+  # Per-profile apps (apps.md, "The session side"): the profile's app env on PATH and
+  # XDG_DATA_DIRS for the compositor and everything it starts (steam:// handlers, xdg-open).
+  # /run/hinteros/apps/<user> is a symlink chain that hinteros-system repoints, so later installs
+  # show up without a new session.
+  profileEnvWrapper = pkgs.writeShellScript "hinteros-profile-env" ''
+    link=/run/hinteros/apps/''${USER:-$(${pkgs.coreutils}/bin/id -un)}
+    export PATH="$link/bin''${PATH:+:$PATH}"
+    export XDG_DATA_DIRS="$link/share:''${XDG_DATA_DIRS:-/run/current-system/sw/share}"
+    exec "$@"
+  '';
+  perProfile = config.hinteros.appEnv.perProfile or false;
+  greeterOn = config.hinteros.profiles.greeter.enable or false;
+
   # A new session of the user (greetd restarted, the compositor crashed) may find the previous
   # session's daemon still running: the user manager outlives a session whose scope is still being
   # torn down. That daemon is attached to the old compositor (its Xwayland is gone), so the new
@@ -134,19 +152,46 @@ let
 
   # The compositor's and the home app's stdout/stderr go to the journal
   # (`journalctl -t hinteros-compositor`); greetd would drop them.
+  compositorPrefix = [
+    (lib.getExe' config.systemd.package "systemd-cat")
+    "--identifier"
+    "hinteros-compositor"
+    (lib.getExe' pkgs.coreutils "env")
+  ]
+  ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment
+  ++ lib.optional (cfg.compositor == "gamescope") cfg.displayEnvWrapper;
+
   sessionCommand = lib.escapeShellArgs (
-    [
-      sessionStart
-      (lib.getExe' config.systemd.package "systemd-cat")
-      "--identifier"
-      "hinteros-compositor"
-      (lib.getExe' pkgs.coreutils "env")
-    ]
-    ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment
-    ++ lib.optional (cfg.compositor == "gamescope") cfg.displayEnvWrapper
+    [ sessionStart ]
+    ++ compositorPrefix
+    ++ lib.optional perProfile profileEnvWrapper
     ++ compositorCommand.${cfg.compositor}
     ++ homeCommand
   );
+
+  # The greeter (profiles.md, "The pieces"). greetd runs `greeterLink` as `hinteros-greeter` at
+  # boot and whenever a profile's session ends. `hinteros-session greet` takes the fast path
+  # into a profile (greetd IPC, no UI) or execs `pickerLink`: the compositor with the launcher in
+  # greeter mode, and the session daemon in greeter mode as a child of the greeter session (so it
+  # inherits GREETD_SOCK). The profile session it starts is always `sessionLink`.
+  daemonExe = lib.getExe config.hinteros.daemon.session.package;
+  greeterDaemon = pkgs.writeShellScript "hinteros-greeter-daemon" ''
+    ${
+      lib.optionalString (cfg.compositor == "cage") "DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 "
+    }${daemonExe} --greeter --config ${config.hinteros.daemon.sessionConfigFile} &
+    exec "$@"
+  '';
+  pickerCommand = lib.escapeShellArgs (
+    compositorPrefix
+    ++ [ greeterDaemon ]
+    ++ compositorCommand.${cfg.compositor}
+    ++ homeCommandWith [ "--greeter" ]
+  );
+  pickerScript = pkgs.writeShellScript "hinteros-console-picker" "exec ${pickerCommand}";
+  greeterScript = pkgs.writeShellScript "hinteros-console-greeter" ''
+    exec ${daemonExe} greet --config ${config.hinteros.daemon.sessionConfigFile} -- ${consoleDir}/picker
+  '';
+  greeterLink = "${consoleDir}/greeter";
 
   # greetd runs the session through /run/current-system, so a session started after a switch
   # (session.restart, a crash) gets the current system's compositor and home app: greetd itself
@@ -359,9 +404,11 @@ in
       }
     ];
 
+    # Autologin: the session user holds the devices through static groups. With the greeter
+    # (profiles.nix) no account has them: logind's uaccess gives them to the active session.
     users.users.${cfg.user} = {
       isNormalUser = true;
-      extraGroups = [
+      extraGroups = lib.optionals (!greeterOn) [
         "video"
         "input"
         "uinput" # the daemon injects key presses for keyboard-driven apps
@@ -370,13 +417,24 @@ in
 
     services.greetd = {
       enable = true;
-      settings = rec {
-        initial_session = {
-          command = sessionLink;
-          inherit (cfg) user;
-        };
-        default_session = initial_session;
-      };
+      settings =
+        if greeterOn then
+          {
+            # No initial_session: the greeter decides (and its config does not depend on the
+            # account list, so creating a profile never restarts greetd).
+            default_session = {
+              command = greeterLink;
+              user = config.hinteros.profiles.greeter.user;
+            };
+          }
+        else
+          rec {
+            initial_session = {
+              command = sessionLink;
+              inherit (cfg) user;
+            };
+            default_session = initial_session;
+          };
     };
 
     # greetd starts `default_session` as a "greeter" once the `initial_session` has ended (a session
@@ -396,6 +454,10 @@ in
       mkdir -p $out/hinteros-console
       ln -s ${lib.getExe cfg.homeApp} $out/hinteros-console/home
       ln -s ${sessionScript} $out/hinteros-console/session
+    ''
+    + lib.optionalString greeterOn ''
+      ln -s ${greeterScript} $out/hinteros-console/greeter
+      ln -s ${pickerScript} $out/hinteros-console/picker
     '';
   };
 }

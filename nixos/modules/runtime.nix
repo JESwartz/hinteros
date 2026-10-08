@@ -1,7 +1,9 @@
 # Runtime settings services: everything Settings changes without a rebuild (M5). NetworkManager
 # (Wi-Fi), BlueZ (controller pairing), PipeWire (audio output and volume) and logind/polkit
-# (sleep, restart, shutdown). The session daemon talks to them over DBus as the session user,
-# so the polkit rules here are scoped to that user's active local session.
+# (sleep, restart, shutdown). The session daemon talks to them over DBus as the profile's user,
+# so the polkit rules here are scoped to the active local session of a profile: a member of the
+# `hinteros` group (profiles.md, "Device access per seat"; spike 7: polkit treats the profile's
+# user service as active and local).
 {
   config,
   lib,
@@ -10,19 +12,29 @@
 }:
 let
   cfg = config.hinteros.runtime;
-  user = config.hinteros.session.user;
+  group = config.hinteros.daemon.group;
+  greeterOn = config.hinteros.profiles.greeter.enable or false;
+  greeterUser = config.hinteros.profiles.greeter.user or "hinteros-greeter";
 
-  # Only the session user, in an active local session (the console). Remote logins such as
-  # SSH, and every other user, keep the stock policy.
-  scoped = ''subject.user == "${user}" && subject.local && subject.active'';
+  # Only a profile in an active local session (the console). Remote logins such as SSH, and
+  # every other user, keep the stock policy.
+  scoped = ''subject.isInGroup("${group}") && subject.local && subject.active'';
+  # The greeter (the picker) gets power only.
+  scopedPower =
+    if greeterOn then
+      ''(subject.isInGroup("${group}") || subject.user == "${greeterUser}") && subject.local && subject.active''
+    else
+      scoped;
 
-  rule = actions: ''
+  ruleFor = scope: actions: ''
     polkit.addRule(function(action, subject) {
-      if (${scoped} && (${lib.concatMapStringsSep " || " (a: ''action.id == "${a}"'') actions})) {
+      if (${scope} && (${lib.concatMapStringsSep " || " (a: ''action.id == "${a}"'') actions})) {
         return polkit.Result.YES;
       }
     });
   '';
+
+  rule = ruleFor scoped;
 
   # What the Wi-Fi settings screen needs: scan, toggle, connect, and per-user connections.
   # ACCEPTED (threat-model.md, B3): settings.modify.system is granted. The session user can
@@ -101,7 +113,7 @@ in
         # The session daemon pairs controllers over the system bus as the session user. This BlueZ
         # (bluetooth.conf) lets *every* local user talk to org.bluez, and older ones only
         # `at_console` users and group `lp`. Pin it: org.bluez is closed to everyone but root (BlueZ
-        # itself) and the session user, whatever BlueZ ships. Later policy wins, hence mkAfter (the
+        # itself) and the profiles (the `hinteros` group), whatever BlueZ ships. Later policy wins, hence mkAfter (the
         # BlueZ package is added to the list by hardware.bluetooth); a user policy beats the default
         # context.
         services.dbus.packages = lib.mkAfter [
@@ -112,7 +124,7 @@ in
               <policy context="default">
                 <deny send_destination="org.bluez"/>
               </policy>
-              <policy user="${user}">
+              <policy group="${group}">
                 <allow send_destination="org.bluez"/>
               </policy>
             </busconfig>
@@ -160,7 +172,7 @@ in
           HandleLidSwitchExternalPower = "ignore";
           HandleLidSwitchDocked = "ignore";
         };
-        security.polkit.extraConfig = rule powerActions;
+        security.polkit.extraConfig = ruleFor scopedPower powerActions;
       })
     ]
   );

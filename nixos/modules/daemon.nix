@@ -5,6 +5,7 @@
 #                     /run/hinteros/system.sock (0660, group `hinteros`) to the session daemon.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -71,10 +72,20 @@ let
         channel = "Switch the update channel or the base";
         "jobs.cancel" = "Cancel a running system job";
         apps = "Install or remove apps";
+        # Profiles (profiles.md, "Authority"): PINs are checked by the service; polkit stays the
+        # per-action gate (and the future parental-controls hook).
+        profiles = "Change profiles";
+        "profiles.create" = "Create a profile";
+        starter = "Change the starter apps";
+        services = "Enable or disable box services";
       }
     )}
     ${mkAction' "ssh" "Turn remote login (SSH) on or off"
       "Authentication is required to turn remote login (SSH) on or off"
+      "auth_admin"
+    }
+    ${mkAction' "profiles.recover" "Reset the admin profile's PIN"
+      "Authentication is required to reset the admin profile's PIN"
       "auth_admin"
     }
     </policyconfig>
@@ -88,6 +99,9 @@ let
         builtins.toJSON {
           inherit (config.hinteros.release) version;
           dev = (config.hinteros.dev or { enable = false; }).enable;
+          # The highest state.json schema this generation's state.nix reads (DECISIONS D5): the
+          # service migrates schema 1 only when the running generation says 2.
+          stateSchema = 2;
         }
       )
     } $out/share/hinteros/release.json
@@ -96,12 +110,23 @@ let
     cp ${pkgs.writeText "org.hinteros.system.policy" policy} $out/share/polkit-1/actions/org.hinteros.system.policy
   '';
 
-  # ssh is not granted here: it stays auth_admin. Local overrides (parental controls) go in a
+  # ssh and profiles.recover are not granted here: they stay auth_admin. The greeter may only
+  # create profiles (over greeter.sock). Local overrides (parental controls) go in a
   # lower-numbered rules file that returns NO.
+  greeterOn = config.hinteros.profiles.greeter.enable or false;
   polkitRules = ''
     polkit.addRule(function (action, subject) {
       if (action.id.indexOf("org.hinteros.system.") === 0 &&
-          action.id !== "org.hinteros.system.ssh" && subject.isInGroup("${cfg.group}")) {
+          action.id !== "org.hinteros.system.ssh" &&
+          action.id !== "org.hinteros.system.profiles.recover" && subject.isInGroup("${cfg.group}")) {
+        return polkit.Result.YES;
+      }
+    });
+  ''
+  + lib.optionalString greeterOn ''
+    polkit.addRule(function (action, subject) {
+      if (action.id === "org.hinteros.system.profiles.create" &&
+          subject.user === "${config.hinteros.profiles.greeter.user}") {
         return polkit.Result.YES;
       }
     });
@@ -175,6 +200,14 @@ in
         default = pkgs.hinteros-system;
         defaultText = lib.literalExpression "pkgs.hinteros-system";
         description = "Package providing the `hinteros-system` binary.";
+      };
+
+      sessionConfigFile = lib.mkOption {
+        type = lib.types.path;
+        readOnly = true;
+        default = sessionConfig;
+        defaultText = lib.literalMD "generated from `session.settings`";
+        description = "The generated session.toml (the profile sessions' daemon, and the greeter's).";
       };
 
       session.settings = lib.mkOption {
@@ -298,9 +331,6 @@ in
         tag_windows = lib.mkDefault true;
         library_poll_s = lib.mkDefault 60;
         library_debounce_ms = lib.mkDefault 500;
-        path = lib.mkIf config.programs.steam.enable (
-          lib.mkDefault (lib.getExe config.programs.steam.package)
-        );
       };
       close.timeout_ms = lib.mkDefault 5000;
       # Runtime settings (API 0.7): the audio client is pactl (PipeWire's PulseAudio server finds
@@ -310,7 +340,8 @@ in
     };
 
     users.groups.${cfg.group} = { };
-    users.users.${sessionUser}.extraGroups = [ cfg.group ];
+    # profiles.nix puts every account in the group; without it (module tests) the session user.
+    users.users.${sessionUser}.extraGroups = lib.mkIf (!(options.hinteros ? profiles)) [ cfg.group ];
 
     assertions = [
       {
@@ -337,6 +368,25 @@ in
       etc."polkit-1/rules.d/50-hinteros.rules".text = polkitRules;
     };
 
+    # Per-profile disk use (profiles.md, "Per-profile storage"; DECISIONS D5): started by
+    # hinteros-system over D-Bus when profiles.list finds the data older than an hour. Reads the
+    # homes, writes /var/lib/hinteros/usage.json.
+    systemd.services.hinteros-usage = {
+      description = "HinterOS per-profile disk use";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${lib.getExe cfg.system.package} usage";
+        User = "root";
+        ProtectSystem = "strict";
+        ProtectHome = "read-only";
+        ReadWritePaths = [ "/var/lib/hinteros" ];
+        PrivateNetwork = true;
+        NoNewPrivileges = true;
+        Nice = 19;
+        IOSchedulingClass = "idle";
+      };
+    };
+
     systemd = {
       services.hinteros-system = {
         description = "HinterOS system service";
@@ -361,7 +411,10 @@ in
           # It reads /etc/hinteros, /proc, the profile links and /run/current-system, and writes
           # only /run/hinteros. Everything that changes the system happens in hinteros-job@.
           ProtectSystem = "strict";
-          ReadWritePaths = [ "/run/hinteros" ];
+          ReadWritePaths = [
+            "/run/hinteros"
+            "/var/lib/hinteros"
+          ];
           NoNewPrivileges = true;
           PrivateTmp = true;
           ProtectHome = true;
@@ -377,6 +430,8 @@ in
           # Only so the audit entries can read /proc/<pid>/exe of another user's process
           # (HINTEROS_EXE; with an empty set the field is "?").
           CapabilityBoundingSet = [ "CAP_SYS_PTRACE" ];
+          # greeter.sock is root:hinteros-greeter 0660: a member may chgrp it without CAP_CHOWN.
+          SupplementaryGroups = lib.optional greeterOn config.hinteros.profiles.greeter.user;
           UMask = "0007";
         };
       };
@@ -407,13 +462,14 @@ in
         };
       };
 
-      # User unit: applies to every user's manager, so restrict it to the session user.
+      # User unit: applies to every user's manager, so restrict it to the accounts that may be
+      # on screen (the hinteros group). The greeter runs its own instance (session.nix).
       # It is wanted by default.target, which the user manager reaches at autologin, i.e. at
       # the same time as the compositor and home app start.
       user.services.hinteros-session = {
         description = "HinterOS session daemon";
         wantedBy = [ "default.target" ];
-        unitConfig.ConditionUser = sessionUser;
+        unitConfig.ConditionGroup = cfg.group;
         environment = {
           RUST_LOG = cfg.logLevel;
         }

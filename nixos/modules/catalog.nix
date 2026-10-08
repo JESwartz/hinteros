@@ -1,18 +1,20 @@
-# The App Store catalog (design/catalog.md, repo hinteros-catalog) as the source of
-# `hinteros.apps.<id>`. The flake supplies the data (`hinteros.catalog.*`, see flake.nix); this
-# module turns every entry into
-#   - a `hinteros.apps.<id>` with the entry's `app` settings (as defaults), its name and icon
-#     fields (`icon.desktopId`, `iconUrl`, `siteUrl`, `firefoxProfile`, written into session.toml),
-#   - its restricted `nixos` module, active while the app is enabled,
-#   - the unfree packages it needs (`hinteros.unfreeAllowlist`, derived from the enabled entries),
-#   - the `requires` features,
-# and installs the generated index and vendor terms at `share/hinteros/catalog.json` and
-# `share/hinteros/terms/` (the Store reads /run/current-system/sw/share/hinteros/).
+# The App Store catalog (design/catalog.md, repo hinteros-catalog; entry format 3) in the system.
+# The flake supplies the data (`hinteros.catalog.*`, see flake.nix); this module
+#   - turns every `kind = "app"` entry into a box-wide `hinteros.apps.<id>` with the entry's `app`
+#     settings (as defaults) and its name and icon fields. `app` is called with `{ pkgs, lib,
+#     box }`, `box` being the system's (`box.firefoxKiosk`: the kiosk wrapper; `box.steam`: stock
+#     pkgs.steam, spike 8). Per-profile envs call it with their own pkgs (app-env.nix);
+#   - derives, from the box-wide apps that are on, the unfree packages they need
+#     (`hinteros.unfreeAllowlist`) and the box features they name (`hinteros.boxFeatures`);
+#   - enables the restricted `service` module of every service in `hinteros.catalog.services`
+#     (state.json `services`, M10);
+#   - installs the generated index and vendor terms at `share/hinteros/catalog.json` and
+#     `share/hinteros/terms/` (the Store reads /run/current-system/sw/share/hinteros/).
 #
-# Which apps are on is decided elsewhere: apps.nix enables the `onIso` apps with the session (no
-# state), state.nix enables exactly the ids of state.json `apps`.
+# Which box-wide apps are on is decided elsewhere: the `onIso` apps are on with the session (no
+# state), state.nix sets exactly the ids of a schema-1 state's `apps` and none on schema 2.
 # A function of the catalog data, not a plain module: which entries exist decides the shape of
-# this module's config (one `nixos` module per entry), so it must not be read from `config`.
+# this module's config (one `service` module per entry), so it must not be read from `config`.
 # flake.nix passes it in; `hinteros.catalog.*` re-exports it for other modules to read.
 {
   entries,
@@ -27,45 +29,37 @@
   ...
 }:
 let
-  # What an entry's `app` and `nixos` functions are called with.
-  args = {
-    inherit
-      config
-      options
-      lib
-      pkgs
-      ;
-  };
-
+  cfg = config.hinteros.catalog;
+  entriesLib = import ../lib/app-entries.nix { inherit lib; };
   sessionEnabled = config.hinteros.session.enable;
 
   # Tombstones (`status = "removed"`) are known ids that do nothing.
   live = lib.filterAttrs (_: e: e.status != "removed") entries;
-  enabled = lib.filterAttrs (id: _: config.hinteros.apps.${id}.enable) live;
+  liveApps = lib.filterAttrs (_: e: (e.kind or "app") == "app") live;
+  liveServices = lib.filterAttrs (_: e: (e.kind or "app") == "service") live;
+  enabled = lib.filterAttrs (id: _: config.hinteros.apps.${id}.enable) liveApps;
 
-  # mkDefault on every leaf: a device can still override single settings of an entry. Derivations
-  # (the `package`) are values, not attribute sets to walk into.
-  defaultLeaves =
-    v:
-    if lib.isAttrs v && !lib.isDerivation v then lib.mapAttrs (_: defaultLeaves) v else lib.mkDefault v;
+  # The box's inputs to the box-wide apps (catalog.md, format 3).
+  box = {
+    firefoxKiosk = config.hinteros.firefoxKiosk.wrapper;
+    inherit (pkgs) steam;
+  };
 
-  appOf =
+  serviceOf =
     e:
-    if e.app == null then
+    if e.service == null then
       { }
-    else if lib.isFunction e.app then
-      e.app args
+    else if lib.isFunction e.service then
+      e.service {
+        inherit
+          config
+          options
+          lib
+          pkgs
+          ;
+      }
     else
-      e.app;
-
-  nixosOf =
-    e:
-    if e.nixos == null then
-      { }
-    else if lib.isFunction e.nixos then
-      e.nixos args
-    else
-      e.nixos;
+      e.service;
 in
 {
   options.hinteros.catalog = {
@@ -94,26 +88,37 @@ in
       readOnly = true;
       description = "Package with `share/hinteros/catalog.json` (the Store index) and `share/hinteros/terms/*.txt`.";
     };
+
+    services = lib.mkOption {
+      type = lib.types.listOf (lib.types.enum (builtins.attrNames liveServices));
+      default = [ ];
+      description = "Enabled catalog services (state.json `services`): their `service` modules are part of the system.";
+    };
+
+    box = lib.mkOption {
+      type = lib.types.raw;
+      readOnly = true;
+      internal = true;
+      default = box;
+      description = "The `box` argument the box-wide apps' `app` functions get.";
+    };
   };
+
+  imports = [ ./box-features.nix ];
 
   config = lib.mkMerge [
     {
       hinteros.apps = lib.mapAttrs (
         _: e:
-        defaultLeaves (
+        entriesLib.defaultLeaves (
           {
             enable = sessionEnabled && e.onIso;
-            inherit (e) name;
-            listed = e.app != null;
-            desktopId = e.icon.desktopId or null;
-            iconUrl = e.icon.iconUrl or null;
-            siteUrl = e.icon.siteUrl or null;
-            firefoxProfile = e.icon.firefoxProfile or false;
           }
-          // appOf e
+          // entriesLib.catalogSettings {
+            inherit pkgs lib box;
+          } e
         )
-      ) live;
-
+      ) liveApps;
     }
 
     {
@@ -123,21 +128,22 @@ in
       };
     }
 
-    # The unfree packages the enabled entries need, by name (nixpkgs.config must not depend on pkgs).
+    # The unfree packages the box-wide apps need, by name (nixpkgs.config must not depend on pkgs).
+    # App envs allow their own in a separate nixpkgs instance (app-env.nix).
     {
       hinteros.unfreeAllowlist = lib.unique (
         lib.concatMap (e: e.license.unfreePackages) (lib.attrValues enabled)
       );
     }
 
-    # System features the enabled entries ask for.
-    (lib.mkIf (lib.any (e: lib.elem "graphics32" e.requires) (lib.attrValues enabled)) {
-      hardware.graphics.enable32Bit = lib.mkDefault true;
-    })
+    # Box features the box-wide apps name (schema 1; on schema 2 state.json `requirements`).
+    {
+      hinteros.boxFeatures = lib.unique (lib.concatMap (e: e.box or [ ]) (lib.attrValues enabled));
+    }
 
-    # Each entry's own NixOS config (the restricted `nixos` module) while it is enabled.
+    # Each enabled service's restricted NixOS module.
     (lib.mkMerge (
-      lib.mapAttrsToList (id: e: lib.mkIf config.hinteros.apps.${id}.enable (nixosOf e)) live
+      lib.mapAttrsToList (id: e: lib.mkIf (lib.elem id cfg.services) (serviceOf e)) liveServices
     ))
   ];
 }

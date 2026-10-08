@@ -47,7 +47,15 @@ let
   failedAssertions = c: map (a: a.message) (lib.filter (a: !a.assertion) c.config.assertions);
 
   catalogEntries = self.inputs.hinteros-catalog.catalog;
-  liveIds = builtins.attrNames (lib.filterAttrs (_: e: e.status != "removed") catalogEntries);
+  liveIds = builtins.attrNames (
+    lib.filterAttrs (_: e: e.status != "removed" && (e.kind or "app") == "app") catalogEntries
+  );
+  # App envs (app-env.nix).
+  env = c: ids: c.config.hinteros.appEnv.build ids;
+  drv = e: builtins.unsafeDiscardStringContext e.drvPath;
+  # Another box: other compositor and session settings.
+  otherBox = cage;
+  envFails = c: ids: !(builtins.tryEval (drv (env c ids))).success;
   mkApps =
     ids: extra:
     self.lib.mkDevice {
@@ -68,6 +76,20 @@ let
         extra
       ];
     };
+  c2 = self.lib.mkDevice {
+    state = {
+      schemaVersion = 2;
+      profiles = [
+        {
+          id = "p1";
+          user = "hinteros";
+        }
+      ];
+      requirements = [ ];
+      services = [ ];
+    };
+    extraModules = [ { system.stateVersion = "25.11"; } ];
+  };
   # A device with every catalog entry enabled (nothing built: the drv paths below force evaluation).
   every = mkApps liveIds { };
   iso = self.nixosConfigurations.installer;
@@ -80,7 +102,17 @@ let
   sessionCmd = c: c.config.hinteros.session.command;
   gs = mk { hinteros.session.compositor = "gamescope"; };
 
-  fx = c: c.config.programs.firefox;
+  # The box-wide Firefox policies and the wrapped Firefox the kiosk apps run (firefox-kiosk.nix).
+  fx =
+    c:
+    let
+      k = c.config.hinteros.firefoxKiosk;
+    in
+    {
+      inherit (k) policies autoConfig;
+      finalPackage = k.firefox;
+      hasNativeHost = lib.hasInfix "hinteros-session" k.firefox.buildCommand;
+    };
   oskOff = mk { hinteros.firefoxKiosk.oskExtension = "off"; };
   oskEsr = mk { hinteros.firefoxKiosk.oskExtension = "esr-unsigned"; };
   oskSigned = mk {
@@ -118,6 +150,105 @@ let
     id: e: lib.hasSuffix "/bin/hinteros-firefox-kiosk" (lib.head e.command) && lib.elem id e.command;
 
   results = lib.runTests {
+    # The env's manifest: the same entries session.toml has for the same apps, Steam's path, the
+    # box features; sorted, de-duplicated ids.
+    testEnvManifest =
+      let
+        m =
+          (env base [
+            "youtube"
+            "steam"
+            "jellyfin"
+            "youtube"
+          ]).manifest;
+      in
+      {
+        expr = [
+          m.version
+          m.ids
+          (map (a: a.id) m.apps)
+          m.box
+          (lib.hasSuffix "/bin/steam" m.steam.path)
+          (lib.findFirst (a: a.id == "youtube") null m.apps == entry base "youtube")
+          (lib.findFirst (a: a.id == "jellyfin") null m.apps == entry base "jellyfin")
+          (env base [ "youtube" ]).manifest.steam
+          (env base [ "youtube" ]).manifest.box
+        ];
+        expected = [
+          1
+          [
+            "jellyfin"
+            "steam"
+            "youtube"
+          ]
+          [
+            "jellyfin"
+            "youtube"
+          ]
+          [
+            "graphics32"
+            "steam-devices"
+          ]
+          true
+          true
+          true
+          null
+          [ ]
+        ];
+      };
+    # Same ids, same system: same store path, whatever the order, duplicates or unrelated box
+    # settings; Steam is stock pkgs.steam, so it does not depend on the box's graphics (spike 8).
+    testEnvDeterministic = {
+      expr = [
+        (
+          drv (
+            env base [
+              "firefox"
+              "jellyfin"
+            ]
+          ) == drv (
+            env base [
+              "jellyfin"
+              "firefox"
+              "firefox"
+            ]
+          )
+        )
+        (drv (env base [ "firefox" ]) == drv (env otherBox [ "firefox" ]))
+        (drv (env base [ "steam" ]) == drv (env otherBox [ "steam" ]))
+        (drv (env base [ "steam" ]) == drv (env cacheJob [ "steam" ]))
+        (drv (env base [ "firefox" ]) == drv (env c2 [ "firefox" ]))
+        (drv (env base [ "firefox" ]) != drv (env base [ "jellyfin" ]))
+      ];
+      expected = [
+        true
+        true
+        true
+        true
+        true
+        true
+      ];
+    };
+    # Unfree per env: the cache job's envs may hold Steam, never Plex; the system's own allowlist
+    # lists no app on schema 2, and the env still evaluates (its own nixpkgs instance).
+    testEnvUnfree = {
+      expr = [
+        (envFails cacheJob [ "plex-htpc" ])
+        (envFails cacheJob [ "steam" ])
+        (envFails c2 [ "plex-htpc" ])
+        c2.config.hinteros.unfreeAllowlist
+        (envFails base [ "no-such-app" ])
+        (envFails base [ "jellyfin-server" ])
+      ];
+      expected = [
+        true
+        false
+        false
+        [ ]
+        true
+        true
+      ];
+    };
     testDefaultApps = {
       expr = appsOf base;
       expected = [
@@ -322,7 +453,7 @@ let
         ];
       expected = [
         [ ]
-        true
+        false
         [
           "steam"
           "steam-unwrapped"
@@ -375,7 +506,7 @@ let
         (lib.filter (id: lib.elem id appIds.all) streaming)
         (lib.filter (id: lib.elem id appIds.onIso) streaming)
         (lib.filter (id: lib.elem id appIds.preselected) streaming)
-        (lib.filter (id: catalogEntries.${id}.installer || catalogEntries.${id}.onIso) streaming)
+        (lib.filter (id: catalogEntries.${id}.starter != null) streaming)
       ];
       expected = [
         true
@@ -511,10 +642,10 @@ let
     testOskExtensionOff = {
       expr = [
         oskOff.config.hinteros.firefoxKiosk.oskExtension
-        ((fx oskOff).policies.ExtensionSettings ? "${extId}")
+        ((fx oskOff).policies.ExtensionSettings or { } ? "${extId}")
         (fx oskOff).autoConfig
-        (lib.hasSuffix "esr" (fx oskOff).package.version)
-        (map lib.getName (fx oskOff).nativeMessagingHosts.packages)
+        (lib.hasSuffix "esr" (fx oskOff).finalPackage.version)
+        (fx oskOff).hasNativeHost
         (settings oskOff).osk.auto_show
         (settings oskOff).input.xbox_label_swap
       ];
@@ -523,15 +654,18 @@ let
         false
         ""
         false
-        [ "hinteros-session" ]
+        true
         false
         "auto"
       ];
     };
     testOskExtensionEsrUnsigned = {
       expr = [
-        (lib.hasSuffix "esr" (fx oskEsr).package.version)
+        (lib.hasSuffix "esr" (fx oskEsr).finalPackage.version)
         (hasSub (fx oskEsr).autoConfig ''lockPref("xpinstall.signatures.required", false);'')
+        # Spike 8: the signature pref is box-wide in the policies too, so any env's Firefox gets it.
+        (fx oskEsr).policies.Preferences."xpinstall.signatures.required"
+        (fx oskEsr).hasNativeHost
         (fx oskEsr).policies.ExtensionSettings.${extId}.installation_mode
         (hasSub (fx oskEsr).policies.ExtensionSettings.${extId}.install_url
           "hinteros-osk-firefox-extension"
@@ -549,6 +683,11 @@ let
       expected = [
         true
         true
+        {
+          Value = false;
+          Status = "locked";
+        }
+        true
         "force_installed"
         true
         true
@@ -561,7 +700,8 @@ let
     };
     testOskExtensionSigned = {
       expr = [
-        (lib.hasSuffix "esr" (fx oskSigned).package.version)
+        (lib.hasSuffix "esr" (fx oskSigned).finalPackage.version)
+        ((fx oskSigned).policies.Preferences ? "xpinstall.signatures.required")
         # No signature override, but the address bar reporter.
         (hasSub (fx oskSigned).autoConfig "xpinstall.signatures.required")
         (hasSub (fx oskSigned).autoConfig "hinteros-firefox-chrome")
@@ -569,6 +709,7 @@ let
         (oskFailures oskSigned)
       ];
       expected = [
+        false
         false
         false
         true
@@ -595,6 +736,8 @@ pkgs.runCommand "hinteros-apps-eval"
     # Evaluation only: every catalog entry in one device config, and the ISO (which throws on any
     # unfree package, as it allows none).
     everyDrv = builtins.unsafeDiscardStringContext every.config.system.build.toplevel.drvPath;
+    # Every app in one env (schema 2, as hinteros-system builds them).
+    envDrv = drv (env base liveIds);
     cacheDrv = builtins.unsafeDiscardStringContext cacheJob.config.system.build.toplevel.drvPath;
     isoDrv = builtins.unsafeDiscardStringContext iso.config.system.build.isoImage.drvPath;
   }

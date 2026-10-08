@@ -11,6 +11,8 @@ let
   cfg = config.hinteros.maintenance;
   sessionCfg = config.hinteros.session;
   launcherName = baseNameOf (lib.getExe sessionCfg.homeApp);
+  # With the greeter the launcher runs as the greeter or as whichever profile is on screen.
+  greeterOn = config.hinteros.profiles.greeter.enable or false;
 
   diskCheck = pkgs.writeShellApplication {
     name = "hinteros-disk-check";
@@ -43,7 +45,7 @@ let
     ];
     text = ''
       for _ in $(seq 1 ${toString cfg.bootCounting.healthTimeoutSeconds}); do
-        if systemctl is-active --quiet hinteros-system.service${lib.optionalString sessionCfg.enable " && systemctl is-active --quiet greetd.service && pgrep -u ${sessionCfg.user} -f ${lib.escapeShellArg launcherName} >/dev/null"}; then
+        if systemctl is-active --quiet hinteros-system.service${lib.optionalString sessionCfg.enable " && systemctl is-active --quiet greetd.service && pgrep ${if greeterOn then "" else "-u ${sessionCfg.user} "}-f ${lib.escapeShellArg launcherName} >/dev/null"}; then
           echo "daemon${lib.optionalString sessionCfg.enable " and launcher"} are up"
           exit 0
         fi
