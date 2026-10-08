@@ -65,6 +65,8 @@ in
       environment.etc."hinteros-envs.json".text = builtins.toJSON envs;
       boot.loader.grub.enable = lib.mkForce false;
       virtualisation.diskSize = 4096;
+      # Apps, not the picker: autologin of p1 (greeter mode: profiles-greeter).
+      hinteros.profiles.greeter.enable = false;
       virtualisation.memorySize = lib.mkForce 3072;
     };
 

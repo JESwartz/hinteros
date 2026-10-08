@@ -18,6 +18,9 @@ VERSION = os.environ.get("HINTEROS_SESSION_API", "0.9")
 
 
 def sock_path():
+    # HINTEROS_SESSION_SOCK: a particular daemon (the greeter's and a profile's can both exist).
+    if os.environ.get("HINTEROS_SESSION_SOCK"):
+        return os.environ["HINTEROS_SESSION_SOCK"]
     (p,) = glob.glob("/run/user/*/hinteros/session.sock")
     return p
 

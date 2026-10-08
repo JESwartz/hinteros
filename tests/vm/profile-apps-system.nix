@@ -52,6 +52,8 @@
       environment.etc."hinteros-test/envs.json".text = builtins.toJSON (
         lib.mapAttrs (_: e: e.outPath) envs
       );
+      # Apps, not the picker: autologin of p1 (greeter mode: profiles-greeter).
+      hinteros.profiles.greeter.enable = false;
       virtualisation.memorySize = lib.mkForce 2048;
     };
 

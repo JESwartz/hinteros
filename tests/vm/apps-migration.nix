@@ -127,5 +127,24 @@ in
                 break
             time.sleep(1)
         assert after == before, (before, after)
+
+    with subtest("next boot: the picker (schema 2), and the migrated p1 gets in without a PIN"):
+        # The switch kept the autologin session (greetd is not restarted by a switch); a new
+        # greetd is what the next boot runs.
+        machine.succeed("systemctl restart greetd.service")
+        gsock = "/run/user/$(id -u hinteros-greeter)/hinteros/session.sock"
+        machine.wait_until_succeeds(f"test -S {gsock}", timeout=120)
+        out = machine.succeed(
+            f"runuser -u hinteros-greeter -- env {ENV} PYTHONPATH=/etc/hinteros-test "
+            f"HINTEROS_SESSION_SOCK={gsock} python3 /etc/hinteros-test/greeter.py p1"
+        )
+        g = json.loads(out)
+        assert [p["id"] for p in g["list"]["profiles"]] == ["p1"], g
+        assert len(g["outcomes"]) == 1 and g["outcomes"][0]["ok"] is True, g
+        machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock", timeout=120)
+        machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '", timeout=60)
+        cur = json.loads(machine.succeed(f"runuser -u hinteros -- env {ENV} HINTEROS_SESSION_SOCK=/run/user/$(id -u hinteros)/hinteros/session.sock python3 /etc/hinteros-test/session.py profile.current"))["response"]["result"]
+        # "Set your PIN" comes up in the session.
+        assert cur["id"] == "p1" and cur["admin"] and not cur["pin_set"], cur
   '';
 }

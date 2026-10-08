@@ -10,9 +10,9 @@
 # units, so creating or removing an account does not restart the running session.
 #
 # Two session modes:
-#   - `greeter.enable = false` (default until the greeter ships in the daemon and launcher):
-#     today's autologin of the first account, which keeps the static device groups;
-#   - `greeter.enable = true`: greetd runs the greeter (`hinteros-greeter`) at boot and whenever a
+#   - `greeter.enable = false` (the default on schema 1, i.e. until the box has migrated):
+#     autologin of the first account, which keeps the static device groups;
+#   - `greeter.enable = true` (the default on schema 2): greetd runs the greeter (`hinteros-greeter`) at boot and whenever a
 #     profile's session ends; profile sessions go through the PAM stack below; devices follow the
 #     active session (logind uaccess), and every per-user grant is written against the group.
 {
@@ -35,13 +35,14 @@ let
   # hinteros-system. pam_exec runs it with an empty PATH.
   pin = "${lib.getExe config.hinteros.daemon.system.package} pin";
 
-  # The session part of NixOS' login stack that a console session needs.
+  # The session part of NixOS' login stack that a console session needs. No pam_limits: NixOS has
+  # no /etc/security/limits.conf (its stacks name a generated file), and a `required` module that
+  # cannot read its config fails pam_open_session, so greetd could start no session at all.
   sessionTail = ''
     session  required   pam_env.so conffile=/etc/pam/environment readenv=0
     session  required   pam_unix.so
     session  required   pam_loginuid.so
     session  optional   ${systemdPkg}/lib/security/pam_systemd.so
-    session  required   pam_limits.so conf=/etc/security/limits.conf
   '';
 
   accountUsers = map (a: a.user) cfg.accounts;
@@ -95,10 +96,19 @@ in
     };
 
     greeter = {
-      enable = lib.mkEnableOption ''
-        the greeter session (the profile picker) instead of autologin, with the PIN and
-        end-others PAM stack and uaccess device access. Needs the M7 daemon (`hinteros-session
-        greet`, `hinteros-session --greeter`, `hinteros-system pin`) and launcher (`--greeter`)'';
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = config.hinteros.appEnv.perProfile or false;
+        defaultText = lib.literalExpression "config.hinteros.appEnv.perProfile";
+        description = ''
+          The greeter session (the profile picker) instead of autologin, with the PIN and
+          end-others PAM stack and uaccess device access. On by default on schema 2 (profiles);
+          a schema-1 box keeps autologin until its migration switches it to schema 2. The
+          migration's switch does not restart greetd (nixpkgs: restartIfChanged = false), so
+          the running session stays; the picker comes at the next boot or session end, where
+          the migrated p1 (unlocked, no PIN yet) is entered without a PIN.
+        '';
+      };
       user = lib.mkOption {
         type = lib.types.str;
         readOnly = true;

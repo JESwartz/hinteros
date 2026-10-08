@@ -30,8 +30,19 @@ let
       extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
     }).config;
 
-  auto = mk [ ];
+  auto = mk [ { hinteros.profiles.greeter.enable = false; } ];
   greeter = mk [ { hinteros.profiles.greeter.enable = true; } ];
+  # Schema 2's default is the greeter; schema 1 (not migrated yet) keeps autologin.
+  schema2Default = mk [ ];
+  schema1Default =
+    (self.lib.mkDevice {
+      state = {
+        schemaVersion = 1;
+        settings.ssh.enable = false;
+        apps = [ ];
+      };
+      extraModules = [ { system.stateVersion = "25.11"; } ];
+    }).config;
   greeterDev = mk [
     {
       hinteros.profiles.greeter.enable = true;
@@ -50,6 +61,18 @@ let
   console = c: c.system.systemBuilderCommands;
 
   results = lib.runTests {
+    testGreeterDefault = {
+      expr = {
+        schema2 = schema2Default.hinteros.profiles.greeter.enable;
+        schema1 = schema1Default.hinteros.profiles.greeter.enable;
+        schema1Autologin = schema1Default.services.greetd.settings ? initial_session;
+      };
+      expected = {
+        schema2 = true;
+        schema1 = false;
+        schema1Autologin = true;
+      };
+    };
     # Test VMs point kiosk apps at local pages in every env that has them.
     testEnvOverrides = {
       expr =
