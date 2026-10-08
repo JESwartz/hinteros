@@ -38,7 +38,9 @@ in
             e = config.hinteros.appEnv.build ids;
           in
           lib.nameValuePair (lib.concatStringsSep "," ids) {
-            drv = builtins.unsafeDiscardOutputDependency e.drvPath;
+            # Only its name: the stub answers from the table, and a .drv in the closure would
+            # need every source it was built from.
+            drv = builtins.unsafeDiscardStringContext e.drvPath;
             out = e.outPath;
           }
         ) idSets
@@ -93,7 +95,7 @@ in
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros")
     machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock")
-    system_gen = machine.succeed("readlink /nix/var/nix/profiles/system").strip()
+    system_gen = machine.succeed("readlink -f /run/current-system").strip()
 
     def sess(method, params=None):
         out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/session.py {method} '{json.dumps(params or {})}'")
@@ -142,7 +144,7 @@ in
         assert done["state"] == "succeeded" and done["kind"] == "apps_install", done
         assert machine.succeed(f"readlink -f {P}").strip() == envs["firefox,moonlight,youtube"]["out"]
         assert len(gens()) == 2, gens()
-        assert machine.succeed("readlink /nix/var/nix/profiles/system").strip() == system_gen
+        assert machine.succeed("readlink -f /run/current-system").strip() == system_gen
         for _ in range(10):
             if "moonlight" in app_ids():
                 break
@@ -164,7 +166,7 @@ in
                 break
             time.sleep(1)
         assert "moonlight" not in app_ids(), app_ids()
-        assert machine.succeed("readlink /nix/var/nix/profiles/system").strip() == system_gen
+        assert machine.succeed("readlink -f /run/current-system").strip() == system_gen
 
     with subtest("remove with delete_data: the app's dataPaths in this home only"):
         done = wait_job(ok("system.apps.install", {"ids": ["moonlight"], "revision": mine()["revision"]})["job_id"])
@@ -181,6 +183,6 @@ in
         machine.fail(f"test -e '{home}/.config/Moonlight Game Streaming Project'")
         machine.succeed(f"test -e {home}/.config/other/keep")
         assert mine()["ids"] == ["firefox", "youtube"]
-        assert machine.succeed("readlink /nix/var/nix/profiles/system").strip() == system_gen
+        assert machine.succeed("readlink -f /run/current-system").strip() == system_gen
   '';
 }

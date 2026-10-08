@@ -32,7 +32,8 @@ in
     let
       env = config.hinteros.appEnv.build ids;
       envs.${lib.concatStringsSep "," ids} = {
-        drv = builtins.unsafeDiscardOutputDependency env.drvPath;
+        # Only its name (see profile-apps.nix).
+        drv = builtins.unsafeDiscardStringContext env.drvPath;
         out = env.outPath;
       };
       stateOf = dir: builtins.fromJSON (builtins.readFile (dir + "/state.json"));
@@ -63,6 +64,8 @@ in
           serviceConfig.Type = "oneshot";
           script = ''
             mkdir -p /run/stub
+            # The migration's system build waits until the test has seen the box before it.
+            touch /run/stub/hold
             if [ -e /run/current-system/specialisation/migrated ]; then
               readlink -f /run/current-system/specialisation/migrated > /run/stub/toplevel
             fi
@@ -88,16 +91,33 @@ in
         out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/session.py apps.list")
         r = json.loads(out)["response"]
         assert "result" in r, r
-        return {a["id"]: a["command"] for a in r["result"]["apps"]}
+        return {a["id"]: a["name"] for a in r["result"]["apps"]}
+
+    def commands_before():
+        """The box-wide apps' commands: session.toml's [[apps]] (schema 1)."""
+        import tomllib
+        args = machine.succeed("ps -u hinteros -o args= | grep -m1 'hinteros-session --config'").split()
+        toml = tomllib.loads(machine.succeed(f"cat {args[args.index('--config') + 1]}"))
+        return {a["id"]: a["command"] for a in toml.get("apps", []) if isinstance(a, dict)}
+
+    def commands_after():
+        """p1's apps' commands: its env's manifest (schema 2)."""
+        m = json.loads(machine.succeed("cat /run/hinteros/apps/hinteros/share/hinteros/apps.json"))
+        return {a["id"]: a["command"] for a in m["apps"]}
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock")
-    orig = machine.succeed("readlink -f /run/current-system").strip()
+    # The generation it booted (the migration may have switched already).
+    orig = machine.succeed("readlink -f /run/booted-system").strip()
 
     with subtest("before: schema 1, box-wide apps from session.toml"):
-        # The migration may already be running; the generation is still the original one.
+        # The migration may already be running; its switch waits for /run/stub/hold to go.
         before = apps()
         assert {"jellyfin", "youtube", "firefox"} <= set(before), before
+        cmds = commands_before()
+        assert {"jellyfin", "youtube", "firefox"} <= set(cmds), cmds
+        assert machine.succeed("readlink -f /run/current-system").strip() == orig
+        machine.succeed("rm /run/stub/hold")
 
     with subtest("the migration job runs by itself and switches to schema 2"):
         machine.wait_until_succeeds("grep -Eq '\"schemaVersion\": *2' /etc/hinteros/state.json", timeout=600)
@@ -117,16 +137,21 @@ in
 
     with subtest("after: the same apps, from p1's manifest"):
         machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock")
+        # The fake Steam is a box-wide program here, not the catalog's `steam` (not in the
+        # fixture's apps): in profile mode Steam comes only from an env's manifest, so it goes.
+        # (A box with the catalog's Steam keeps it: its env has `steam` and the box features.)
+        want = {k: v for k, v in before.items() if k != "steam"}
         after = {}
         for _ in range(60):
             try:
                 after = apps()
             except Exception:
                 after = {}
-            if set(after) == set(before):
+            if after == want:
                 break
             time.sleep(1)
-        assert after == before, (before, after)
+        assert after == want, (before, after)
+        assert commands_after() == cmds, (cmds, commands_after())
 
     with subtest("next boot: the picker (schema 2), and the migrated p1 gets in without a PIN"):
         # The switch kept the autologin session (greetd is not restarted by a switch); a new
