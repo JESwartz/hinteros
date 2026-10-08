@@ -44,7 +44,7 @@
     installer.succeed("systemctl cat getty@tty2.service | grep -q -- '--autologin root'")
     installer.succeed("command -v hinteros-save-log hinteros-diagnose lspci lsusb ethtool iw lshw nixos-facter")
     motd = installer.succeed("cat $(grep -o '/nix/store/[^ ]*-motd' /etc/pam.d/login | head -1)")
-    for want in ["Ctrl+Alt+F2", "hinteros-diagnose", "hinteros-save-log", "tty1"]:
+    for want in ["Ctrl+Alt+F2", "Ctrl+Alt+F1", "back", "hinteros-diagnose", "hinteros-save-log", "tty1"]:
         assert want in motd, (want, motd)
     for stale in ["empty passwords", "No installer screen is running yet", "set a password"]:
         assert stale not in motd, (stale, motd)
@@ -92,8 +92,32 @@
     installer.wait_until_succeeds("grep -qx tty1 /sys/class/tty/tty0/active", timeout=30)
     installer.wait_for_text("Choose the disk", timeout=timedelta(seconds=60))
 
+    # `back` (and its alias `installer`) from the tty2 console returns to the UI; the console shows
+    # the reminder above its prompt.
+    installer.send_key("ctrl-alt-f2")
+    installer.wait_until_succeeds("grep -qx tty2 /sys/class/tty/tty0/active", timeout=30)
+    installer.sleep(3)
+    installer.succeed("grep -rq 'return to the installer' /etc/bashrc /etc/profile /etc/set-environment")
+    installer.send_chars("echo reminder-check\n")
+    installer.sleep(3)
+    installer.wait_for_text("return to the installer", timeout=timedelta(seconds=30))
+    installer.send_chars("back\n")
+    installer.wait_until_succeeds("grep -qx tty1 /sys/class/tty/tty0/active", timeout=30)
+    installer.wait_for_text("Choose the disk", timeout=timedelta(seconds=60))
+    installer.succeed("command -v back installer")
+
     # The UI exits: the console (getty) takes tty1 back.
     installer.succeed("pkill -u root -f 'hinteros-launcher.*--installer'")
     installer.wait_for_unit("getty@tty1.service")
+
+    # With the UI gone, `back` starts it again and brings tty1 to the front.
+    installer.send_key("ctrl-alt-f2")
+    installer.wait_until_succeeds("grep -qx tty2 /sys/class/tty/tty0/active", timeout=30)
+    installer.sleep(3)
+    installer.send_chars("installer\n")
+    installer.wait_until_succeeds("pgrep -u root -f 'hinteros-launcher.*--installer'", timeout=120)
+    installer.wait_until_succeeds("grep -qx tty1 /sys/class/tty/tty0/active", timeout=60)
+    installer.wait_for_text("HinterOS", timeout=timedelta(seconds=180))
+    installer.screenshot("installer-after-back")
   '';
 }

@@ -437,6 +437,37 @@ let
     '';
   };
 
+  # `back` (alias `installer`): from the tty2 console back to the installer screens on tty1. If the
+  # UI is not running (it exited, or crashed) it is started again first; if tty1 does not come to
+  # the front (cage holds the VT in graphics mode and the switch request was lost) the UI is
+  # restarted, which takes the VT.
+  backCommand = pkgs.writeShellApplication {
+    name = "back";
+    runtimeInputs = [
+      pkgs.kbd
+      pkgs.systemd
+      pkgs.coreutils
+    ];
+    text = ''
+      active() { [ "$(cat /sys/class/tty/tty0/active)" = tty1 ]; }
+      if ${
+        lib.boolToString (cfg.ui.command != null)
+      } && ! systemctl is-active --quiet cage-tty1.service; then
+        systemctl restart cage-tty1.service
+      fi
+      chvt 1 || true
+      for _ in 1 2 3 4 5 6; do
+        if active; then exit 0; fi
+        sleep 0.5
+      done
+      if ${lib.boolToString (cfg.ui.command != null)}; then
+        systemctl restart cage-tty1.service
+        sleep 1
+      fi
+      chvt 1
+    '';
+  };
+
   # An Xcursor theme whose every cursor is a single transparent pixel.
   blankCursors = pkgs.runCommand "hinteros-blank-cursors" { nativeBuildInputs = [ pkgs.perl ]; } ''
     d=$out/share/icons/hinteros-blank
@@ -529,7 +560,19 @@ in
       pkgs.disko
       pkgs.jq
       saveLog
+      backCommand
+      (pkgs.runCommand "installer-alias" { } ''
+        mkdir -p $out/bin
+        ln -s ${backCommand}/bin/back $out/bin/installer
+      '')
     ];
+
+    # A reminder above every prompt of the tty2 console.
+    programs.bash.interactiveShellInit = ''
+      if [ "$(tty 2>/dev/null)" = /dev/tty2 ]; then
+        PROMPT_COMMAND='echo "Type \`back\` or press Ctrl+Alt+F1 to return to the installer."'
+      fi
+    '';
 
     # Mounting a second stick to save logs: FAT32 (vfat) is always there; exFAT and NTFS (the
     # kernel ntfs3 driver, plus ntfs-3g tools) are what Windows-formatted sticks use.
@@ -604,6 +647,8 @@ in
 
       The installer screens are on tty1 (Ctrl+Alt+F1); this console is tty2 (Ctrl+Alt+F2),
       logged in as root. Remote login is off.
+
+      Type `back` (or press Ctrl+Alt+F1) to return to the installer screens.
 
       Network or hardware problem (for example the wired network says "unavailable")?
 
