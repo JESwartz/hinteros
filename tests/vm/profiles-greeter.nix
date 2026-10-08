@@ -1,16 +1,21 @@
-# Greeter mode end to end (profiles.md "The pieces", DECISIONS D7-D9, S4): a schema-2 box with
-# `hinteros.profiles.greeter.enable` boots into the picker (cage + the launcher with --greeter,
-# the session daemon in greeter mode as `hinteros-greeter`). Profiles: p1 = `hinteros`, the admin,
-# locked with PIN 2468; p2 = `hinteros-p2`, unlocked, no PIN. A client of the greeter daemon's
-# socket stands in for the picker's buttons (tests/vm/system/client/greeter.py):
-#   - greeter.login p2: no PIN asked (PAM `pin unlocked`), p2's session starts as hinteros-p2;
-#   - from p2's session, session.switch_profile p1: the session ends, the picker comes back
-#     (p1 is locked: no fast path), a wrong PIN is refused (PAM `pin verify`), the right one
-#     starts p1's session as hinteros and nothing of p2 is left running (`pin end-others`).
-# Each handover leaves greetd's VT (read from /dev/vcs1) with the PAM splash ("Loading Sam",
-# "HinterOS" on the way back, "Loading James") and no log text (everything greetd runs logs to the
-# journal). Then root removes p1's forgotten PIN with `hinteros-system reset-pin James`: p1's
-# session sees `pin_set: false` and sets a new PIN without the old one.
+# Greeter mode end to end (profiles.md "The pieces", DECISIONS D7-D9, S4, J1-J3): a schema-2 box
+# with `hinteros.profiles.greeter.enable` boots into the picker (cage + the launcher with
+# --greeter, the session daemon in greeter mode as `hinteros-greeter`). Profiles: p1 =
+# `hinteros`, the admin, locked with PIN 2468; p2 = `hinteros-p2`, unlocked, no PIN; the guest. A
+# client of the greeter daemon's socket stands in for the picker's buttons
+# (tests/vm/system/client/greeter.py), one of a profile's daemon for the launcher (session.py):
+#   - at the picker, the admin p1 with five wrong PINs (never a wait: no admin backoff), then the
+#     right one;
+#   - switches with session.switch_profile, each straight from one session to the next with no
+#     picker UI (a watcher samples the greeter user's processes every 50 ms: no compositor, no
+#     launcher or daemon in greeter mode): p1 -> unlocked p2, p2 -> the guest, the guest -> the
+#     locked p1 (its PIN given in the guest's session first; a missing or wrong one is refused
+#     there and the guest's session stays), p1 -> the guest again;
+#   - End guest session goes to the picker (the used-up switch hint does not lead back in).
+# Each handover paints the PAM console splash ("Loading Sam…" etc. in block letters, journalled as
+# hinteros-splash) on greetd's VT (/dev/vcsu1) with no log text, and end-others leaves nothing of
+# the previous account running. Then root removes p1's forgotten PIN with `hinteros-system
+# reset-pin James`: p1's session sees `pin_set: false` and sets a new PIN without the old one.
 { self, pkgs }:
 let
   fixture = ./fixtures/profiles-greeter;
@@ -114,18 +119,21 @@ in
         )
         return json.loads(out)["response"]
 
-    def vt_text():
-        # greetd's VT (tty1) as text: what the kernel console shows between two compositors.
-        return machine.succeed("tr -c '[:print:]' ' ' < /dev/vcs1")
+    def splashes():
+        # What `pin splash` painted, in order (it journals the text; the VT has block letters).
+        out = machine.succeed("journalctl -t hinteros-splash -o json --output-fields=HINTEROS_SPLASH")
+        return [json.loads(l)["HINTEROS_SPLASH"] for l in out.splitlines() if l.strip()]
 
-    def assert_splash(expected, gone=()):
-        text = vt_text()
-        assert expected in text, f"{expected!r} not on tty1: {text.strip()!r}"
-        for g in gone:
-            assert g not in text, f"{g!r} still on tty1: {text.strip()!r}"
-        # Nothing greetd runs logs to the VT (everything goes to the journal).
+    def assert_splash(expected, before):
+        # Since `before` (the count of splashes then): the handover painted `expected`, and
+        # greetd's VT (tty1) shows the big letters and no log text (everything greetd runs logs
+        # to the journal).
+        new = splashes()[before:]
+        assert expected in new, f"{expected!r} not painted: {new!r}"
+        vt = json.loads(machine.succeed("python3 /etc/hinteros-test/vt.py 1"))
+        assert vt["blocks"] > 40, f"no block letters on tty1: {vt!r}"
         for word in ["WARN", "INFO", "ERROR", "DEBUG", "hinteros_session", "Permission denied"]:
-            assert word not in text, f"log text {word!r} on tty1: {text.strip()!r}"
+            assert word not in vt["text"], f"log text {word!r} on tty1: {vt['text'].strip()!r}"
 
     def session_of(user):
         machine.wait_until_succeeds(f"test -S {sock(user)}", timeout=120)
@@ -133,46 +141,99 @@ in
         # greetd lets the greeter go first (the picker quits, or is stopped after 5 s).
         machine.wait_until_fails("pgrep -u hinteros-greeter -f '/bin/cage '", timeout=60)
 
+    # Anything of the picker's UI as the greeter: the compositor (cage here, gamescope on a
+    # box) or the launcher / session daemon in greeter mode. Sampled every 50 ms from boot on.
+    GREETER_UI = "/bin/cage |gamescope|--greeter"
     machine.wait_for_unit("multi-user.target")
+    machine.succeed(
+        "systemd-run --unit=greeter-ui-watch ${pkgs.bash}/bin/sh -c "
+        f"'while :; do ${pkgs.procps}/bin/pgrep -a -u hinteros-greeter -f -- \"{GREETER_UI}\" >> /tmp/greeter-ui; "
+        "${pkgs.coreutils}/bin/sleep 0.05; done'"
+    )
     machine.wait_for_unit("greetd.service")
+
+    def watch_greeter():
+        machine.succeed(": > /tmp/greeter-ui")
+        return len(splashes())
+
+    def assert_no_greeter_ui():
+        seen = machine.succeed("cat /tmp/greeter-ui").strip()
+        assert seen == "", f"the picker ran during the switch:\n{seen}"
+
+    def switch(src, dst, user, expected, **params):
+        # From `src`'s session to `dst` without the picker: old session, then new session,
+        # with the console splash between.
+        before = watch_greeter()
+        r = sess(src, "session.switch_profile", {"id": dst, **params})
+        assert r.get("result") == {}, r
+        session_of(user)
+        machine.wait_until_fails(f"pgrep -u {src} -f '/bin/cage '", timeout=60)
+        assert_no_greeter_ui()
+        assert_splash(expected, before)
 
     with subtest("the box boots into the picker, not into a profile"):
         picker_up()
         machine.fail("pgrep -u hinteros -f '/bin/cage '")
         machine.fail("pgrep -u hinteros-p2")
         assert "hinteros" not in machine.succeed("id -nG hinteros-greeter").split()
+        assert "HinterOS" in splashes(), splashes()
 
-    with subtest("an unlocked profile: no PIN, its session starts as its own user"):
-        g = greeter("p2")
+    with subtest("the picker: the admin profile's PIN; wrong ones never lock it out"):
+        before = len(splashes())
+        g = greeter("p1", "0000", "0000", "0000", "0000", "0000", "2468")
         names = {p["id"]: p["name"] for p in g["list"]["profiles"]}
         assert names == {"p1": "James", "p2": "Sam"}, g
         assert [p["locked"] for p in g["list"]["profiles"]] == [True, False], g
-        assert len(g["outcomes"]) == 1 and g["outcomes"][0]["ok"] is True, g
-        session_of("hinteros-p2")
-        # The console splash of the handover (PAM `pin splash`) is on greetd's VT.
-        assert_splash("Loading Sam")
-        cur = sess("hinteros-p2", "profile.current")["result"]
-        assert cur["id"] == "p2" and not cur["admin"] and not cur["guest"], cur
-
-    with subtest("switch to the locked p1: the picker asks for its PIN, a wrong one is refused"):
-        r = sess("hinteros-p2", "session.switch_profile", {"id": "p1"})
-        assert r.get("result") == {}, r
-        machine.wait_until_fails("pgrep -u hinteros-p2 -f '/bin/cage '", timeout=90)
-        picker_up()
-        # On the way back to the picker: just "HinterOS", no log lines.
-        assert_splash("HinterOS", gone=["Loading Sam"])
-        pub = json.loads(machine.succeed("cat /run/hinteros/profiles-public.json"))
-        assert pub["next"]["target"] == "p1" and not pub["next"]["fast"], pub
-        g = greeter("p1", "0000", "2468")
-        assert len(g["outcomes"]) == 2, g
-        assert g["outcomes"][0]["ok"] is False, g
-        assert g["outcomes"][1]["ok"] is True, g
+        assert len(g["outcomes"]) == 6, g
+        for o in g["outcomes"][:5]:
+            assert o["ok"] is False and not o.get("locked_seconds"), g
+        assert g["outcomes"][5]["ok"] is True, g
         session_of("hinteros")
-        assert_splash("Loading James", gone=["Loading Sam"])
+        assert_splash("Loading James…", before)
         cur = sess("hinteros", "profile.current")["result"]
         assert cur["id"] == "p1" and cur["admin"] and cur["pin_set"], cur
-        # end-others: nothing of p2 is left.
+
+    with subtest("switch to an unlocked profile: no picker, one session to the next"):
+        switch("hinteros", "p2", "hinteros-p2", "Loading Sam…")
+        cur = sess("hinteros-p2", "profile.current")["result"]
+        assert cur["id"] == "p2" and not cur["admin"] and not cur["guest"], cur
+        # end-others: nothing of p1 is left; the hint is used up.
+        machine.wait_until_fails("pgrep -u hinteros", timeout=30)
+        machine.fail("test -e /run/hinteros/switch.json")
+
+    with subtest("switch to the guest: no picker"):
+        switch("hinteros-p2", "guest", "hinteros-guest", "Loading Guest…")
+        assert sess("hinteros-guest", "profile.current")["result"]["guest"]
         machine.wait_until_fails("pgrep -u hinteros-p2", timeout=30)
+
+    with subtest("switch to a locked profile: its PIN in the old session first, then no picker"):
+        before = watch_greeter()
+        r = sess("hinteros-guest", "session.switch_profile", {"id": "p1"})
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "target"}, r
+        r = sess("hinteros-guest", "session.switch_profile", {"id": "p1", "pin": "0000"})
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "target"}, r
+        # A wrong PIN ends nothing.
+        machine.succeed("pgrep -u hinteros-guest -f '/bin/cage '")
+        machine.fail("test -e /run/hinteros/switch.json")
+        switch("hinteros-guest", "p1", "hinteros", "Loading James…", pin="2468")
+        cur = sess("hinteros", "profile.current")["result"]
+        assert cur["id"] == "p1", cur
+        machine.wait_until_fails("pgrep -u hinteros-guest", timeout=30)
+        # The token was used up: the hint (and its token) is gone.
+        machine.fail("test -e /run/hinteros/switch.json")
+
+    with subtest("End guest session: the picker, not straight back into the guest"):
+        switch("hinteros", "guest", "hinteros-guest", "Loading Guest…")
+        before = len(splashes())
+        r = sess("hinteros-guest", "session.end_guest")
+        assert r.get("result") == {}, r
+        machine.wait_until_fails("pgrep -u hinteros-guest -f '/bin/cage '", timeout=90)
+        picker_up()
+        assert_splash("HinterOS", before)
+        assert "--greeter" in machine.succeed("cat /tmp/greeter-ui"), "the watch saw no picker"
+        g = greeter("p1", "2468")
+        assert g["outcomes"][-1]["ok"] is True, g
+        session_of("hinteros")
 
     with subtest("a forgotten PIN: root removes it from the terminal, the profile sets a new one"):
         # On root's PATH (systemPackages); without an argument it lists the profiles.

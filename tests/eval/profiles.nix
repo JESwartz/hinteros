@@ -137,6 +137,9 @@ let
         (lib.hasInfix "/hinteros-console/picker" (console greeter))
         greeter.hinteros.daemon.session.settings.greeter.session_command
         greeter.systemd.services.greetd.after
+        # The console font from the initrd: the splash centres on the final size.
+        greeter.console.earlySetup
+        greeter.console.font
       ];
       expected = [
         false
@@ -147,7 +150,12 @@ let
         true
         true
         [ "/run/current-system/hinteros-console/session" ]
-        [ "hinteros-system.service" ]
+        [
+          "hinteros-system.service"
+          "systemd-vconsole-setup.service"
+        ]
+        true
+        "ter-v32b"
       ];
     };
     # The PAM stack (profiles.md, "PAM: where the PIN and the kill are enforced").

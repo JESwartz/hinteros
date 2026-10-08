@@ -120,9 +120,21 @@ let
   # which gamescope applies at its next start) in the session user's state dir. The session daemon
   # runs through it too, so both see the same files. A wrapper, not fixed paths: the uid is only
   # known at login.
+  #
+  # The display mode is the box's, not the user's (profiles.md "Per profile vs. shared"):
+  # `display.keep` saves it for every profile (hinteros-system writes /run/hinteros/gamescope-modes
+  # from runtime.json, also at boot), and every session (a profile, a fresh one, the guest whose
+  # home is new at every boot, the picker) starts gamescope with it, so a switch never makes the
+  # TV change mode. A copy, not a link: the session daemon writes the user's file when a mode is
+  # kept (and then saves it box-wide).
   displayEnvWrapper = pkgs.writeShellScript "hinteros-display-env" ''
     state="''${XDG_STATE_HOME:-$HOME/.local/state}/hinteros"
     ${pkgs.coreutils}/bin/mkdir -p "$state"
+    box=/run/hinteros/gamescope-modes
+    if [ -s "$box" ]; then
+      ${pkgs.coreutils}/bin/cp -f "$box" "$state/gamescope-modes.new" \
+        && ${pkgs.coreutils}/bin/mv -f "$state/gamescope-modes.new" "$state/gamescope-modes"
+    fi
     export GAMESCOPE_PATCHED_EDID_FILE="$XDG_RUNTIME_DIR/gamescope-edid"
     export GAMESCOPE_MODE_SAVE_FILE="$state/gamescope-modes"
     exec "$@"

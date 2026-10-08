@@ -136,11 +136,16 @@ in
         ];
 
         # The kernel console of the session's VT shows between two compositors (the PAM splash below,
-        # and anything else on tty1): a large font so it reads on a TV from the couch (Terminus
-        # 16x32: 120x33 cells at 1920x1080). Applied by systemd-vconsole-setup at boot.
+        # and anything else on tty1): Terminus 16x32 (120x33 cells at 1920x1080), on which the splash
+        # draws block letters (hinteros-daemon bigtext.rs). Set in the initrd (`earlySetup`, after
+        # the GPU's KMS driver, which facter puts there too): the size the splash centres on at boot
+        # is final, and the stage-2 systemd-vconsole-setup (re-run by udev for every vtcon) sets the
+        # same font again, so nothing moves under the "HinterOS" splash afterwards (it was drawn for
+        # 8x16 cells, then the font changed under it: small, near the top left).
         console = {
           font = lib.mkDefault "ter-v32b";
           packages = [ pkgs.terminus_font ];
+          earlySetup = lib.mkDefault true;
         };
 
         # Autologin (and the boot-health check) use the first account.
@@ -246,9 +251,13 @@ in
           KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
         '';
 
-        # The greeter reads the public view the service writes at start.
+        # The greeter reads the public view the service writes at start; the splash centres on the
+        # console size, final once the console font is set.
         systemd.services.greetd = {
-          after = [ "hinteros-system.service" ];
+          after = [
+            "hinteros-system.service"
+            "systemd-vconsole-setup.service"
+          ];
           wants = [ "hinteros-system.service" ];
         };
       })
