@@ -104,7 +104,7 @@ An example is in `/etc/hinteros-installer/plan.example.json` on the ISO:
 | `hostname` | Lowercase letters, digits and hyphens |
 | `admin` | `user` plus `password` (plain text, hashed by the installer) or `hashedPassword` (`mkpasswd` output). Required: it is the only SSH login and the sudo account. The session user (`hinteros`) and root get no password |
 | `ssh.enable` | sshd from the first boot, password login for the admin only. Default false |
-| `channel` | `stable` or `beta`: the `ref` in the generated flake's input URL. Default `stable` |
+| `channel` | `stable` or `beta`: the `ref` in the generated flake's input URL. Default: the installer's own channel, `hinteros.installer.channel` (`stable`; a beta ISO sets `beta`) |
 | `base` | nixpkgs base; only `unstable` exists. Default `unstable` |
 | `apps` | Catalog ids, listed from the catalog: the `onIso` apps (`jellyfin`, `youtube`, `firefox`; on the ISO, work offline) and `steam` (downloaded, online only; nothing unfree is on the ISO). The installer offers exactly these four; Crunchyroll, Moonlight, Plex and the streaming apps are Store-only. The installer UI pre-selects `youtube` and `firefox` |
 | `acceptedTerms` | Optional `{"<id>": "<terms version>"}`. An app whose catalog entry has vendor terms (Steam, Plex) is refused (`terms-not-accepted`) unless the accepted version equals the version in the catalog index on this installer. The accepted ones are recorded on the box in `/var/lib/hinteros/terms-accepted.json` (root, 0600): `{"<id>": [{"version", "accepted_at", "by": "installer"}]}` |
