@@ -68,6 +68,9 @@ in
         firefox.kiosk.url = "http://127.0.0.1:8000/";
       };
 
+      # The test checks the automatic keyboard (extension -> osk.sock): auto_show is off by default.
+      hinteros.daemon.osk.autoShow = true;
+
       systemd.services.typing-page = {
         wantedBy = [ "multi-user.target" ];
         serviceConfig.ExecStart = "${lib.getExe pkgs.python3} ${server}";

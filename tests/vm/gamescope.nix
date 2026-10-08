@@ -213,6 +213,9 @@
     ok("apps.close", {"id": "steam"})
     wait_event("app_exited", lambda p: p["id"] == "steam" and p["reason"] == "closed")
     machine.succeed(f"grep -q 'bigpicture: close' /run/user/{uid}/fake-steam.log")
+    # A Steam window within 10 s of our own Steam request (here the close) is Steam's answer and gets
+    # focus (daemon README, "Steam games"); only a later pop-up is a steam_attention banner.
+    machine.sleep(12)
     machine.succeed(as_user("steam --hinteros-fake-popup 'Steam Guard'"))
     attention = wait_event("steam_attention", lambda p: any(w["title"] == "Steam Guard" for w in p["windows"]))
     assert attention["windows"], attention
