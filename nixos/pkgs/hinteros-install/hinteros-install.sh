@@ -100,17 +100,19 @@ run() {
 
 usage() {
   cat >&2 <<'USAGE'
-usage: hinteros-install --plan FILE|- [--validate-only]
+usage: hinteros-install --plan FILE|- [--validate-only | --state-dir DIR]
 
 Installs HinterOS on the disk named in the plan, erasing it. The plan is a JSON object, see
 the README ("Installer"). With --validate-only the plan and the machine are checked and
-nothing is touched.
+nothing is touched. With --state-dir the plan is checked and the state.json files it would
+produce are written to DIR (for tests).
 USAGE
   exit 2
 }
 
 plan_file=
 validate_only=0
+state_dir=
 while [ $# -gt 0 ]; do
   case $1 in
     --plan)
@@ -122,6 +124,11 @@ while [ $# -gt 0 ]; do
       validate_only=1
       shift
       ;;
+    --state-dir)
+      [ $# -ge 2 ] || usage
+      state_dir=$2
+      shift 2
+      ;;
     -h | --help) usage ;;
     *) usage ;;
   esac
@@ -132,7 +139,7 @@ mkdir -p "$(dirname "$LOG")"
 : >>"$LOG"
 chmod 0600 "$LOG"
 
-[ "$(id -u)" -eq 0 ] || fail 2 not-root "hinteros-install must run as root"
+[ -n "$state_dir" ] || [ "$(id -u)" -eq 0 ] || fail 2 not-root "hinteros-install must run as root"
 
 # ---------------------------------------------------------------------------------------------
 # 1. Validate: the plan, then the machine. Nothing is touched before this is done.
@@ -252,6 +259,33 @@ base=$(plan .base)
 network_pref=$(plan .network)
 mapfile -t apps < <(plan '.apps[]')
 wifi_ssid=$(plan '.wifi.ssid // empty')
+
+# state.json for a set of apps (a JSON array of ids), into DIR (default: the device config).
+write_state() {
+  local dir=${2:-$cfg}
+  jq -n --arg base "$base" --arg sv "$STATE_VERSION" --arg host "$hostname" --arg admin "$admin_user" \
+    --argjson ssh "$ssh_enable" --argjson apps "$1" '{
+      schemaVersion: 1,
+      base: $base,
+      stateVersion: $sv,
+      settings: {hostname: $host, ssh: {enable: $ssh}, admin: {user: $admin}},
+      disk: {layout: "gpt-esp-ext4"},
+      apps: $apps,
+      profiles: []
+    }' >"$dir/state.json"
+  chmod 0644 "$dir/state.json"
+}
+json_array() { jq -nc '$ARGS.positional' --args "$@"; }
+
+# --state-dir: write the state.json files this plan would install (the system stage's in
+# DIR/system, the finished install's in DIR/apps) and stop. For the flake check that has
+# hinteros-system parse them; nothing else is checked or touched, and root is not needed.
+if [ -n "$state_dir" ]; then
+  mkdir -p "$state_dir/system" "$state_dir/apps"
+  write_state '[]' "$state_dir/system"
+  write_state "$(json_array "${apps[@]}")" "$state_dir/apps"
+  exit 0
+fi
 
 # The machine.
 if [ ! -d /sys/firmware/efi ] && [ -z "${HINTEROS_INSTALL_ALLOW_BIOS:-}" ]; then
@@ -408,20 +442,6 @@ else
 fi
 
 progress config 28 "Writing the device configuration"
-# state.json for a set of apps (a JSON array of ids).
-write_state() {
-  jq -n --arg base "$base" --arg sv "$STATE_VERSION" --arg host "$hostname" --arg admin "$admin_user" \
-    --argjson ssh "$ssh_enable" --argjson apps "$1" '{
-      schemaVersion: 1,
-      base: $base,
-      stateVersion: $sv,
-      settings: {hostname: $host, ssh: {enable: $ssh}, admin: {user: $admin}},
-      disk: {layout: "gpt-esp-ext4"},
-      apps: $apps,
-      profiles: []
-    }' >"$cfg/state.json"
-  chmod 0644 "$cfg/state.json"
-}
 write_state '[]'
 
 # Extra modules of the generated flake: the test hook, and the boot loader override.
@@ -660,8 +680,6 @@ fi
 # ---------------------------------------------------------------------------------------------
 installed_apps=()
 commit_started=0
-
-json_array() { jq -nc '$ARGS.positional' --args "$@"; }
 
 finish() { # leaves the run: flush, unmount, final line
   local failed_json msg
