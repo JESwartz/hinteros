@@ -27,6 +27,7 @@ one consistent system.
 | `overlays.default` | HinterOS packages: `hinteros-launcher`, `hinteros-session`, `hinteros-system` (from the component flakes) and the placeholder home app and `hinteros-firefox-kiosk` |
 | `nixosConfigurations.vm` | Test VM that autologs in and starts the console session (cage in the VM, see `nixos/README.md`); `vm-gamescope` uses gamescope |
 | `packages.x86_64-linux.vm`, `apps.x86_64-linux.vm` | `nix run .#vm` opens the VM in a window (software rendering) |
+| `packages.x86_64-linux.promote`, `apps.x86_64-linux.promote` | `nix run .#promote`: the release tool (see "Releases and channels"); `checks.promote` tests it against a temporary repo with throwaway keys |
 | `lib.catalogIds` | `{ <id> = { name; status; statusReason; }; }` for every catalog entry, tombstones included: what `hinteros-system` evaluates (`nix eval --json ...#lib.catalogIds`, no import-from-derivation) against a target revision to tell which apps an update adds or retires |
 | `lib.mkDevice` | `mkDevice { state; configDir ? null; facterReport ? null; extraModules ? []; base ? "unstable" }` builds a device's `nixosSystem` from its state.json (design: `device-config.md` in the docs). `state` is checked by `nixos/modules/state.nix`: `schemaVersion` must be 1, unknown fields and unknown app ids fail evaluation (ids are the catalog's; tombstoned ids are accepted and do nothing). It maps `settings.ssh.enable` (opt-in; password login for the admin account only, see hardening.nix), `settings.admin.user` (enables `hinteros.admin`; its password hash lives in the root-only `/var/lib/hinteros/admin-password-hash`, never in the state), `settings.hostname`, `stateVersion`, `disk.layout` (the installer's layout, `nixos/modules/disk.nix`), `apps` and the first profile's user. With a state, exactly the listed catalog apps are enabled. Apps come from the `hinteros-catalog` flake input (`nixos/modules/catalog.nix`): every entry becomes a `hinteros.apps.<id>` (settings from the entry's `app`, icon fields written into session.toml for the daemon to resolve at runtime, its restricted `nixos` module while enabled, its unfree package names in `hinteros.unfreeAllowlist`). Without a state the `onIso` apps (jellyfin, youtube, crunchyroll, firefox) are on with the session. `nixos/lib/app-ids.nix` derives the installer's lists (onIso, online-only, preselected) from the catalog. The Store index and vendor terms are installed at `share/hinteros/catalog.json` and `share/hinteros/terms/` Only the `unstable` base exists for now |
 | `nixosConfigurations.installer`, `packages.x86_64-linux.iso` | The installer ISO (`nix build .#iso`, see Installer below). `nixosModules.installer` is the same environment without the image bits, which the install VM tests run as a node |
@@ -37,6 +38,28 @@ one consistent system.
 | `devShells.default`, `formatter` | Dev shell with the lint tools and git hooks; `nix fmt` |
 
 `nix flake check` runs everything above, including the VM test (needs `/dev/kvm`).
+
+## Releases and channels
+
+Boxes follow the `stable` or `beta` branch of this repo and only install a tip that is signed by
+a key listed in `release/allowed_signers` of the generation they are running (design:
+`distribution.md` in the docs). Commits on `main` are not signed; the owner promotes them:
+
+| Path or command | What it is |
+|---|---|
+| `release/version`, `release/notes.md` | The next release's version (`MAJOR.MINOR.PATCH`) and its notes, newest first: the `## <version>` section on top is the release commit's message. Bump both on `main` before promoting |
+| `release/allowed_signers`, `release/cache-keys` | Release signing keys and binary cache keys every generation trusts (`nixos/modules/release.nix`). Release key fingerprint: `SHA256:NuERttXtUYjtSTqt7kHUqs7TW6rWSHjHOIUlOOADpCE` (ED25519, `hinteros-release`) |
+| `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. The very first one needs `--bootstrap` |
+| `nix run .#promote -- stable [--rev <beta release>]` | Fast-forwards `stable` to a beta release commit after the dogfood confirmation (`--expedite` for high/critical security releases) |
+| `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable` (patch version bump, `Security:` severity required); then merge `stable` into `main` |
+| `sudo hinteros-bootstrap-channel <stable\|beta> <rev>` | On a box, over SSH: move it onto a channel at a rev once, outside the update UI (boxes installed before they trusted the release key) |
+
+`promote` works on a temporary clone of `origin`, prints every check, signs with
+`~/.ssh/hinteros/release_ed25519` (or `--key`, `$HINTEROS_RELEASE_KEY`) without ssh-agent, so
+the passphrase is asked each time, and never force-pushes. `--dry-run` does everything except
+signing and pushing. Until the Forgejo runner exists there are no green CI statuses to check:
+pass `--skip-ci` (it warns) after running the checks by hand. The signed `v<version>` tag with
+the ISO checksums is not automated yet.
 
 ## Installer
 
@@ -267,7 +290,8 @@ scripts/dev-override build .#vm
 | `devices/` | Checked-in devices (`devbox`) |
 | `nixos/overlay.nix`, `nixos/pkgs/` | The overlay and the packages it adds |
 | `nixos/vm/` | Test VM configuration (shared by `nix run .#vm` and the VM tests) |
-| `scripts/` | Dev scripts (`dev-override`) |
+| `scripts/` | Dev scripts (`dev-override`) and the release tool (`promote.sh`) |
+| `release/` | Version, release notes, release signing keys, cache keys |
 | `nixos/hardware/` | Per-model hardware profiles layered on top of the `hardware.facter` report |
 | `tests/vm/` | NixOS VM tests |
 | `tests/couch/` | Manual couch-test checklists, one per milestone |
