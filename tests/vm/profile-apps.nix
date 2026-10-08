@@ -46,13 +46,15 @@ in
     in
     {
       imports = [ (import ./system/node.nix { inherit self pkgs; }) ];
-      hinteros.state = builtins.fromJSON (builtins.readFile (fixture + "/state.json"));
-      hinteros.deviceConfig.configDir = lib.mkForce fixture;
+      hinteros = {
+        state = builtins.fromJSON (builtins.readFile (fixture + "/state.json"));
+        deviceConfig.configDir = lib.mkForce fixture;
+        # Kiosk apps open local pages (nothing here launches them, but keep them offline).
+        appEnv.overrides.youtube.kiosk.url = "file:///etc/hinteros-pages/youtube.html";
+      };
       systemd.tmpfiles.settings."10-hinteros-config"."/etc/hinteros".C.argument = lib.mkForce "${
         fixture
       }";
-      # Kiosk apps open local pages (nothing here launches them, but keep them offline).
-      hinteros.appEnv.overrides.youtube.kiosk.url = "file:///etc/hinteros-pages/youtube.html";
       systemd.services."hinteros-job@".path = lib.mkBefore [
         (stubNix {
           inherit pkgs envs;

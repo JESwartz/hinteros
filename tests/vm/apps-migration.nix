@@ -39,31 +39,35 @@ in
     in
     {
       imports = [ (import ./system/node.nix { inherit self pkgs; }) ];
-      hinteros.state = stateOf v1;
-      hinteros.deviceConfig.configDir = lib.mkForce v1;
+      hinteros = {
+        state = stateOf v1;
+        deviceConfig.configDir = lib.mkForce v1;
+        fakeSteam.enable = true;
+      };
       systemd.tmpfiles.settings."10-hinteros-config"."/etc/hinteros".C.argument = lib.mkForce "${v1}";
-      hinteros.fakeSteam.enable = true;
-      systemd.services."hinteros-job@".path = lib.mkBefore [
-        (stubNix {
-          inherit pkgs envs;
-          nix = config.nix.package;
-        })
-      ];
       # The system the migration's apply flow "builds".
       specialisation.migrated.configuration = {
         hinteros.state = lib.mkOverride 40 (stateOf v2);
         hinteros.deviceConfig.configDir = lib.mkOverride 40 v2;
       };
-      systemd.services.stub-toplevel = {
-        wantedBy = [ "multi-user.target" ];
-        before = [ "hinteros-system.service" ];
-        serviceConfig.Type = "oneshot";
-        script = ''
-          mkdir -p /run/stub
-          if [ -e /run/current-system/specialisation/migrated ]; then
-            readlink -f /run/current-system/specialisation/migrated > /run/stub/toplevel
-          fi
-        '';
+      systemd.services = {
+        "hinteros-job@".path = lib.mkBefore [
+          (stubNix {
+            inherit pkgs envs;
+            nix = config.nix.package;
+          })
+        ];
+        stub-toplevel = {
+          wantedBy = [ "multi-user.target" ];
+          before = [ "hinteros-system.service" ];
+          serviceConfig.Type = "oneshot";
+          script = ''
+            mkdir -p /run/stub
+            if [ -e /run/current-system/specialisation/migrated ]; then
+              readlink -f /run/current-system/specialisation/migrated > /run/stub/toplevel
+            fi
+          '';
+        };
       };
       system.extraDependencies = [ env ];
       environment.etc."hinteros-envs.json".text = builtins.toJSON envs;
