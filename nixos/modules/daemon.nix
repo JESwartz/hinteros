@@ -121,7 +121,12 @@ in
     release.version = lib.mkOption {
       type = lib.types.str;
       default = "0.1.0-dev";
-      description = "HinterOS release version, shipped in `share/hinteros/release.json` (shown by `system.info`). A placeholder until releases are cut (M6).";
+      description = ''
+        HinterOS release version, shipped in `share/hinteros/release.json` (shown by
+        `system.info`). `nixosModules.default` sets it from the repo's `release/version`
+        (release.nix); the default is a placeholder for configs without it. Not meant to be set
+        by devices.
+      '';
     };
 
     update = {
@@ -144,8 +149,9 @@ in
           `"<principal> <ssh-ed25519 key> [comment]"` per entry; they become the generation's
           `share/hinteros/update/allowed_signers` (the namespace is pinned to `git`).
 
-          EMPTY BY DEFAULT: the owner must add his signing key (and an offline backup key) here
-          before M6 releases. With no key, `update.check`, `update.apply` and `channel.set` fail
+          EMPTY BY DEFAULT. `nixosModules.default` sets the vendor's keys from the repo's
+          `release/allowed_signers` (release.nix, with `mkDefault`: a definition elsewhere replaces
+          them). With no key, `update.check`, `update.apply` and `channel.set` fail
           closed: git's verification finds no matching principal, so every tip is rejected with
           `update_verification_failed` (`unknown_signer`) and nothing is ever applied. The running
           generation's list is what counts, so a key added here only takes effect once a

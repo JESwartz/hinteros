@@ -106,8 +106,12 @@
           overlayModule
           catalogModule
           ./nixos/modules
+          # The vendor's trust (signing keys, cache keys) and version from release/: only here,
+          # so configs that pick individual modules start out trusting nobody.
+          ./nixos/modules/release.nix
         ];
         overlay = overlayModule;
+        cache = ./nixos/modules/cache.nix;
         session = ./nixos/modules/session.nix;
         generic-hardware = ./nixos/modules/generic-hardware.nix;
         daemon = ./nixos/modules/daemon.nix;

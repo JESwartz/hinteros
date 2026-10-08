@@ -33,6 +33,12 @@ let
     }
   ];
 
+  # A config that replaces the vendor's signers (release.nix sets them with mkDefault).
+  noKey = mk [ { hinteros.update.allowedSigners = [ ]; } ];
+
+  releaseVersion = lib.fileContents ../../release/version;
+  releaseKey = "release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtzB3OuVIbG4WhjiNynpKPiTEJKdD5vicRouH8CQsrk hinteros-release";
+
   shareOf =
     cfg:
     lib.findFirst (
@@ -209,6 +215,37 @@ let
         false
       ];
     };
+    # release.nix (nixosModules.default): the vendor's version, signers and (still no) cache keys
+    # from release/; a device definition replaces the signers rather than adding to them; the
+    # individual daemon module alone trusts nobody.
+    testReleaseTrust = {
+      expr = [
+        c.hinteros.release.version
+        (lib.elem releaseKey c.hinteros.update.allowedSigners)
+        c.hinteros.cache.publicKeys
+        c.hinteros.cache.enable
+        withKey.hinteros.update.allowedSigners
+        noKey.hinteros.update.allowedSigners
+        (lib.evalModules {
+          modules = [
+            ../../nixos/modules/daemon.nix
+            {
+              _module.check = false;
+              _module.args.pkgs = pkgs;
+            }
+          ];
+        }).config.hinteros.update.allowedSigners
+      ];
+      expected = [
+        releaseVersion
+        true
+        [ ]
+        false
+        [ "owner ${key} owner@hinteros" ]
+        [ ]
+        [ ]
+      ];
+    };
     testBadSignerRejected = {
       expr =
         lib.any (a: !a.assertion)
@@ -219,22 +256,33 @@ let
 
   share = shareOf c;
   shareKey = shareOf withKey;
+  shareNoKey = shareOf noKey;
 in
 assert share != null;
 pkgs.runCommand "hinteros-daemon-eval"
   {
     nativeBuildInputs = [ pkgs.jq ];
-    inherit share shareKey channelLine;
+    inherit
+      share
+      shareKey
+      shareNoKey
+      channelLine
+      releaseVersion
+      ;
     failures = if results == [ ] then "" else builtins.toJSON results;
   }
   ''
     if [ -n "$failures" ]; then echo "$failures" >&2; exit 1; fi
     cd $share/share
-    [ "$(jq -c . hinteros/release.json)" = '{"dev":false,"version":"0.1.0-dev"}' ]
+    [ "$(jq -c . hinteros/release.json)" = "{\"dev\":false,\"version\":\"$releaseVersion\"}" ]
     [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://justsomeshed.com/JSwartz/HinterOS/hinteros.git"}' ]
-    # No signers by default: only comments, so nothing verifies.
-    ! grep -v '^#' hinteros/update/allowed_signers | grep -q .
-    grep -q 'update verifies' hinteros/update/allowed_signers
+    # The vendor's release key (release/allowed_signers, through release.nix), namespace pinned,
+    # and nothing else.
+    [ "$(grep -v '^#' hinteros/update/allowed_signers | grep -c .)" = 1 ]
+    grep -qx 'release namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtzB3OuVIbG4WhjiNynpKPiTEJKdD5vicRouH8CQsrk hinteros-release' hinteros/update/allowed_signers
+    # Signers replaced by an empty list: only comments, so nothing verifies.
+    ! grep -v '^#' $shareNoKey/share/hinteros/update/allowed_signers | grep -q .
+    grep -q 'update verifies' $shareNoKey/share/hinteros/update/allowed_signers
     # polkit: every action is "no" except ssh (the admin password, with a message the launcher shows).
     for a in settings rebuild update.check update.apply rollback channel jobs.cancel apps; do
       grep -q "org.hinteros.system.$a\"" polkit-1/actions/org.hinteros.system.policy
