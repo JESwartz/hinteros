@@ -1,9 +1,11 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "base": "unstable",
   "settings": {
-    "ssh": { "enable": false }
+    "ssh": { "enable": false },
+    "guest": { "enable": true }
   },
-  "apps": ["jellyfin", "youtube", "crunchyroll", "firefox", "steam", "plex-htpc"],
-  "profiles": [{ "id": "p1", "name": "Dev", "user": "hinteros" }]
+  "profiles": [{ "id": "p1", "user": "hinteros" }],
+  "requirements": ["graphics32", "steam-devices"],
+  "services": []
 }
