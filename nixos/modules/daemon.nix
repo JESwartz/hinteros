@@ -273,10 +273,10 @@ in
         auto_show = cfg.osk.autoShow;
         command = lib.mkDefault [ "${cfg.osk.package}/bin/hinteros-osk" ];
       };
-      # Pointer (right stick in keyboard-profile apps). idle_ms equals gamescope's
-      # --hide-cursor-delay (session.nix). The daemon hides/shows the cursor plane with
+      # Pointer (right stick in keyboard-profile apps). gamescope never hides it on inactivity
+      # (session.nix `cursor.hideDelayMs`); the daemon hides/shows the cursor plane with
       # gamescopectl, by absolute store path (the user unit's PATH does not carry it). Under cage
-      # there is no gamescope: the timeout alone has to do.
+      # there is no gamescope and no hiding.
       pointer =
         let
           ctl = lib.getExe' config.hinteros.session.gamescope.package "gamescopectl";
@@ -289,7 +289,6 @@ in
             ];
         in
         {
-          idle_ms = lib.mkDefault config.hinteros.session.pointerIdleMs;
           hide_command = lib.mkDefault (cursor "0");
           show_command = lib.mkDefault (cursor "1");
         };
@@ -427,9 +426,13 @@ in
         # Under gamescope, GTK apps it starts (the OSK, native apps) must use Xwayland too: the
         # daemon passes WAYLAND_DISPLAY, GTK would prefer it, and gamescope never sizes Wayland
         # windows (session.nix). The OSK also needs X11 for GAMESCOPE_EXTERNAL_OVERLAY.
-        // lib.optionalAttrs (config.hinteros.session.compositor == "gamescope") {
-          GDK_BACKEND = "x11";
-        };
+        // lib.optionalAttrs (config.hinteros.session.compositor == "gamescope") (
+          {
+            GDK_BACKEND = "x11";
+          }
+          # The large pointer theme for the apps it starts (gamescope scales the pointer).
+          // config.hinteros.session.cursor.environment
+        );
         serviceConfig = {
           # Under gamescope the daemon sees the same mode files gamescope was started with
           # (session.nix), so display.modes and display.set_mode find them.

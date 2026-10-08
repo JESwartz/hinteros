@@ -212,15 +212,26 @@ let
         false
       ];
     };
-    # gamescope hides the pointer after the daemon's idle_ms; gamescopectl is an absolute store path.
+    # gamescope never hides the pointer on inactivity (only the daemon does, with gamescopectl,
+    # an absolute store path) and scales it up for a TV; the home app gets the large theme.
     testPointerSettings =
       let
         p = (settings gs).pointer;
       in
       {
         expr = [
-          p.idle_ms
-          (lib.hasInfix "--hide-cursor-delay 3000" (sessionCmd gs))
+          (p ? idle_ms)
+          (lib.hasInfix "--hide-cursor-delay 86400000" (sessionCmd gs))
+          (lib.hasInfix "--cursor-scale-height 540" (sessionCmd gs))
+          (lib.hasInfix "XCURSOR_THEME=Adwaita" (sessionCmd gs))
+          (lib.hasInfix "--cursor-scale-height" (sessionCmd cage))
+          (lib.hasInfix "XCURSOR_THEME" (sessionCmd cage))
+          (lib.hasInfix "--cursor-scale-height" (
+            sessionCmd (mk {
+              hinteros.session.compositor = "gamescope";
+              hinteros.session.cursor.scaleHeight = null;
+            })
+          ))
           (lib.hasSuffix "/bin/gamescopectl" (lib.head p.hide_command))
           (lib.tail p.hide_command)
           (lib.tail p.show_command)
@@ -229,8 +240,13 @@ let
           ((settings gs).osk ? field_summon)
         ];
         expected = [
-          3000
+          false
           true
+          true
+          true
+          false
+          false
+          false
           true
           [
             "paint_cursor_plane"

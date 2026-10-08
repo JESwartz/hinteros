@@ -38,10 +38,14 @@ let
       "--xwayland-count"
       "2"
       "--force-windows-fullscreen"
-      # The pointer (right stick in keyboard-profile apps) fades after this many ms; equal to the
-      # daemon's `[pointer] idle_ms` (daemon README, "Pointer").
+      # The pointer (right stick in keyboard-profile apps) never fades on inactivity (the
+      # daemon hides it on the D-pad), and is large enough to see on a TV (`cursor` options).
       "--hide-cursor-delay"
-      (toString cfg.pointerIdleMs)
+      (toString cfg.cursor.hideDelayMs)
+    ]
+    ++ lib.optionals (cfg.cursor.scaleHeight != null) [
+      "--cursor-scale-height"
+      (toString cfg.cursor.scaleHeight)
     ]
     ++ cfg.gamescope.extraArgs
     ++ [ "--" ];
@@ -159,13 +163,58 @@ in
       description = "Package providing `hinteros-session reaper`, which wraps the home app under gamescope.";
     };
 
-    pointerIdleMs = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 3000;
-      description = ''
-        gamescope `--hide-cursor-delay` (gamescope's default is 10000) and the session daemon's
-        `[pointer] idle_ms`, which must be equal.
-      '';
+    # The mouse pointer (the right stick in keyboard-mode web apps, daemon README "Right-stick
+    # pointer"), read from the gamescope 3.16.31 source.
+    cursor = {
+      hideDelayMs = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 86400000;
+        description = ''
+          gamescope `--hide-cursor-delay` (gamescope's default is 10000; 0 would hide the pointer
+          at once). A day: the pointer never fades on inactivity. The session daemon hides it
+          itself with `gamescopectl paint_cursor_plane 0` when the D-pad or left stick is used
+          in a pointer app and on the way Home from one, and shows it when the right stick moves.
+        '';
+      };
+      scaleHeight = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = 540;
+        description = ''
+          gamescope `--cursor-scale-height`: the pointer is drawn at gamescope's 36 px base size
+          times floor(output height / this), at most 256 px (steamcompmgr.cpp,
+          MouseCursor::GetDesiredSize), whatever size the app's cursor image has. 540: 72 px at
+          1080p and 1440p, 144 px at 2160p, 36 px at 720p. `null`: the apps' own cursor size.
+        '';
+      };
+      theme = lib.mkOption {
+        type = lib.types.str;
+        default = "Adwaita";
+        description = "Xcursor theme (`XCURSOR_THEME`) for the home app and the apps the session daemon starts.";
+      };
+      # Its share/icons goes on XCURSOR_PATH.
+      package = lib.mkPackageOption pkgs "adwaita-icon-theme" { };
+      size = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 64;
+        description = ''
+          `XCURSOR_SIZE` for the apps the session daemon starts when `scaleHeight` is `null`.
+          With `scaleHeight` they get 256, as gamescope gives its own children (main.cpp: "We
+          always want the biggest cursor size so we can scale it"): Xcursor picks the theme's
+          largest image and gamescope scales it to the size above.
+        '';
+      };
+      environment = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        readOnly = true;
+        internal = true;
+        description = "The Xcursor variables for gamescope sessions (from the options above).";
+        default = {
+          XCURSOR_THEME = cfg.cursor.theme;
+          XCURSOR_PATH = "${cfg.cursor.package}/share/icons:/run/current-system/sw/share/icons";
+          XCURSOR_SIZE = toString (if cfg.cursor.scaleHeight != null then 256 else cfg.cursor.size);
+        };
+        defaultText = lib.literalMD "from `theme`, `package`, `size` and `scaleHeight`";
+      };
     };
 
     environment = lib.mkOption {
@@ -246,6 +295,9 @@ in
       # (gamescope reads XKB_DEFAULT_LAYOUT in wlserver.cpp; cage/wlroots too). Non-US text goes
       # through gamescope's input method instead.
       { XKB_DEFAULT_LAYOUT = lib.mkDefault "us"; }
+      # A pointer theme with large images (gamescope sets XCURSOR_SIZE for its own children
+      # when it scales the pointer). The daemon's apps get the same (daemon.nix).
+      (lib.mkIf (cfg.compositor == "gamescope") (lib.mapAttrs (_: lib.mkDefault) cfg.cursor.environment))
     ];
 
     # The daemon vendors gamescope's private `gamescope_input_method` protocol

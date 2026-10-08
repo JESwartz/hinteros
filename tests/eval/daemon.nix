@@ -173,6 +173,39 @@ let
       expr = lib.hasInfix ''inputs.hinteros.url = "git+%REPO%?ref=%CHANNEL%";'' template;
       expected = true;
     };
+    # InputPlumber 0.81 never answers SendEvent (the RT click) without the overlay's patch; the
+    # service runs the patched package (input-layer checks the click itself).
+    testInputPlumberPatched = {
+      expr = [
+        (map baseNameOf (c.services.inputplumber.package.patches or [ ]))
+        c.services.inputplumber.package.version
+        (lib.elem c.services.inputplumber.package c.services.udev.packages)
+      ];
+      expected = [
+        [ "send-event-no-blocking-send.patch" ]
+        "0.81.0"
+        true
+      ];
+    };
+    # The session daemon gets the large pointer theme for the apps it starts (gamescope).
+    testDaemonCursorEnvironment = {
+      expr =
+        let
+          env = c.systemd.user.services.hinteros-session.environment;
+        in
+        [
+          env.XCURSOR_THEME
+          env.XCURSOR_SIZE
+          (lib.hasSuffix "-adwaita-icon-theme-${pkgs.adwaita-icon-theme.version}/share/icons:/run/current-system/sw/share/icons" env.XCURSOR_PATH)
+          ((c.hinteros.daemon.session.settings.pointer or { }) ? idle_ms)
+        ];
+      expected = [
+        "Adwaita"
+        "256"
+        true
+        false
+      ];
+    };
     testBadSignerRejected = {
       expr =
         lib.any (a: !a.assertion)
