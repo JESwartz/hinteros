@@ -4,6 +4,9 @@
 // about: pages) the same way: {"focus": "text"|"password"|"none"} as one JSON line on the
 // session daemon's osk.sock ($HINTEROS_OSK_SOCKET), on a connection of its own. The daemon
 // keeps one state per connection (hinteros-daemon crates/hinteros-session/src/textfocus.rs).
+// A trusted primary-button click that lands on the focused field also sends
+// {"focus": ..., "clicked": true}, even if the focus did not change: the daemon shows the
+// keyboard for a click into a field, not for focus that came by itself.
 // Outside HinterOS (no socket) it does nothing.
 (function hinterosOskChrome() {
   try {
@@ -45,12 +48,15 @@
     // The focused element of the active Firefox window, if it is in the parent process. A web
     // page in a content process shows up as its <browser> element ("none"): the extension
     // reports those.
-    function current() {
+    function focusedElement() {
       let el = S.focus.focusedElement;
       while (el && el.shadowRoot && el.shadowRoot.activeElement) {
         el = el.shadowRoot.activeElement;
       }
-      return kindOf(el);
+      return el;
+    }
+    function current() {
+      return kindOf(focusedElement());
     }
 
     let out = null;
@@ -70,8 +76,12 @@
       return sts.createUnixDomainTransport(file).openOutputStream(0, 0, 0);
     }
 
-    function send(focus) {
-      const line = JSON.stringify({ focus, client: "hinteros-firefox-chrome" }) + "\n";
+    function send(focus, clicked = false) {
+      const msg = { focus, client: "hinteros-firefox-chrome" };
+      if (clicked) {
+        msg.clicked = true;
+      }
+      const line = JSON.stringify(msg) + "\n";
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           if (!out) {
@@ -108,6 +118,19 @@
       }
     }
 
+    // A click into the focused field (the address bar, whether it just got focus or had it).
+    // "click" comes after the press moved focus, and only for the primary button.
+    function clicked(event) {
+      if (!event.isTrusted) {
+        return;
+      }
+      const el = focusedElement();
+      const focus = kindOf(el);
+      if (focus !== "none" && event.composedPath().includes(el) && send(focus, true)) {
+        sent = focus;
+      }
+    }
+
     const EVENTS = ["focusin", "focusout", "focus", "blur", "activate", "deactivate"];
     const watched = new WeakSet();
     function watch(win) {
@@ -119,6 +142,7 @@
         win.addEventListener(type, settle, true);
       }
       win.addEventListener("unload", settle);
+      win.addEventListener("click", clicked, true);
       settle();
     }
 
