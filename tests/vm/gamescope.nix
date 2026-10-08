@@ -223,5 +223,21 @@
     wait_sees("the placeholder after the pop-up", "hinteros", "placeholder", absent=("steamguard",))
 
     machine.succeed("pgrep -u hinteros -f '/bin/gamescope '")
+
+    # greetd restarted (what a crashed or restarted session looks like from the outside): the new
+    # gamescope gets a new Xwayland, the session daemon is a new process of the new user manager,
+    # and it must take over focus again - the base layer property is set and the home app shows.
+    old_inv = machine.succeed(as_user("systemctl --user show -p InvocationID --value hinteros-session.service")).strip()
+    old_gs = machine.succeed("pgrep -u hinteros -o -f '/bin/gamescope '").strip()
+    print("greetd restart: old gamescope", old_gs, "old daemon invocation", old_inv)
+    machine.succeed("systemctl restart greetd")
+    machine.wait_until_fails(f"kill -0 {old_gs}", timeout=60)
+    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/gamescope '", timeout=120)
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros", timeout=120)
+    machine.wait_until_succeeds("test -S /run/user/" + uid + "/hinteros/session.sock", timeout=120)
+    machine.wait_until_succeeds(as_user("systemctl --user show -p InvocationID --value hinteros-session.service | grep -qvx " + old_inv), timeout=120)
+    machine.wait_until_succeeds(as_user("xprop -root GAMESCOPECTRL_BASELAYER_APPID | grep -q 4100000000"), timeout=120)
+    machine.wait_until_succeeds(as_user("xprop -root GAMESCOPE_FOCUSED_APP | grep -q 4100000000"), timeout=120)
+    wait_sees("the placeholder after greetd restarted", "hinteros", "placeholder")
   '';
 }

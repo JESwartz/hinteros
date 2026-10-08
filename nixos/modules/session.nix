@@ -80,10 +80,20 @@ let
     exec "$@"
   '';
 
+  # A new session of the user (greetd restarted, the compositor crashed) may find the previous
+  # session's daemon still running: the user manager outlives a session whose scope is still being
+  # torn down. That daemon is attached to the old compositor (its Xwayland is gone), so the new
+  # session restarts it (try-restart: only if it is running) and the new one takes over focus.
+  sessionStart = pkgs.writeShellScript "hinteros-session-start" ''
+    ${lib.getExe' config.systemd.package "systemctl"} --user --no-block try-restart hinteros-session.service || true
+    exec "$@"
+  '';
+
   # The compositor's and the home app's stdout/stderr go to the journal
   # (`journalctl -t hinteros-compositor`); greetd would drop them.
   sessionCommand = lib.escapeShellArgs (
     [
+      sessionStart
       (lib.getExe' config.systemd.package "systemd-cat")
       "--identifier"
       "hinteros-compositor"
