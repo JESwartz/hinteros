@@ -44,6 +44,10 @@ in
     boot.loader = {
       systemd-boot.enable = true;
       efi.canTouchEfiVariables = true;
+      # No generation menu: the default (newest good) generation boots at once. Generations are
+      # managed from the launcher, and boot counting falls back by itself. Holding Space (or any
+      # key) while the box starts still shows systemd-boot's menu, for recovery.
+      timeout = lib.mkDefault 0;
     };
 
     # The hardware report (facter.json) adds what it detects; these cover the common mini PC
