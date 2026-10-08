@@ -21,6 +21,11 @@ let
       wiredEeeOff =
         c.networking.networkmanager.ensureProfiles.profiles.hinteros-wired.ethtool.eee-enabled == "0";
       firmware = c.hardware.enableRedistributableFirmware;
+      # The UI's stderr (the launcher's hinteros-focus: lines) reaches the journal, so it is in
+      # `journalctl` and in hinteros-save-log's journal.txt.
+      uiLogsToJournal =
+        (c.systemd.services.cage-tty1.serviceConfig.StandardError or "") == "journal"
+        && (c.systemd.services.cage-tty1.serviceConfig.StandardOutput or "") == "journal";
     }
   );
 in

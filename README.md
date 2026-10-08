@@ -214,6 +214,7 @@ Every HinterOS system (devices and the ISO) has `pciutils`, `usbutils`, `ethtool
   link`, carrier, speed, EEE, driver and firmware per interface (`ethtool`), PCI network devices
   (`lspci -nnk`), kernel log lines for NIC drivers and firmware loading, `nmcli device` and
   `general`, Wi-Fi and `rfkill`.
+- `back` (alias `installer`, ISO): from the tty2 console to the installer screens on tty1; it restarts the UI if it is not running, and a reminder is printed above every tty2 prompt. The UI's stderr goes to the journal (and so into `hinteros-save-log`'s `journal.txt`).
 - `hinteros-save-log /dev/sdX` (ISO): saves the install log, journal, dmesg, the `hinteros-diagnose`
   output, nmcli, lspci, lsusb, lsblk and a `nixos-facter` report in a timestamped folder on a second
   USB stick. Give the whole stick or one partition (a whole stick uses its first partition with a
@@ -225,6 +226,12 @@ An Ethernet port that `nmcli device` shows as `unavailable` has no carrier: chec
 first (`hinteros-diagnose` shows `carrier=0 link=no`). The wired profile turns EEE off and Wi-Fi
 power saving is off (`nixos/modules/network-hardware.nix`); the NIC drivers are all in-tree (r8169
 including RTL8125, igc, e1000e, igb, r8152, ax88179_178a, cdc_ncm, cdc_ether).
+
+The ISO also carries the build-time inputs of the small derivations an install builds (etc, units, the
+initrd, the toplevel ...): `nixos/lib/offline-inputs.nix` derives them from the derivations of several
+representative devices (no apps, each app alone, all apps, ssh on and off) and the `offline-inputs`
+flake check fails if a different set of devices needs an output that is not on the ISO. Without
+them nix builds the missing input and its inputs, down to the bootstrap tools.
 
 The ISO carries the closure of a default system (the base plus the four `onIso` apps in
 `nixos/lib/app-ids.nix`), the sources of this repository and of every flake input it locks, and a
