@@ -8,8 +8,9 @@
     `.launcherAppId` (4100000000) and `.reaperPackage`: under gamescope (always `-e`, Steam mode) the home app runs as
     `hinteros-session reaper SteamLaunch AppId=<id> -- <home app>`, so gamescope gives its windows the launcher app id.
     The daemon user unit retries until gamescope's Xwayland (`:0`) is up. `.gamescope.backend` (`drm`, `headless`, `wayland`, `sdl`; default: gamescope chooses).
+    `.cursor.*` (gamescope only): the pointer never fades on inactivity (`--hide-cursor-delay` `.hideDelayMs`, a day; the session daemon hides it on the D-pad and on the way Home with `gamescopectl paint_cursor_plane`) and is large on a TV (`--cursor-scale-height` `.scaleHeight`, 540: gamescope's 36 px base times floor(output height / 540), 72 px at 1080p; `null` keeps the apps' size). The home app and the daemon's apps get `XCURSOR_THEME` (`.theme`, Adwaita from `.package`), `XCURSOR_PATH` and `XCURSOR_SIZE` (256 with scaling, as gamescope gives its own children; else `.size`).
   - `input.nix`: `hinteros.input.enable` (default: the session is enabled). InputPlumber with polkit,
-    the session user in group `inputplumber` and its udev rules. `ManageAllDevices` is set by the session daemon.
+    the session user in group `inputplumber` and its udev rules. `ManageAllDevices` is set by the session daemon. The overlay patches InputPlumber 0.81.0: `CompositeDevice.SendEvent` (the daemon's RT click) used `blocking_send` inside its tokio runtime, panicked and never answered (`nixos/pkgs/inputplumber/`; `input-layer` checks the click).
   - `daemon.nix`: `hinteros.daemon.enable`, `.group` (default `hinteros`), `.session.package`,
     `.system.package`, `.osk.{enable,package,summon}` (the on-screen keyboard, `hinteros-osk` from the launcher package; `[osk]` in session.toml; default chord Guide+Y), `.logLevel`. A systemd user service `hinteros-session` for the session user
     (socket `$XDG_RUNTIME_DIR/hinteros/session.sock`, started with `--config` of a `session.toml` generated from
