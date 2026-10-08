@@ -6,7 +6,16 @@
     (`gamescope` or `cage`), `.environment`, `.homeApp`
     (package, default `pkgs.hinteros-launcher`; `pkgs.hinteros-placeholder-home` is kept for debugging), `.gamescope.package`, `.gamescope.extraArgs`, `.gamescope.reviewedVersion`. The compositor gets `XKB_DEFAULT_LAYOUT=us` (the daemon types US key codes). The gamescope version is pinned: the daemon vendors gamescope's private `gamescope_input_method` protocol (3.16.31), so evaluation fails with another version until `reviewedVersion` is updated after re-checking the daemon's protocol XML.
     `.launcherAppId` (4100000000) and `.reaperPackage`: under gamescope (always `-e`, Steam mode) the home app runs as
-    `hinteros-session reaper SteamLaunch AppId=<id> -- <home app>`, so gamescope gives its windows the launcher app id.
+    `hinteros-session reaper SteamLaunch AppId=<id> -- hinteros-home`, so gamescope gives its windows the launcher app id.
+    `hinteros-home` (the compositor's one child, also under cage) runs the home app that
+    `/run/current-system/hinteros-console/home` points to, and again whenever it exits with 75: a
+    switch restarts the session daemon but not the session, so the launcher exits with 75 when the
+    new daemon refuses its API version or comes back after a restart and the system has another
+    launcher (launcher `lib/src/system/home_relaunch.dart`); the new one starts in the same
+    gamescope (no black screen, the running session survives). Any other exit ends the session as
+    before. greetd runs `/run/current-system/hinteros-console/session`, so a new session
+    (`session.restart`, a crash) also gets the current system's compositor and home app (greetd
+    keeps the config it was started with: nixpkgs never restarts it on a switch).
     The daemon user unit retries until gamescope's Xwayland (`:0`) is up. `.gamescope.backend` (`drm`, `headless`, `wayland`, `sdl`; default: gamescope chooses).
     `.cursor.*` (gamescope only): the pointer never fades on inactivity (`--hide-cursor-delay` `.hideDelayMs`, a day; the session daemon hides it on the D-pad and on the way Home with `gamescopectl paint_cursor_plane`) and is large on a TV (`--cursor-scale-height` `.scaleHeight`, 540: gamescope's 36 px base times floor(output height / 540), 72 px at 1080p; `null` keeps the apps' size). The home app and the daemon's apps get `XCURSOR_THEME` (`.theme`, Adwaita from `.package`), `XCURSOR_PATH` and `XCURSOR_SIZE` (256 with scaling, as gamescope gives its own children; else `.size`).
   - `input.nix`: `hinteros.input.enable` (default: the session is enabled). InputPlumber with polkit,

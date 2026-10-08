@@ -57,6 +57,41 @@ let
     ];
   };
 
+  # The current system's console programs, linked from the system toplevel (so
+  # /run/current-system/hinteros-console/{home,session}): a switch updates /run/current-system
+  # (in its activation, before units are restarted); the running session keeps its programs.
+  # Not /etc/hinteros: that is the device's mutable config dir, swapped at boot
+  # (device-config.nix).
+  consoleDir = "/run/current-system/hinteros-console";
+  homeLink = "${consoleDir}/home";
+  # The exit code with which the home app asks the loop below to start it again.
+  homeRelaunchCode = 75;
+
+  # The compositor's one child: runs the home app that `homeLink` points to *now*, and again
+  # whenever it exits with `homeRelaunchCode`; any other exit ends the loop, the compositor and
+  # the session, as before. A system switch restarts the session daemon (a user unit) but not
+  # this session (greetd is never restarted by a switch), so the old launcher would keep running
+  # against the new daemon; on an API mismatch it was refused forever ("Switching over"). The
+  # launcher (lib/src/system/home_relaunch.dart) exits with the code when the daemon refuses it
+  # or comes back after a restart and `homeLink` has another launcher than the one it was
+  # started as (HINTEROS_HOME_EXE): the new one starts in the same gamescope, which never loses
+  # its child (it would quit, ending every app), and whose Xwaylands keep a client (gamescope's
+  # own window manager, the daemon), so their -terminate does not end them.
+  homeLoop = pkgs.writeShellScript "hinteros-home" ''
+    link=${homeLink}
+    while :; do
+      exe=$(${pkgs.coreutils}/bin/readlink -e "$link") || exe=${lib.getExe cfg.homeApp}
+      HINTEROS_HOME_RELAUNCH=${toString homeRelaunchCode} HINTEROS_HOME_LINK="$link" \
+        HINTEROS_HOME_EXE="$exe" "$exe" "$@"
+      code=$?
+      if [ "$code" -ne ${toString homeRelaunchCode} ]; then
+        exit "$code"
+      fi
+      echo "hinteros-home: $exe asked to be replaced; starting $(${pkgs.coreutils}/bin/readlink -e "$link")" >&2
+      ${pkgs.coreutils}/bin/sleep 1
+    done
+  '';
+
   # Under gamescope the home app runs under the reaper, which is how gamescope (Steam mode)
   # learns the app id of its windows. Started here rather than by the daemon's
   # launcher.command: gamescope needs a child to run anyway, and the home app then comes up
@@ -69,10 +104,10 @@ let
         "SteamLaunch"
         "AppId=${toString cfg.launcherAppId}"
         "--"
-        (lib.getExe cfg.homeApp)
+        homeLoop
       ]
     else
-      [ (lib.getExe cfg.homeApp) ];
+      [ homeLoop ];
 
   # Runs its arguments with gamescope's display mode files set (runtime settings, API 0.7):
   # `GAMESCOPE_PATCHED_EDID_FILE` (gamescope writes the connector's modes next to it, as
@@ -112,6 +147,12 @@ let
     ++ compositorCommand.${cfg.compositor}
     ++ homeCommand
   );
+
+  # greetd runs the session through /run/current-system, so a session started after a switch
+  # (session.restart, a crash) gets the current system's compositor and home app: greetd itself
+  # keeps the config it was started with (nixpkgs: restartIfChanged = false).
+  sessionLink = "${consoleDir}/session";
+  sessionScript = pkgs.writeShellScript "hinteros-console-session" "exec ${sessionCommand}";
 in
 {
   options.hinteros.session = {
@@ -325,7 +366,7 @@ in
       enable = true;
       settings = rec {
         initial_session = {
-          command = sessionCommand;
+          command = sessionLink;
           inherit (cfg) user;
         };
         default_session = initial_session;
@@ -342,5 +383,11 @@ in
     };
 
     environment.systemPackages = [ cfg.gamescope.package ];
+
+    system.systemBuilderCommands = ''
+      mkdir -p $out/hinteros-console
+      ln -s ${lib.getExe cfg.homeApp} $out/hinteros-console/home
+      ln -s ${sessionScript} $out/hinteros-console/session
+    '';
   };
 }
