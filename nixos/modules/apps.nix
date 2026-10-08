@@ -137,8 +137,9 @@ let
           defaultText = lib.literalExpression "kiosk.fullscreenOnly";
           description = ''
             Plain Firefox with a toolbar (not a kiosk): the daemon maps View to Ctrl+L plus the
-            on-screen keyboard (session.toml `address_bar`, see the hinteros-daemon README). On
-            for `fullscreenOnly` apps (the catalog's Firefox), off for kiosk apps.
+            on-screen keyboard, and LB / RB to history back / forward (Alt+Left / Alt+Right)
+            (session.toml `address_bar`, see the hinteros-daemon README). On for
+            `fullscreenOnly` apps (the catalog's Firefox), off for kiosk apps.
           '';
         };
 
