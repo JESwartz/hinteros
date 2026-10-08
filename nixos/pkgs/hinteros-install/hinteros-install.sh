@@ -45,18 +45,27 @@ stage=validate
 percent=0
 phase=system
 cur_app=
+cur_app_n=0 # 1-based position of cur_app among the apps being installed
+apps_total=0
+step_pct= # progress of the current step alone (0-100); empty = not measurable
 failed_apps=()
 # Test hook: treat the apps stage as online (no offline restriction, any app id) although there is
 # no network, so an online-only app fails to download. The system stage still follows the probe.
 ONLINE_APPS_HOOK=${HINTEROS_INSTALL_ONLINE_APPS:-}
 
+# Besides the overall `percent` (monotonic over the whole install), a line may carry
+# `step_percent` (0-100: how far the current stage or app is; absent = not measurable, the UI
+# shows an indeterminate bar) and, in the apps phase while one app is being built, `app` with
+# `app_index`/`app_total` (1-based). The UI draws one bar per step and per app from these.
 progress() { # stage percent message [level] [code] [extra-json-object]
   # Never backwards (the stages run several builds that each count from their own start).
   [ "$2" -ge "$percent" ] || set -- "$1" "$percent" "${@:3}"
   jq -nc --arg phase "$phase" --arg stage "$1" --argjson percent "$2" --arg message "$3" \
     --arg level "${4:-info}" --arg code "${5:-}" --arg app "$cur_app" --argjson extra "${6:-"{}"}" \
+    --arg step "$step_pct" --argjson an "$cur_app_n" --argjson at "$apps_total" \
     '{phase: $phase, stage: $stage, percent: $percent, level: $level, message: $message}
-     + (if $app == "" then {} else {app: $app} end)
+     + (if $step == "" then {} else {step_percent: ($step | tonumber)} end)
+     + (if $app == "" then {} else {app: $app, app_index: $an, app_total: $at} end)
      + (if $code == "" then {} else {code: $code} end) + $extra' >&3
   stage=$1
   percent=$2
@@ -534,7 +543,8 @@ progress_filter='
         .prog[($e.id | tostring)] = $e.fields
         | ([.prog[] | .[0]] | add) as $done | ([.prog[] | .[1]] | add) as $exp
         | (if $exp > 0 then ($lo + (($done / $exp) * ($hi - $lo) | floor)) else $lo end) as $pct
-        | if $pct > .last then .last = $pct | .emit = {percent: $pct, message: "\($done) of \($exp) steps"} else . end
+        | (if $exp > 0 then (($done * 100 / $exp) | floor) else 0 end) as $step
+        | if $step > .last then .last = $step | .emit = {percent: $pct, step: $step, message: "\($done) of \($exp) steps"} else . end
       else . end;
     select(.emit != null) | .emit)'
 
@@ -551,10 +561,12 @@ nix_logged() {
   "$@" >"$NIXOUT" 2>"$NIXLOG" </dev/null &
   pid=$!
   while IFS= read -r p; do
+    step_pct=$(printf '%s' "$p" | jq -r .step)
     progress "$st" "$(printf '%s' "$p" | jq -r .percent)" "$label: $(printf '%s' "$p" | jq -r .message)"
   done < <(tail -n +1 -F --pid="$pid" "$NIXLOG" 2>/dev/null | jq -cnR --unbuffered --argjson lo "$lo" --argjson hi "$hi" "$progress_filter" 2>/dev/null || true)
   NIX_RC=0
   wait "$pid" || NIX_RC=$?
+  step_pct=
   cat "$NIXLOG" "$NIXOUT" >>"$LOG"
 }
 
@@ -748,29 +760,33 @@ if [ "${#apps[@]}" -gt 0 ]; then
 
   good=()
   good_out=
-  if build_apps "$(json_array "${apps[@]}")" 76 88; then
-    good=("${apps[@]}")
-    good_out=$APPS_OUT
-  else
-    nix_failure
-    progress apps "$percent" "Building all the apps failed; trying them one at a time" warn apps-retry
-    n=0
-    for a in "${apps[@]}"; do
-      cur_app=$a
-      n=$((n + 1))
-      lo=$((78 + (n - 1) * 10 / ${#apps[@]}))
-      hi=$((78 + n * 10 / ${#apps[@]}))
-      if build_apps "$(json_array "${good[@]}" "$a")" "$lo" "$hi"; then
-        good+=("$a")
-        good_out=$APPS_OUT
-      else
-        nix_failure
-        failed_apps+=("$a")
-        progress apps "$percent" "$a could not be installed: $(printf '%s' "$NIX_ERRS" | tail -n 3 | tr '\n' ' ' | cut -c1-400)" warn app-failed
-      fi
-    done
-    cur_app=
-  fi
+  # One build per app, each adding the app to those that already worked: the progress bar then
+  # follows one app at a time, and an app that fails to build does not take the others with it.
+  # (Whatever an earlier build produced is in the store already, so only the new app costs time.)
+  apps_total=${#apps[@]}
+  n=0
+  for a in "${apps[@]}"; do
+    cur_app=$a
+    n=$((n + 1))
+    cur_app_n=$n
+    lo=$((76 + (n - 1) * 12 / apps_total))
+    hi=$((76 + n * 12 / apps_total))
+    step_pct=
+    progress apps "$lo" "Installing $a ($n of $apps_total)"
+    if build_apps "$(json_array "${good[@]}" "$a")" "$lo" "$hi"; then
+      good+=("$a")
+      good_out=$APPS_OUT
+      step_pct=100
+      progress apps "$hi" "$a is built"
+      step_pct=
+    else
+      nix_failure
+      failed_apps+=("$a")
+      progress apps "$percent" "$a could not be installed: $(printf '%s' "$NIX_ERRS" | tail -n 3 | tr '\n' ' ' | cut -c1-400)" warn app-failed
+    fi
+  done
+  cur_app=
+  cur_app_n=0
   nix_cleanup
 
   if [ "${#good[@]}" -gt 0 ]; then
