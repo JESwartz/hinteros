@@ -192,6 +192,33 @@ let
           false
         ];
       };
+    # The console splash during the handover: optional, before end-others, in both stacks; a
+    # console font that reads on a TV; a quiet kernel console.
+    testGreeterSplash =
+      let
+        before =
+          s:
+          let
+            parts = lib.splitString "pin end-others" s;
+          in
+          lib.length parts == 2
+          && lib.hasInfix "session  optional   pam_exec.so quiet " (lib.head parts)
+          && lib.hasInfix "/bin/hinteros-system pin splash" (lib.head parts);
+      in
+      {
+        expr = [
+          (before (pam greeter "greetd"))
+          (before (pam greeter "greetd-greeter"))
+          greeter.console.font
+          (greeter.boot.consoleLogLevel <= 3)
+        ];
+        expected = [
+          true
+          true
+          "ter-v32b"
+          true
+        ];
+      };
     # Kill on switch and no lingering.
     testGreeterLogind = {
       expr = [

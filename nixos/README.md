@@ -136,3 +136,34 @@ repaints at the nested size).
 - `pactl` (`pkgs.pulseaudio`) is set as `[audio] pactl` by absolute path; the user manager provides `XDG_RUNTIME_DIR`, which is how it finds `pipewire-pulse`.
 - BlueZ: this BlueZ's `bluetooth.conf` lets every local user call org.bluez (older ones: `at_console`/group `lp`). `runtime.nix` installs `hinteros-bluez.conf` (after BlueZ's): org.bluez is denied by default and allowed for the session user (root is allowed by BlueZ's own policy). The `runtime-settings` test checks both sides with `busctl`.
 - gamescope (real devices, no `-W/-H/-r`, see "Display size"): the session command and the daemon unit run through `hinteros.session.displayEnvWrapper`, which sets `GAMESCOPE_PATCHED_EDID_FILE=$XDG_RUNTIME_DIR/gamescope-edid` (gamescope writes `<file>.modes`) and `GAMESCOPE_MODE_SAVE_FILE=$XDG_STATE_HOME/hinteros/gamescope-modes` (`~/.local/state/hinteros/gamescope-modes`, persistent, picked by gamescope at its next start). The daemon reads the same variables. The headless VM test keeps its explicit `-W/-H` through `gamescope.extraArgs`.
+
+## Profiles, the greeter and PINs (M7)
+
+- `profiles.nix`: one Unix user per profile account (`hinteros`, `hinteros-p<N>`), the guest, and
+  greeter mode (on with state.json schema 2): greetd runs the picker as `hinteros-greeter`; the
+  `greetd` PAM stack enforces PINs and the kill on switch through `hinteros-system pin
+  unlocked|verify|end-others` (pam_exec, as root). A profile without a PIN is entered without
+  one, even when it is locked.
+- **Handover splash**: both session stacks first run `pin splash` (`optional`; the helper always
+  exits 0): it paints greetd's VT (`PAM_TTY`) with console escape sequences in the launcher's
+  colours and a centred "Loading <name>…" ("HinterOS" on the way back to the picker), which is
+  what the TV shows between the picker's last frame and the session's first (~2 s). The console
+  font is Terminus 16x32 (`console.font = "ter-v32b"`, legible on a TV); the quiet boot keeps the
+  kernel console at log level 3 (`branding.nix`), so kernel messages do not write over it.
+- **Nothing greetd runs writes to the VT**: greetd connects a session's stdout/stderr to it. The
+  greeter command, the picker and the profile session all start under `systemd-cat`
+  (`journalctl -t hinteros-greeter`, `-t hinteros-compositor`, `-t hinteros-session-start`).
+- **Forgotten PIN**: the person who set up the box removes it as root from a terminal (SSH as the
+  admin account, or a console):
+
+  ```sh
+  sudo hinteros-system reset-pin            # lists the profiles with their ids
+  sudo hinteros-system reset-pin Sam        # or: reset-pin p2
+  ```
+
+  It removes the PIN and the wrong-PIN wait (under the same lock the checks use), writes an audit
+  entry (`journalctl HINTEROS_METHOD=reset-pin`) and updates the picker's view. The profile then
+  opens from the picker without a PIN and its launcher asks for a new one ("Set your PIN").
+  `hinteros-system` is in `environment.systemPackages` (`daemon.nix`), so it is on the admin's
+  and root's PATH. There is no on-screen recovery for a forgotten PIN; the launcher's PIN pads
+  only point to this command.

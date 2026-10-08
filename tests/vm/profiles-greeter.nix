@@ -7,6 +7,10 @@
 #   - from p2's session, session.switch_profile p1: the session ends, the picker comes back
 #     (p1 is locked: no fast path), a wrong PIN is refused (PAM `pin verify`), the right one
 #     starts p1's session as hinteros and nothing of p2 is left running (`pin end-others`).
+# Each handover leaves greetd's VT (read from /dev/vcs1) with the PAM splash ("Loading Sam",
+# "HinterOS" on the way back, "Loading James") and no log text (everything greetd runs logs to the
+# journal). Then root removes p1's forgotten PIN with `hinteros-system reset-pin James`: p1's
+# session sees `pin_set: false` and sets a new PIN without the old one.
 { self, pkgs }:
 let
   fixture = ./fixtures/profiles-greeter;
@@ -48,7 +52,7 @@ in
   meta.timeout = 1800;
 
   nodes.machine =
-    { config, lib, ... }:
+    { lib, ... }:
     {
       imports = [
         ../../nixos/modules
@@ -110,6 +114,19 @@ in
         )
         return json.loads(out)["response"]
 
+    def vt_text():
+        # greetd's VT (tty1) as text: what the kernel console shows between two compositors.
+        return machine.succeed("tr -c '[:print:]' ' ' < /dev/vcs1")
+
+    def assert_splash(expected, gone=()):
+        text = vt_text()
+        assert expected in text, f"{expected!r} not on tty1: {text.strip()!r}"
+        for g in gone:
+            assert g not in text, f"{g!r} still on tty1: {text.strip()!r}"
+        # Nothing greetd runs logs to the VT (everything goes to the journal).
+        for word in ["WARN", "INFO", "ERROR", "DEBUG", "hinteros_session", "Permission denied"]:
+            assert word not in text, f"log text {word!r} on tty1: {text.strip()!r}"
+
     def session_of(user):
         machine.wait_until_succeeds(f"test -S {sock(user)}", timeout=120)
         machine.wait_until_succeeds(f"pgrep -u {user} -f '/bin/cage '", timeout=60)
@@ -132,6 +149,8 @@ in
         assert [p["locked"] for p in g["list"]["profiles"]] == [True, False], g
         assert len(g["outcomes"]) == 1 and g["outcomes"][0]["ok"] is True, g
         session_of("hinteros-p2")
+        # The console splash of the handover (PAM `pin splash`) is on greetd's VT.
+        assert_splash("Loading Sam")
         cur = sess("hinteros-p2", "profile.current")["result"]
         assert cur["id"] == "p2" and not cur["admin"] and not cur["guest"], cur
 
@@ -140,6 +159,8 @@ in
         assert r.get("result") == {}, r
         machine.wait_until_fails("pgrep -u hinteros-p2 -f '/bin/cage '", timeout=90)
         picker_up()
+        # On the way back to the picker: just "HinterOS", no log lines.
+        assert_splash("HinterOS", gone=["Loading Sam"])
         pub = json.loads(machine.succeed("cat /run/hinteros/profiles-public.json"))
         assert pub["next"]["target"] == "p1" and not pub["next"]["fast"], pub
         g = greeter("p1", "0000", "2468")
@@ -147,9 +168,29 @@ in
         assert g["outcomes"][0]["ok"] is False, g
         assert g["outcomes"][1]["ok"] is True, g
         session_of("hinteros")
+        assert_splash("Loading James", gone=["Loading Sam"])
         cur = sess("hinteros", "profile.current")["result"]
         assert cur["id"] == "p1" and cur["admin"] and cur["pin_set"], cur
         # end-others: nothing of p2 is left.
         machine.wait_until_fails("pgrep -u hinteros-p2", timeout=30)
+
+    with subtest("a forgotten PIN: root removes it from the terminal, the profile sets a new one"):
+        # On root's PATH (systemPackages); without an argument it lists the profiles.
+        out = machine.succeed("hinteros-system reset-pin")
+        assert "p1" in out and "James" in out and "PIN set" in out, out
+        # Not as root: refused.
+        machine.fail("runuser -u hinteros -- hinteros-system reset-pin p1")
+        out = machine.succeed("hinteros-system reset-pin James")
+        assert "Removed the PIN of James (p1)" in out, out
+        machine.fail("test -e /var/lib/hinteros/pins/p1")
+        cur = sess("hinteros", "profile.current")["result"]
+        assert cur["id"] == "p1" and cur["locked"] and not cur["pin_set"], cur
+        # The audit entry, without any PIN.
+        machine.succeed("journalctl -o verbose HINTEROS_METHOD=reset-pin | grep -q 'PROFILE=p1'")
+        # "Set your PIN" (no current PIN needed), then p1 has a PIN again.
+        r = sess("hinteros", "system.profiles.set_pin", {"pin": "8642"})
+        assert r.get("result") == {}, r
+        cur = sess("hinteros", "profile.current")["result"]
+        assert cur["pin_set"], cur
   '';
 }

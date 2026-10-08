@@ -18,6 +18,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -134,6 +135,14 @@ in
           }
         ];
 
+        # The kernel console of the session's VT shows between two compositors (the PAM splash below,
+        # and anything else on tty1): a large font so it reads on a TV from the couch (Terminus
+        # 16x32: 120x33 cells at 1920x1080). Applied by systemd-vconsole-setup at boot.
+        console = {
+          font = lib.mkDefault "ter-v32b";
+          packages = [ pkgs.terminus_font ];
+        };
+
         # Autologin (and the boot-health check) use the first account.
         hinteros.session.user = lib.mkDefault (
           if cfg.accounts == [ ] then "hinteros" else (builtins.head cfg.accounts).user
@@ -187,6 +196,11 @@ in
         # (unlocked, the guest, a one-time token, the spare in first-boot mode), else the PIN;
         # pam_permit for setcred (spike 7). Before pam_systemd opens the session, every other
         # account's processes are ended (spike 7: logind alone leaves SIGTERM-ignoring ones).
+        # First of all, `splash` paints greetd's VT (PAM_TTY) with "Loading <name>…" in the
+        # launcher's colours: between the last frame of the picker and the first of the session
+        # (~2 s on real hardware) the kernel console of that VT is what the TV shows. Optional, and
+        # the helper always exits 0 for it: a splash never stops a login. The greeter's stack has
+        # it too (just "HinterOS", on the way back to the picker).
         security.pam.services = {
           greetd.text = lib.mkForce ''
             auth     requisite  pam_succeed_if.so user ingroup ${group}
@@ -194,6 +208,7 @@ in
             auth     required   pam_exec.so quiet stdout expose_authtok ${pin} verify
             auth     required   pam_permit.so
             account  required   pam_unix.so
+            session  optional   pam_exec.so quiet ${pin} splash
             session  required   pam_exec.so quiet ${pin} end-others
             ${sessionTail}
           '';
@@ -203,6 +218,7 @@ in
           greetd-greeter.text = lib.mkForce ''
             auth     required   pam_permit.so
             account  required   pam_unix.so
+            session  optional   pam_exec.so quiet ${pin} splash
             session  optional   pam_exec.so quiet ${pin} end-others
             ${sessionTail}
           '';

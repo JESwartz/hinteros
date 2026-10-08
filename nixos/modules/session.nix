@@ -150,10 +150,15 @@ let
     exec "$@"
   '';
 
-  # The compositor's and the home app's stdout/stderr go to the journal
-  # (`journalctl -t hinteros-compositor`); greetd would drop them.
+  # Nothing greetd runs may write to the VT: greetd connects a session's stdout/stderr to it, so a
+  # log line would flash on the TV between two compositors (and scribble over the PAM splash).
+  # Every command greetd starts (`greeterScript`, `pickerScript`, `sessionScript`) runs under
+  # systemd-cat first: the compositor's and the home app's output is `journalctl -t
+  # hinteros-compositor`, the greeter's `-t hinteros-greeter`, the session wrapper's
+  # `-t hinteros-session-start`.
+  systemdCat = lib.getExe' config.systemd.package "systemd-cat";
   compositorPrefix = [
-    (lib.getExe' config.systemd.package "systemd-cat")
+    systemdCat
     "--identifier"
     "hinteros-compositor"
     (lib.getExe' pkgs.coreutils "env")
@@ -189,7 +194,7 @@ let
   );
   pickerScript = pkgs.writeShellScript "hinteros-console-picker" "exec ${pickerCommand}";
   greeterScript = pkgs.writeShellScript "hinteros-console-greeter" ''
-    exec ${daemonExe} greet --config ${config.hinteros.daemon.sessionConfigFile} -- ${consoleDir}/picker
+    exec ${systemdCat} --identifier hinteros-greeter ${daemonExe} greet --config ${config.hinteros.daemon.sessionConfigFile} -- ${consoleDir}/picker
   '';
   greeterLink = "${consoleDir}/greeter";
 
@@ -197,7 +202,13 @@ let
   # (session.restart, a crash) gets the current system's compositor and home app: greetd itself
   # keeps the config it was started with (nixpkgs: restartIfChanged = false).
   sessionLink = "${consoleDir}/session";
-  sessionScript = pkgs.writeShellScript "hinteros-console-session" "exec ${sessionCommand}";
+  sessionScript = pkgs.writeShellScript "hinteros-console-session" "exec ${
+    lib.escapeShellArgs [
+      systemdCat
+      "--identifier"
+      "hinteros-session-start"
+    ]
+  } ${sessionCommand}";
 in
 {
   options.hinteros.session = {
