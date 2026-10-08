@@ -50,7 +50,10 @@ let
     }
   );
 
-  rev = self.rev or self.dirtyRev or "unknown";
+  # The env manifests' `system_rev`. A dirty tree gets the placeholder the installer's offline
+  # lock uses for it too (nixos/installer: isoRev), so the ISO's starter envs are the ones an
+  # install from that ISO evaluates.
+  rev = self.rev or "0000000000000000000000000000000000000000";
 
   embeddedFlake =
     let

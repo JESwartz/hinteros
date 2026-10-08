@@ -3,13 +3,14 @@
 # VM tests, which run it as a plain node. Takes the system flake's `self` to pin the offline
 # lock to this very revision.
 #
-# Offline installs. The ISO carries (1) the closure of a default HinterOS system (the base plus
-# the three apps with `onIso`), (2) the sources of this repo and of every flake input it locks,
-# and (3) a flake.lock for the generated /etc/hinteros flake whose `hinteros` input points at the
-# revision the ISO was built from, with the same narHash. Nix resolves a locked input whose
-# narHash is already in the store without fetching, so `nixos-install --flake` evaluates and
-# substitutes everything from the ISO's store. A later `nix flake update hinteros` on the
-# installed box moves it to the channel.
+# Offline installs. The ISO carries (1) the closure of a default HinterOS system (state.json
+# schema 2, no apps) and the starter env of every subset of the apps with `onIso` and a
+# `starter` (the apps are per profile; the installer's picks become the starter set), (2) the
+# sources of this repo and of every flake input it locks, and (3) a flake.lock for the generated
+# /etc/hinteros flake whose `hinteros` input points at the revision the ISO was built from, with
+# the same narHash. Nix resolves a locked input whose narHash is already in the store without
+# fetching, so `nixos-install --flake` evaluates and substitutes everything from the ISO's store.
+# A later `nix flake update hinteros` on the installed box moves it to the channel.
 { self }:
 {
   config,
@@ -79,28 +80,53 @@ let
       apps,
     }:
     self.lib.mkDevice {
+      # As hinteros-install writes it: schema 2, the spare p1, the picked apps' box features
+      # (the apps themselves are the starter env, below).
       state = {
-        schemaVersion = 1;
+        schemaVersion = 2;
         base = "unstable";
         stateVersion = config.system.nixos.release;
         settings = {
           inherit hostname;
           ssh.enable = ssh;
           admin.user = user;
+          guest.enable = true;
         };
         disk.layout = "gpt-esp-ext4";
-        inherit apps;
-        profiles = [ ];
+        profiles = [
+          {
+            id = "p1";
+            user = "hinteros";
+          }
+        ];
+        requirements = lib.sort lib.lessThan (
+          lib.unique (lib.concatMap (id: config.hinteros.catalog.entries.${id}.box or [ ]) apps)
+        );
+        services = [ ];
       };
       configDir = deviceConfigDir;
     };
 
-  # A representative device: the base plus the default apps. Its closure is what the ISO ships;
-  # a real install differs from it only in small configuration derivations.
+  # The starter envs an offline install can build: every subset of the apps on the ISO (the
+  # installer adds the picked apps one at a time, keeping those that worked), against the default
+  # device. Their outputs are on the ISO, so nothing is built.
+  subsets =
+    l:
+    if l == [ ] then
+      [ [ ] ]
+    else
+      let
+        r = subsets (lib.tail l);
+      in
+      r ++ map (s: [ (lib.head l) ] ++ s) r;
+  starterEnvs = map defaultDevice.config.hinteros.appEnv.build (subsets appIds.onIso);
+
+  # A representative device (apps are per profile, so the apps do not change the system: free
+  # apps need no box features). Its closure is what the ISO ships; a real install differs from it
+  # only in small configuration derivations.
   defaultDevice = mkVariant { apps = appIds.onIso; };
 
-  # Devices an offline install can produce: the system stage (no apps), each app alone and all
-  # of them (the apps stage tries them one by one when the whole set fails), with and without ssh.
+  # Devices an offline install can produce, with and without ssh.
   # The build-time inputs of what they build are put on the ISO (nixos/lib/offline-inputs.nix).
   offlineInputs = import ../lib/offline-inputs.nix { inherit lib pkgs; };
   toplevelOf = d: d.config.system.build.toplevel;
@@ -627,6 +653,9 @@ in
     # The offline closure.
     system.extraDependencies = [
       config.hinteros.installer.defaultSystem
+    ]
+    ++ starterEnvs
+    ++ [
       pkgs.stdenvNoCC
       launcherPubspecLock
     ]

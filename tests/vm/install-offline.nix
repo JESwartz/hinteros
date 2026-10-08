@@ -308,8 +308,10 @@ in
             "pass"
         }
         state = json.loads(target.succeed("cat /etc/hinteros/state.json"))
-        assert state["schemaVersion"] == 1, state
-        assert state["apps"] == json.loads('${builtins.toJSON installedApps}'), state
+        # Schema 2: the spare p1 and no apps (the picks are the starter set, below).
+        assert state["schemaVersion"] == 2 and "apps" not in state, state
+        assert state["profiles"] == [{"id": "p1", "user": "hinteros"}], state
+        assert state["services"] == [] and state["settings"]["guest"] == {"enable": True}, state
         assert state["settings"]["ssh"]["enable"] is True, state
         assert state["settings"]["admin"] == {"user": "james"}, state
         assert state["settings"]["hostname"] == "livingroom", state
@@ -373,24 +375,17 @@ in
         target.fail(pw("hinteros"))
         target.fail(pw("root"))
 
-    with subtest("apps: only the selected ones"):
-        uid = target.succeed("id -u hinteros").strip()
-        sock = f"/run/user/{uid}/hinteros/session.sock"
-        target.wait_until_succeeds(f"test -S {sock}")
-        hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.9", "client": {"name": "install-test", "version": "0"}}}
-        call = {"jsonrpc": "2.0", "id": 1, "method": "apps.list", "params": {}}
-        payload = "".join(json.dumps(m) + "\n" for m in (hello, call))
-        cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:{sock}"
-        out = target.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
-        replies = [json.loads(l) for l in out.splitlines() if l.strip()]
-        apps = next(r for r in replies if r.get("id") == 1)["result"]["apps"]
-        ids = [a["id"] for a in apps]
-        print(ids)
-        for present in json.loads('${builtins.toJSON installedApps}'):
-            assert present in ids, (present, ids)
-        for absent in [a for a in ("jellyfin", "youtube", "crunchyroll", "firefox", "plex-htpc", "moonlight", "steam") if a not in json.loads('${builtins.toJSON installedApps}')]:
-            assert absent not in ids, ids
+    with subtest("the starter set: the installed apps, as the starter env"):
+        installed = json.loads('${builtins.toJSON installedApps}')
+        starter = json.loads(target.succeed("cat /var/lib/hinteros/starter.json"))
+        assert starter["version"] == 1 and starter["by"] == "installer", starter
+        assert sorted(starter["ids"]) == sorted(installed), starter
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/starter.json").strip() == "600 root"
+        m = json.loads(target.succeed("cat /nix/var/nix/profiles/hinteros/starter/share/hinteros/apps.json"))
+        assert m["ids"] == sorted(installed), m
+        assert target.succeed("stat -c '%U %a' /nix/var/nix/profiles/hinteros/apps").strip() == "root 755"
+        # Nothing of the apps is in the system itself.
+        target.fail("test -e /run/current-system/sw/bin/hinteros-firefox-kiosk")
 
     target.shutdown()
   '';

@@ -3,10 +3,11 @@
 #
 #   hinteros-install --plan plan.json [--validate-only]
 #
-# Two stages. The SYSTEM stage installs the base HinterOS system with no catalog apps (state.json
-# `apps: []`), offline from this medium's store if need be. The APPS stage then adds the selected
-# apps to the installed system (build + activate for the next boot). Whatever happens to an app,
-# the system stage's result stays: the box boots the last good generation.
+# Two stages. The SYSTEM stage installs HinterOS (state.json schema 2: one spare account, p1 =
+# hinteros, no profile, the box features the picked apps need), offline from this medium's store
+# if need be. The APPS stage then builds the picked apps' env into the target and makes it the
+# starter set (/nix/var/nix/profiles/hinteros/starter, /var/lib/hinteros/starter.json); the
+# system is not rebuilt. Whatever happens to an app, the system stage's result stays.
 #
 # stdout carries one JSON object per line, for a UI to follow:
 #   {"phase":"system","stage":"partition","percent":14,"level":"info","message":"..."}
@@ -269,30 +270,49 @@ network_pref=$(plan .network)
 mapfile -t apps < <(plan '.apps[]')
 wifi_ssid=$(plan '.wifi.ssid // empty')
 
-# state.json for a set of apps (a JSON array of ids), into DIR (default: the device config).
+# state.json (schema 2, profiles.md "Installer"): one spare account (p1 = hinteros) and no
+# profile (first-boot mode creates the admin profile), no apps (each profile has its own; the
+# picks become the starter set, below). `requirements` are the box features the picked apps need
+# (Steam: graphics32, steam-devices), so the system stage already has them and a profile created
+# from the starter set never waits for a rebuild. Into DIR (default: the device config).
 write_state() {
-  local dir=${2:-$cfg}
+  local dir=${1:-$cfg}
   jq -n --arg base "$base" --arg sv "$STATE_VERSION" --arg host "$hostname" --arg admin "$admin_user" \
-    --argjson ssh "$ssh_enable" --argjson apps "$1" '{
-      schemaVersion: 1,
+    --argjson ssh "$ssh_enable" --argjson req "$requirements" '{
+      schemaVersion: 2,
       base: $base,
       stateVersion: $sv,
-      settings: {hostname: $host, ssh: {enable: $ssh}, admin: {user: $admin}},
+      settings: {hostname: $host, ssh: {enable: $ssh}, admin: {user: $admin}, guest: {enable: true}},
       disk: {layout: "gpt-esp-ext4"},
-      apps: $apps,
-      profiles: []
+      profiles: [{id: "p1", user: "hinteros"}],
+      requirements: $req,
+      services: []
     }' >"$dir/state.json"
   chmod 0644 "$dir/state.json"
 }
 json_array() { jq -nc '$ARGS.positional' --args "$@"; }
+# The box features of the picked apps (catalog index v3 `box`), sorted.
+requirements=$(json_array "${apps[@]}" | jq -c --slurpfile idx "$CATALOG_INDEX" \
+  '. as $a | [$idx[0].apps[] | select(.id as $i | $a | index($i)) | (.box // [])[]] | unique')
+# The starter set (apps.md "Starter set"): which apps new profiles and guests start with.
+write_starter() { # JSON array of app ids, [DIR]
+  local dir=${2:-$MNT/var/lib/hinteros}
+  (
+    umask 0077
+    jq -n --argjson ids "$1" --argjson now "$(date +%s)" \
+      '{version: 1, ids: $ids, updated_at: $now, by: "installer"}' >"$dir/starter.json"
+  )
+  chmod 0600 "$dir/starter.json"
+}
 
-# --state-dir: write the state.json files this plan would install (the system stage's in
-# DIR/system, the finished install's in DIR/apps) and stop. For the flake check that has
-# hinteros-system parse them; nothing else is checked or touched, and root is not needed.
+# --state-dir: write the state.json this plan would install (DIR/system; DIR/apps holds the same
+# state, the apps being in the starter set, DIR/apps/starter.json) and stop. For the flake check
+# that has hinteros-system parse them; nothing else is checked or touched, and root is not needed.
 if [ -n "$state_dir" ]; then
   mkdir -p "$state_dir/system" "$state_dir/apps"
-  write_state '[]' "$state_dir/system"
-  write_state "$(json_array "${apps[@]}")" "$state_dir/apps"
+  write_state "$state_dir/system"
+  write_state "$state_dir/apps"
+  write_starter "$(json_array "${apps[@]}")" "$state_dir/apps"
   exit 0
 fi
 
@@ -426,7 +446,7 @@ stale=$(find "$MNT" -mindepth 1 -maxdepth 1 ! -name lost+found ! -name boot -pri
 progress partition 20 "Disk is partitioned and mounted"
 
 # ---------------------------------------------------------------------------------------------
-# 3. The device config: /etc/hinteros. The system stage installs it with no apps.
+# 3. The device config: /etc/hinteros (schema 2; apps are per profile).
 # ---------------------------------------------------------------------------------------------
 cfg=$MNT/etc/hinteros
 install -d -m 0755 "$MNT/etc" "$cfg" "$MNT/var/lib/hinteros"
@@ -451,7 +471,7 @@ else
 fi
 
 progress config 28 "Writing the device configuration"
-write_state '[]'
+write_state
 
 # Extra modules of the generated flake: the test hook, and the boot loader override.
 extra_mods=()
@@ -688,10 +708,9 @@ if [ -n "$wifi_ssid" ]; then
 fi
 
 # ---------------------------------------------------------------------------------------------
-# 5. APPS STAGE: add the selected apps. The base system above stays bootable whatever happens.
+# 5. APPS STAGE: the starter set. The system above is not touched.
 # ---------------------------------------------------------------------------------------------
 installed_apps=()
-commit_started=0
 
 finish() { # leaves the run: flush, unmount, final line
   local failed_json msg
@@ -718,109 +737,91 @@ apps_error() {
   apps_rescue
 }
 
-# Best effort after an unexpected failure in the apps stage: the base system is what boots.
+# Best effort after an unexpected failure in the apps stage: an empty starter set (the system
+# itself is untouched by this stage).
 # shellcheck disable=SC2329 # the ERR trap of the apps stage
 apps_rescue() {
   trap - ERR
   set +e
   failed_apps=("${apps[@]}")
   cur_app=
-  write_state '[]'
+  rm -f "$profiles_dir/starter" "$profiles_dir"/starter-*-link
+  write_starter '[]'
   write_terms '[]'
-  if [ "$commit_started" -eq 1 ]; then
-    nixos-install --root "$MNT" --no-root-passwd --no-channel-copy --system "$base_system" >>"$LOG" 2>&1
-  fi
   finish
 }
 
-if [ "${#apps[@]}" -gt 0 ]; then
-  phase=apps
-  apps_online=$online
-  [ -n "$ONLINE_APPS_HOOK" ] && apps_online=1
-  trap 'apps_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
-  progress apps 74 "Adding the apps: ${apps[*]}"
-  apps_flags=(--no-update-lock-file --no-link --print-out-paths --log-format internal-json -v "${subst_flags[@]}")
-  if [ "$apps_online" -eq 0 ]; then
-    apps_flags+=("${offline_flags[@]}")
-  fi
-  APPS_OUT=
-  # build_apps JSON_ARRAY LO HI: the toplevel of the system with these apps -> $APPS_OUT, NIX_RC.
-  build_apps() {
-    write_state "$1"
-    APPS_OUT=
-    nix_logged apps "$2" "$3" "Building" nix --extra-experimental-features 'nix-command flakes' build \
-      "path:$cfg#nixosConfigurations.hinteros.config.system.build.toplevel" --store "$MNT" \
-      --extra-substituters "auto?trusted=1" "${apps_flags[@]}"
-    if [ "$NIX_RC" -eq 0 ]; then
-      APPS_OUT=$(tail -n 1 "$NIXOUT")
-      [ -n "$APPS_OUT" ] && [ -e "$MNT$APPS_OUT" ] || NIX_RC=1
-    fi
-    [ "$NIX_RC" -eq 0 ]
-  }
-
-  good=()
-  good_out=
-  # One build per app, each adding the app to those that already worked: the progress bar then
-  # follows one app at a time, and an app that fails to build does not take the others with it.
-  # (Whatever an earlier build produced is in the store already, so only the new app costs time.)
-  apps_total=${#apps[@]}
-  n=0
-  for a in "${apps[@]}"; do
-    cur_app=$a
-    n=$((n + 1))
-    cur_app_n=$n
-    lo=$((76 + (n - 1) * 12 / apps_total))
-    hi=$((76 + n * 12 / apps_total))
-    step_pct=
-    progress apps "$lo" "Installing $a ($n of $apps_total)"
-    if build_apps "$(json_array "${good[@]}" "$a")" "$lo" "$hi"; then
-      good+=("$a")
-      good_out=$APPS_OUT
-      step_pct=100
-      progress apps "$hi" "$a is built"
-      step_pct=
-    else
-      nix_failure
-      failed_apps+=("$a")
-      progress apps "$percent" "$a could not be installed: $(printf '%s' "$NIX_ERRS" | tail -n 3 | tr '\n' ' ' | cut -c1-400)" warn app-failed
-    fi
-  done
-  cur_app=
-  cur_app_n=0
-  nix_cleanup
-
-  if [ "${#good[@]}" -gt 0 ]; then
-    # Switch the next boot to the system with the apps. This sets the profile and writes the boot
-    # loader entry last; the base system's entry stays in the menu.
-    write_state "$(json_array "${good[@]}")"
-    progress apps 91 "Activating the system with: ${good[*]}"
-    commit_started=1
-    nix_logged apps 91 95 "Activating" nixos-install --root "$MNT" --no-root-passwd --no-channel-copy \
-      --system "$good_out" "${subst_flags[@]}"
-    if [ "$NIX_RC" -ne 0 ]; then
-      nix_failure
-      progress apps "$percent" "Could not activate the system with the apps; keeping the base system: $(printf '%s' "$NIX_ERRS" | tail -n 2 | tr '\n' ' ' | cut -c1-300)" warn apps-activate-failed
-      for a in "${good[@]}"; do
-        cur_app=$a
-        failed_apps+=("$a")
-        progress apps "$percent" "$a could not be activated" warn app-failed
-      done
-      cur_app=
-      good=()
-      # Back to the base system's profile and boot entry.
-      nix_logged apps 95 96 "Restoring" nixos-install --root "$MNT" --no-root-passwd --no-channel-copy --system "$base_system"
-      [ "$NIX_RC" -eq 0 ] || { nix_failure; nix_cleanup; fail 1 install-failed "could not restore the base system after the apps failed; see $LOG"; }
-    fi
-    nix_cleanup
-  fi
-  installed_apps=("${good[@]}")
-  write_state "$(json_array "${installed_apps[@]}")"
-  write_terms "$(json_array "${installed_apps[@]}")"
-  if [ "${#installed_apps[@]}" -gt 0 ]; then
-    snap="$MNT$(readlink -f "$MNT/nix/var/nix/profiles/system")/hinteros"
-    [ -d "$snap" ] && check_snapshot "$snap"
-  fi
-  trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+# The starter env (apps.md "Installer and first boot"): the same `config.hinteros.appEnv.build`
+# as on the box, against the target's configuration, built into the target's store, and set as
+# the target's /nix/var/nix/profiles/hinteros/starter. Offline, every subset of the apps on this
+# installer is in its store already (nixos/installer). No profile is created here: first-boot mode
+# sets the admin profile's apps to this env.
+profiles_dir=$MNT/nix/var/nix/profiles/hinteros
+install -d -m 0755 "$MNT/nix/var/nix/profiles" "$profiles_dir" "$profiles_dir/apps"
+phase=apps
+apps_online=$online
+[ -n "$ONLINE_APPS_HOOK" ] && apps_online=1
+trap 'apps_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+progress apps 74 "Preparing the starter apps: ${apps[*]:-none}"
+env_flags=(--impure --no-link --print-out-paths --log-format internal-json -v "${subst_flags[@]}")
+if [ "$apps_online" -eq 0 ]; then
+  env_flags+=("${offline_flags[@]}")
 fi
+ENV_OUT=
+# build_env JSON_ARRAY LO HI: the starter env of these apps -> $ENV_OUT, NIX_RC.
+build_env() {
+  ENV_OUT=
+  nix_logged apps "$2" "$3" "Building" nix --extra-experimental-features 'nix-command flakes' build \
+    --store "$MNT" --extra-substituters "auto?trusted=1" "${env_flags[@]}" --expr \
+    "(builtins.getFlake \"path:$cfg\").nixosConfigurations.hinteros.config.hinteros.appEnv.build (builtins.fromJSON ''$1'')"
+  if [ "$NIX_RC" -eq 0 ]; then
+    ENV_OUT=$(tail -n 1 "$NIXOUT")
+    [ -n "$ENV_OUT" ] && [ -e "$MNT$ENV_OUT/share/hinteros/apps.json" ] || NIX_RC=1
+  fi
+  [ "$NIX_RC" -eq 0 ]
+}
+
+good=()
+good_out=
+# One build per app, each adding the app to those that already worked: the progress bar then
+# follows one app at a time, and an app that fails to build does not take the others with it.
+# (Whatever an earlier build produced is in the store already, so only the new app costs time.)
+apps_total=${#apps[@]}
+n=0
+for a in "${apps[@]}"; do
+  cur_app=$a
+  n=$((n + 1))
+  cur_app_n=$n
+  lo=$((76 + (n - 1) * 14 / apps_total))
+  hi=$((76 + n * 14 / apps_total))
+  step_pct=
+  progress apps "$lo" "Installing $a ($n of $apps_total)"
+  if build_env "$(json_array "${good[@]}" "$a")" "$lo" "$hi"; then
+    good+=("$a")
+    good_out=$ENV_OUT
+    step_pct=100
+    progress apps "$hi" "$a is built"
+    step_pct=
+  else
+    nix_failure
+    failed_apps+=("$a")
+    progress apps "$percent" "$a could not be installed: $(printf '%s' "$NIX_ERRS" | tail -n 3 | tr '\n' ' ' | cut -c1-400)" warn app-failed
+  fi
+done
+cur_app=
+cur_app_n=0
+if [ -z "$good_out" ]; then
+  # No apps (none picked, or none worked): an empty starter env, so new profiles start alike.
+  build_env '[]' 90 91 || { nix_failure; nix_cleanup; fail 1 install-failed "could not build the (empty) starter env; see $LOG"; }
+  good_out=$ENV_OUT
+fi
+nix_cleanup
+progress apps 92 "Setting the starter apps: ${good[*]:-none}"
+ln -sfn "$good_out" "$profiles_dir/starter-1-link"
+ln -sfn starter-1-link "$profiles_dir/starter"
+installed_apps=("${good[@]}")
+write_starter "$(json_array "${installed_apps[@]}")"
+write_terms "$(json_array "${installed_apps[@]}")"
+trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 finish
