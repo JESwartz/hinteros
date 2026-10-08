@@ -540,6 +540,10 @@ let
         (lib.hasSuffix "/hinteros-osk@hinteros.xpi"
           (fx oskEsr).policies.ExtensionSettings.${extId}.install_url
         )
+        (fx oskEsr).policies.ExtensionSettings.${extId}.private_browsing
+        (hasSub (fx oskEsr).autoConfig ''lockPref("extensions.quarantineIgnoredByUser.${extId}", true);'')
+        # The address bar reporter.
+        (hasSub (fx oskEsr).autoConfig "hinteros-firefox-chrome")
         (oskFailures oskEsr)
       ];
       expected = [
@@ -549,19 +553,25 @@ let
         true
         true
         true
+        true
+        true
+        true
         [ ]
       ];
     };
     testOskExtensionSigned = {
       expr = [
         (lib.hasSuffix "esr" (fx oskSigned).package.version)
-        (fx oskSigned).autoConfig
+        # No signature override, but the address bar reporter.
+        (hasSub (fx oskSigned).autoConfig "xpinstall.signatures.required")
+        (hasSub (fx oskSigned).autoConfig "hinteros-firefox-chrome")
         (fx oskSigned).policies.ExtensionSettings.${extId}.install_url
         (oskFailures oskSigned)
       ];
       expected = [
         false
-        ""
+        false
+        true
         "file:///nix/store/00000000000000000000000000000000-signed/osk.xpi"
         [ ]
       ];

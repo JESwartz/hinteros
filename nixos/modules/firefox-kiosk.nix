@@ -75,10 +75,26 @@ in
       enable = true;
       # The OSK extension's host manifest, linked into Firefox's own native-messaging dir.
       nativeMessagingHosts.packages = [ pkgs.hinteros-session ];
-      package = lib.mkIf (cfg.oskExtension == "esr-unsigned") pkgs.firefox-esr;
-      autoConfig = lib.mkIf (cfg.oskExtension == "esr-unsigned") ''
-        lockPref("xpinstall.signatures.required", false);
-      '';
+      # With the extension, autoConfig also runs privileged code (firefox-osk-chrome.js: the
+      # address bar and other browser fields, which the extension cannot see), so it must not
+      # be sandboxed; the pref only counts in a default-prefs file, hence extraAutoConfig.
+      package = lib.mkIf (cfg.oskExtension != "off") (
+        (if cfg.oskExtension == "esr-unsigned" then pkgs.firefox-esr else pkgs.firefox).override {
+          extraAutoConfig = ''pref("general.config.sandbox_enabled", false);'';
+        }
+      );
+      autoConfig = lib.mkMerge [
+        (lib.mkIf (cfg.oskExtension == "esr-unsigned") ''
+          lockPref("xpinstall.signatures.required", false);
+        '')
+        (lib.mkIf (cfg.oskExtension != "off") ''
+          // The OSK extension also works in private windows and on sites Mozilla marks as
+          // restricted (its own hard-blocked domains, extensions.webextensions.restrictedDomains,
+          // stay blocked).
+          lockPref("extensions.quarantineIgnoredByUser.${ext}", true);
+          ${builtins.readFile ./firefox-osk-chrome.js}
+        '')
+      ];
       # Enterprise policies (policies.json), shared by all profiles including plain Firefox.
       policies = {
         DisableTelemetry = lib.mkDefault true;
@@ -127,6 +143,7 @@ in
           ${ext} = {
             installation_mode = "force_installed";
             install_url = "file://${oskXpi}";
+            private_browsing = true;
           };
         };
       };
