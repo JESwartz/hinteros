@@ -36,17 +36,44 @@ let
   # "Launcher and daemon are up". Gates boot-complete.target, so systemd-bless-boot only marks
   # the entry good once the console is really there; otherwise the boot counter runs out and
   # systemd-boot falls back to the previous generation.
+  #
+  # systemd-bless-boot only runs when the boot loader left LoaderBootCountPath (a volatile EFI
+  # variable) for the generator. Some firmware drops systemd-boot's volatile variables (the
+  # Lenovo M900: only LoaderSystemToken survives), so nothing ever marked a boot good: every
+  # entry ran out of tries and the next boot fell back a generation. Without that variable the
+  # check marks the booted entry good itself, as bless-boot would: the entry whose `init=` is
+  # the booted system loses its `+LEFT[-DONE]` counter.
   bootHealth = pkgs.writeShellApplication {
     name = "hinteros-boot-health";
     runtimeInputs = [
       pkgs.coreutils
+      pkgs.findutils
+      pkgs.gnugrep
       pkgs.procps
       pkgs.systemd
     ];
     text = ''
+      bless_booted_entry() {
+        if compgen -G "/sys/firmware/efi/efivars/LoaderBootCountPath-*" >/dev/null; then
+          return 0 # systemd-bless-boot does it
+        fi
+        booted=$(readlink -f /run/booted-system)
+        for entry in /boot/loader/entries/*+*.conf; do
+          [ -e "$entry" ] || continue
+          grep -q "^options .*init=$booted/init" "$entry" || continue
+          name=$(basename "$entry" .conf)
+          good="/boot/loader/entries/''${name%%+*}.conf"
+          if mv "$entry" "$good"; then
+            echo "boot loader variables missing: marked $(basename "$good") good"
+          else
+            echo "cannot mark $(basename "$entry") good" >&2
+          fi
+        done
+      }
       for _ in $(seq 1 ${toString cfg.bootCounting.healthTimeoutSeconds}); do
         if systemctl is-active --quiet hinteros-system.service${lib.optionalString sessionCfg.enable " && systemctl is-active --quiet greetd.service && pgrep ${if greeterOn then "" else "-u ${sessionCfg.user} "}-f ${lib.escapeShellArg launcherName} >/dev/null"}; then
           echo "daemon${lib.optionalString sessionCfg.enable " and launcher"} are up"
+          bless_booted_entry
           exit 0
         fi
         sleep 1
@@ -133,6 +160,10 @@ in
       systemd.services.hinteros-boot-health = {
         description = "Check that the HinterOS daemon and launcher are up";
         before = [ "boot-complete.target" ];
+        # Every boot: also when nothing pulls in boot-complete.target (no LoaderBootCountPath,
+        # see bootHealth), this check is what marks the boot good.
+        wantedBy = [ "multi-user.target" ];
+        unitConfig.RequiresMountsFor = [ "/boot" ];
         after = [
           "hinteros-system.service"
         ]

@@ -152,12 +152,16 @@ let
         devbox.boot.loader.systemd-boot.bootCounting.tries
         devbox.boot.loader.systemd-boot.configurationLimit
         devbox.systemd.targets.boot-complete.requires
+        # Runs every boot: it marks the boot good itself when the firmware drops the
+        # loader's volatile variables (no LoaderBootCountPath for systemd-bless-boot).
+        devbox.systemd.services.hinteros-boot-health.wantedBy
       ];
       expected = [
         true
         3
         5
         [ "hinteros-boot-health.service" ]
+        [ "multi-user.target" ]
       ];
     };
     testGcKeepsGenerations = {
