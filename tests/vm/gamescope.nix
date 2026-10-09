@@ -208,11 +208,11 @@
     machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
     wait_sees("the placeholder after Big Picture", "hinteros", "placeholder", absent=("fakebigpicture",))
 
-    # Close Big Picture (through the stub), then a Steam Guard style pop-up appears while the
+    # Close Steam (it shuts down, through the stub), then a Steam Guard style pop-up appears while the
     # placeholder is focused: steam_attention with its title, steam.focus shows it, Home returns.
     ok("apps.close", {"id": "steam"})
     wait_event("app_exited", lambda p: p["id"] == "steam" and p["reason"] == "closed")
-    machine.succeed(f"grep -q 'bigpicture: close' /run/user/{uid}/fake-steam.log")
+    machine.succeed(f"grep -q '^shutdown$' /run/user/{uid}/fake-steam.log")
     # A Steam window within 10 s of our own Steam request (here the close) is Steam's answer and gets
     # focus (daemon README, "Steam games"); only a later pop-up is a steam_attention banner.
     machine.sleep(12)

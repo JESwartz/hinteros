@@ -6,7 +6,8 @@
 # The stub understands: `-silent` (starts a long-lived stand-in "steam" client process, so the
 # daemon sees Steam running), `-gamepadui` and `steam://open/bigpicture` (a "Fake Big Picture"
 # window that looks like Steam's to the daemon: WM_CLASS steam/Steam), `steam://close/bigpicture`,
-# `steam://rungameid/<id>` (a "Fake game <id>" window under the reaper, like a real game) and
+# `-shutdown` (Big Picture and the stand-in client exit), `steam://rungameid/<id>` (a "Fake
+# game <id>" window under the reaper, like a real game) and
 # `--hinteros-fake-popup <title>` (a Steam-style dialog window, e.g. "Steam Guard").
 {
   lib,
@@ -164,6 +165,16 @@ let
               kill "$(cat "$run/fake-steam-bigpicture.pid")" 2>/dev/null || true
               rm -f "$run/fake-steam-bigpicture.pid"
             fi
+            ;;
+          -shutdown)
+            # Steam exits: Big Picture and the stand-in client go.
+            echo "shutdown" >> "$log"
+            for p in bigpicture client; do
+              if [ -s "$run/fake-steam-$p.pid" ]; then
+                kill "$(cat "$run/fake-steam-$p.pid")" 2>/dev/null || true
+                rm -f "$run/fake-steam-$p.pid"
+              fi
+            done
             ;;
           --hinteros-fake-popup)
             title="''${1:-Steam Guard}"
