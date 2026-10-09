@@ -1,6 +1,6 @@
 --- a/src/Backends/DRMBackend.cpp	2026-10-09 17:16:34.538453206 -0400
-+++ b/src/Backends/DRMBackend.cpp	2026-10-09 17:16:54.227762670 -0400
-@@ -1813,12 +1813,17 @@
++++ b/src/Backends/DRMBackend.cpp	2026-10-09 17:36:32.629708245 -0400
+@@ -1813,12 +1813,19 @@
  			pPlane->GetProperties().AMD_PLANE_BLEND_LUT->SetPendingValue( req, 0, true );
  	}
  
@@ -11,11 +11,13 @@
 -	if ( ret != 0 ) {
 -		drm_log.errorf_errno( "finish_drm: drmModeAtomicCommit failed" );
 +	// HinterOS: leave the output running as it is instead of committing the request above.
-+	// Turning the CRTC off (and resetting "content type") makes the next DRM master (the
-+	// console's fbdev, then the next gamescope) do a full modeset: on a TV that is a blank and
-+	// an HDMI resync at every session change. Close the framebuffers on screen (CLOSEFB, not
-+	// RmFB, which would turn the output off) so they stay up until the next master's first
-+	// frame; the mode, connector and "content type" stay, so its commit can be a fastset.
++	// Turning the CRTC off makes the next DRM master (the console's fbdev, then the next
++	// gamescope) do a full modeset: on a TV a blank and an HDMI resync at every session
++	// change. Close the framebuffers on screen with CLOSEFB (kernel 6.8+): unlike RmFB, or
++	// the kernel removing them when this process exits, it does not turn their planes off, so
++	// the last frame stays up until the next master's first one and its commit is a fastset.
++	// (Only here: while running, gamescope relies on RmFB turning off a plane whose buffer
++	// goes away.)
 +	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
 +	{
 +		uint32_t uFbId = (uint32_t) pPlane->GetProperties().FB_ID->GetCurrentValue();
@@ -24,17 +26,16 @@
  	}
  	drmModeAtomicFree(req);
  
-@@ -2859,8 +2864,11 @@
- 	}
- 	CDRMFb::~CDRMFb()
- 	{
--		// I own the fbid.
--		if ( drmModeRmFB( g_DRM.fd, m_uFbId ) != 0 )
-+		// I own the fbid. Close it rather than remove it (HinterOS): drmModeRmFB on the fb
-+		// being scanned out turns the output off, a blank and an HDMI resync on a TV; CLOSEFB
-+		// leaves it on screen until the next DRM master shows its own. Kernels before 6.8 lack
-+		// CLOSEFB: fall back to RmFB.
-+		if ( drmModeCloseFB( g_DRM.fd, m_uFbId ) != 0 && drmModeRmFB( g_DRM.fd, m_uFbId ) != 0 )
- 			drm_log.errorf_errno( "drmModeRmFB failed" );
- 		m_uFbId = 0;
- 	}
+@@ -3386,8 +3393,10 @@
+ 		if ( drm->pConnector->GetProperties().HDR_OUTPUT_METADATA )
+ 			drm->pConnector->GetProperties().HDR_OUTPUT_METADATA->SetPendingValue( drm->req, pHDRMetadata ? pHDRMetadata->GetBlobValue() : 0lu, bForceInRequest );
+ 
+-		if ( drm->pConnector->GetProperties().content_type )
+-			drm->pConnector->GetProperties().content_type->SetPendingValue( drm->req, DRM_MODE_CONTENT_TYPE_GAME, bForceInRequest );
++		// HinterOS: "content type" is left as the kernel has it (the console's). Setting Game
++		// changes the HDMI AVI infoframe, which i915 cannot change without a full modeset
++		// ("fastset requirement not met in avi infoframe"): a blank and an HDMI resync when
++		// the first gamescope after boot takes over from the console splash.
+ 
+ 		GamescopeBroadcastRGBMode_t eBroadcastRGB = drm->pConnector->GetScreenType() == gamescope::GAMESCOPE_SCREEN_TYPE_EXTERNAL
+ 			? s_ExternalBroadcastRGBMode
