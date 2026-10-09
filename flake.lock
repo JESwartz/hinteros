@@ -87,11 +87,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791576233,
-        "narHash": "sha256-nWBvbJoNwXJRjKObaX/KS50sp1660Dw5aWT84n9bWWY=",
+        "lastModified": 1791578520,
+        "narHash": "sha256-19O3URdhGFTM+CY5tYnhQELaRzfQQwGUtHYwBNxyGqs=",
         "ref": "m7",
-        "rev": "0879224b74f643fb753408b5c8410528b1bd0e13",
-        "revCount": 102,
+        "rev": "cec3c61a1bf941f5d3bbade70deae3bd6e234c66",
+        "revCount": 103,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git"
       },
