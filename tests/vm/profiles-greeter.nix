@@ -12,10 +12,13 @@
 #     locked p1 (its PIN given in the guest's session first; a missing or wrong one is refused
 #     there and the guest's session stays), p1 -> the guest again;
 #   - End guest session goes to the picker (the used-up switch hint does not lead back in).
-# Each handover paints the PAM console splash ("Loading Sam…" etc. in block letters, journalled as
-# hinteros-splash) on greetd's VT (/dev/vcsu1) with no log text, and end-others leaves nothing of
-# the previous account running. Then root removes p1's forgotten PIN with `hinteros-system
-# reset-pin James`: p1's session sees `pin_set: false` and sets a new PIN without the old one.
+# Each handover paints the PAM splash ("Loading Sam…" etc., journalled as hinteros-splash): with a
+# framebuffer (/dev/fb0, the VM's DRM fbdev) a detached painter that stops once the next session
+# holds the VT and never leaves it in graphics mode without one, else console text; greetd's VT
+# (/dev/vcsu1) has no log text, and end-others leaves nothing of the previous account running.
+# Then root removes p1's forgotten PIN with `hinteros-system reset-pin James`: p1's session sees
+# `pin_set: false` and sets a new PIN without the old one. Last, the text consoles still work:
+# Ctrl+Alt+F2 shows a login prompt, Ctrl+Alt+F1 goes back to the session.
 { self, pkgs }:
 let
   fixture = ./fixtures/profiles-greeter;
@@ -119,21 +122,50 @@ in
         )
         return json.loads(out)["response"]
 
-    def splashes():
-        # What `pin splash` painted, in order (it journals the text; the VT has block letters).
-        out = machine.succeed("journalctl -t hinteros-splash -o json --output-fields=HINTEROS_SPLASH")
-        return [json.loads(l)["HINTEROS_SPLASH"] for l in out.splitlines() if l.strip()]
+    def splash_entries():
+        out = machine.succeed(
+            "journalctl -t hinteros-splash -o json "
+            "--output-fields=MESSAGE,HINTEROS_SPLASH,HINTEROS_SPLASH_MODE,HINTEROS_SPLASH_FRAMES"
+        )
+        return [json.loads(l) for l in out.splitlines() if l.strip()]
 
-    def assert_splash(expected, before):
-        # Since `before` (the count of splashes then): the handover painted `expected`, and
-        # greetd's VT (tty1) shows the big letters and no log text (everything greetd runs logs
-        # to the journal).
-        new = splashes()[before:]
-        assert expected in new, f"{expected!r} not painted: {new!r}"
+    def splashes():
+        # What `pin splash` painted, in order (it journals the text and how: framebuffer or console).
+        return [e["HINTEROS_SPLASH"] for e in splash_entries() if "HINTEROS_SPLASH" in e]
+
+    def painters():
+        # The framebuffer painter's reports (one when each painter stops).
+        return [e for e in splash_entries() if "splash painter" in e.get("MESSAGE", "")]
+
+    def assert_splash(expected, before, painted):
+        # Since `before` / `painted` (the counts of splashes and painter reports then): the
+        # handover painted `expected`. On the framebuffer its painter drew frames and stopped
+        # (once the session took the VT, or after 5 s); as console text it is on tty1. tty1 is
+        # never left in graphics mode without a session holding it, and never shows log text
+        # (everything greetd runs logs to the journal).
+        entries = [e for e in splash_entries() if "HINTEROS_SPLASH" in e][before:]
+        mine = [e for e in entries if e["HINTEROS_SPLASH"] == expected]
+        assert mine, f"{expected!r} not painted: {entries!r}"
+        mode = mine[-1]["HINTEROS_SPLASH_MODE"]
+        assert mode in ("framebuffer", "console"), mine[-1]
+        if mode == "framebuffer":
+            assert "(framebuffer " in mine[-1]["MESSAGE"], mine[-1]
+            report = []
+            for _ in range(30):
+                report = [p for p in painters()[painted:] if expected in p["MESSAGE"]]
+                if report:
+                    break
+                machine.sleep(1)
+            assert report, f"no painter report for {expected!r}: {painters()[painted:]!r}"
+            assert int(report[-1]["HINTEROS_SPLASH_FRAMES"]) > 0, report
+            machine.wait_until_fails("pgrep -f 'hinteros-system [s]plash-paint'", timeout=30)
         vt = json.loads(machine.succeed("python3 /etc/hinteros-test/vt.py 1"))
-        assert vt["blocks"] > 40, f"no block letters on tty1: {vt!r}"
+        if mode == "console":
+            assert expected.rstrip("…") in vt["text"], f"{expected!r} not on tty1: {vt!r}"
+        assert vt["held"] or not vt["graphics"], f"tty1 in graphics mode, no session: {vt!r}"
         for word in ["WARN", "INFO", "ERROR", "DEBUG", "hinteros_session", "Permission denied"]:
             assert word not in vt["text"], f"log text {word!r} on tty1: {vt['text'].strip()!r}"
+        return mode
 
     def session_of(user):
         machine.wait_until_succeeds(f"test -S {sock(user)}", timeout=120)
@@ -154,7 +186,7 @@ in
 
     def watch_greeter():
         machine.succeed(": > /tmp/greeter-ui")
-        return len(splashes())
+        return (len(splashes()), len(painters()))
 
     def assert_no_greeter_ui():
         seen = machine.succeed("cat /tmp/greeter-ui").strip()
@@ -163,13 +195,13 @@ in
     def switch(src, dst, user, expected, **params):
         # From `src`'s session to `dst` without the picker: old session, then new session,
         # with the console splash between.
-        before = watch_greeter()
+        before, painted = watch_greeter()
         r = sess(src, "session.switch_profile", {"id": dst, **params})
         assert r.get("result") == {}, r
         session_of(user)
         machine.wait_until_fails(f"pgrep -u {src} -f '/bin/cage '", timeout=60)
         assert_no_greeter_ui()
-        assert_splash(expected, before)
+        assert_splash(expected, before, painted)
 
     with subtest("the box boots into the picker, not into a profile"):
         picker_up()
@@ -177,9 +209,14 @@ in
         machine.fail("pgrep -u hinteros-p2")
         assert "hinteros" not in machine.succeed("id -nG hinteros-greeter").split()
         assert "HinterOS" in splashes(), splashes()
+        # With a framebuffer the splash is drawn there (the painter), else console text.
+        fb = machine.succeed("test -c /dev/fb0 && cat /sys/class/graphics/fb0/name || true").strip()
+        modes = {e["HINTEROS_SPLASH_MODE"] for e in splash_entries() if "HINTEROS_SPLASH" in e}
+        print(f"framebuffer: {fb!r}; splash modes: {modes}")
+        assert modes == ({"framebuffer"} if fb else {"console"}), (fb, splash_entries())
 
     with subtest("the picker: the admin profile's PIN; wrong ones never lock it out"):
-        before = len(splashes())
+        before, painted = len(splashes()), len(painters())
         g = greeter("p1", "0000", "0000", "0000", "0000", "0000", "2468")
         names = {p["id"]: p["name"] for p in g["list"]["profiles"]}
         assert names == {"p1": "James", "p2": "Sam"}, g
@@ -189,7 +226,7 @@ in
             assert o["ok"] is False and not o.get("locked_seconds"), g
         assert g["outcomes"][5]["ok"] is True, g
         session_of("hinteros")
-        assert_splash("Loading James…", before)
+        assert_splash("Loading James…", before, painted)
         cur = sess("hinteros", "profile.current")["result"]
         assert cur["id"] == "p1" and cur["admin"] and cur["pin_set"], cur
 
@@ -207,7 +244,7 @@ in
         machine.wait_until_fails("pgrep -u hinteros-p2", timeout=30)
 
     with subtest("switch to a locked profile: its PIN in the old session first, then no picker"):
-        before = watch_greeter()
+        watch_greeter()
         r = sess("hinteros-guest", "session.switch_profile", {"id": "p1"})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "target"}, r
         r = sess("hinteros-guest", "session.switch_profile", {"id": "p1", "pin": "0000"})
@@ -224,12 +261,12 @@ in
 
     with subtest("End guest session: the picker, not straight back into the guest"):
         switch("hinteros", "guest", "hinteros-guest", "Loading Guest…")
-        before = len(splashes())
+        before, painted = len(splashes()), len(painters())
         r = sess("hinteros-guest", "session.end_guest")
         assert r.get("result") == {}, r
         machine.wait_until_fails("pgrep -u hinteros-guest -f '/bin/cage '", timeout=90)
         picker_up()
-        assert_splash("HinterOS", before)
+        assert_splash("HinterOS", before, painted)
         assert "--greeter" in machine.succeed("cat /tmp/greeter-ui"), "the watch saw no picker"
         g = greeter("p1", "2468")
         assert g["outcomes"][-1]["ok"] is True, g
@@ -253,5 +290,29 @@ in
         assert r.get("result") == {}, r
         cur = sess("hinteros", "profile.current")["result"]
         assert cur["pin_set"], cur
+
+    with subtest("every painter ran to its end (none killed with a closing session)"):
+        fb_splashes = [
+            e for e in splash_entries()
+            if e.get("HINTEROS_SPLASH_MODE") == "framebuffer" and "HINTEROS_SPLASH" in e
+        ]
+        machine.wait_until_fails("pgrep -f 'hinteros-system [s]plash-paint'", timeout=30)
+        assert len(painters()) == len(fb_splashes), (painters(), fb_splashes)
+
+    with subtest("the text consoles still work after the splashes"):
+        machine.send_key("ctrl-alt-f2")
+        machine.wait_until_succeeds(
+            "python3 /etc/hinteros-test/vt.py 2 | grep -q '\"active\": 2'", timeout=30
+        )
+        machine.wait_until_succeeds("python3 /etc/hinteros-test/vt.py 2 | grep -q 'login:'", timeout=60)
+        vt2 = json.loads(machine.succeed("python3 /etc/hinteros-test/vt.py 2"))
+        assert not vt2["graphics"] and not vt2["held"], vt2
+        machine.send_key("ctrl-alt-f1")
+        machine.wait_until_succeeds(
+            "python3 /etc/hinteros-test/vt.py 1 | grep -q '\"active\": 1'", timeout=30
+        )
+        vt1 = json.loads(machine.succeed("python3 /etc/hinteros-test/vt.py 1"))
+        assert vt1["held"] and vt1["graphics"], vt1
+        assert sess("hinteros", "profile.current")["result"]["id"] == "p1"
   '';
 }

@@ -137,7 +137,7 @@ let
         (lib.hasInfix "/hinteros-console/picker" (console greeter))
         greeter.hinteros.daemon.session.settings.greeter.session_command
         greeter.systemd.services.greetd.after
-        # The console font from the initrd: the splash centres on the final size.
+        # The console font from the initrd: no font change (and fbcon redraw) mid-boot.
         greeter.console.earlySetup
         greeter.console.font
       ];
@@ -200,8 +200,8 @@ let
           false
         ];
       };
-    # The console splash during the handover: optional, before end-others, in both stacks; a
-    # console font that reads on a TV; a quiet kernel console.
+    # The handover splash: optional, before end-others, in both stacks, drawn in the launcher's
+    # typeface; a console font that reads on a TV; a quiet kernel console.
     testGreeterSplash =
       let
         before =
@@ -211,7 +211,10 @@ let
           in
           lib.length parts == 2
           && lib.hasInfix "session  optional   pam_exec.so quiet " (lib.head parts)
-          && lib.hasInfix "/bin/hinteros-system pin splash" (lib.head parts);
+          && lib.hasInfix "/bin/hinteros-system pin splash" (lib.head parts)
+          && lib.hasInfix "pin splash --font /nix/store/" (lib.head parts)
+          && lib.hasInfix "-atkinson-hyperlegible-" (lib.head parts)
+          && lib.hasInfix "/share/fonts/opentype/AtkinsonHyperlegible-Bold.otf\n" (lib.head parts);
       in
       {
         expr = [

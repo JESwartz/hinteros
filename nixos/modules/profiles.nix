@@ -36,6 +36,10 @@ let
   # hinteros-system. pam_exec runs it with an empty PATH.
   pin = "${lib.getExe config.hinteros.daemon.system.package} pin";
 
+  # The handover splash draws in the launcher's typeface: Atkinson Hyperlegible Bold, the
+  # launcher's bundled assets/fonts file (byte-identical to nixpkgs' 2021 release).
+  splash = "${pin} splash --font ${pkgs.atkinson-hyperlegible}/share/fonts/opentype/AtkinsonHyperlegible-Bold.otf";
+
   # The session part of NixOS' login stack that a console session needs. No pam_limits: NixOS has
   # no /etc/security/limits.conf (its stacks name a generated file), and a `required` module that
   # cannot read its config fails pam_open_session, so greetd could start no session at all.
@@ -135,13 +139,14 @@ in
           }
         ];
 
-        # The kernel console of the session's VT shows between two compositors (the PAM splash below,
-        # and anything else on tty1): Terminus 16x32 (120x33 cells at 1920x1080), on which the splash
-        # draws block letters (hinteros-daemon bigtext.rs). Set in the initrd (`earlySetup`, after
-        # the GPU's KMS driver, which facter puts there too): the size the splash centres on at boot
-        # is final, and the stage-2 systemd-vconsole-setup (re-run by udev for every vtcon) sets the
-        # same font again, so nothing moves under the "HinterOS" splash afterwards (it was drawn for
-        # 8x16 cells, then the font changed under it: small, near the top left).
+        # The text console: the handover splash no longer uses it (it draws on the framebuffer), but
+        # a text console is still what the TV shows for the root terminal on Ctrl+Alt+F2 (where
+        # `hinteros-system reset-pin` is typed), the splash's console-text fallback (no
+        # framebuffer) and early boot. Terminus 16x32 (120x33 cells at 1920x1080) reads from a
+        # couch; the kernel's 8x16 (240x67) does not. Set once in the initrd (`earlySetup`, after
+        # the GPU's KMS driver, which facter puts there too): the stage-2 systemd-vconsole-setup
+        # (re-run by udev for every vtcon) sets the same font again, so fbcon never re-lays out and
+        # redraws tty1 in the middle of the boot, under the "HinterOS" splash.
         console = {
           font = lib.mkDefault "ter-v32b";
           packages = [ pkgs.terminus_font ];
@@ -201,11 +206,13 @@ in
         # (unlocked, the guest, a one-time token, the spare in first-boot mode), else the PIN;
         # pam_permit for setcred (spike 7). Before pam_systemd opens the session, every other
         # account's processes are ended (spike 7: logind alone leaves SIGTERM-ignoring ones).
-        # First of all, `splash` paints greetd's VT (PAM_TTY) with "Loading <name>…" in the
-        # launcher's colours: between the last frame of the picker and the first of the session
-        # (~2 s on real hardware) the kernel console of that VT is what the TV shows. Optional, and
-        # the helper always exits 0 for it: a splash never stops a login. The greeter's stack has
-        # it too (just "HinterOS", on the way back to the picker).
+        # First of all, `splash` shows the launcher's "Loading <name>…" page on greetd's VT
+        # (PAM_TTY): between the last frame of the picker and the first of the session (~2 s on
+        # real hardware) the framebuffer of that VT is what the TV shows. The helper starts a
+        # detached painter (VT in graphics mode, /dev/fb0 repainted until the next compositor
+        # holds the VT, at most 5 s) and returns at once; console text without a framebuffer.
+        # Optional, and the helper always exits 0 for it: a splash never stops a login. The
+        # greeter's stack has it too (just "HinterOS", on the way back to the picker).
         security.pam.services = {
           greetd.text = lib.mkForce ''
             auth     requisite  pam_succeed_if.so user ingroup ${group}
@@ -213,7 +220,7 @@ in
             auth     required   pam_exec.so quiet stdout expose_authtok ${pin} verify
             auth     required   pam_permit.so
             account  required   pam_unix.so
-            session  optional   pam_exec.so quiet ${pin} splash
+            session  optional   pam_exec.so quiet ${splash}
             session  required   pam_exec.so quiet ${pin} end-others
             ${sessionTail}
           '';
@@ -223,7 +230,7 @@ in
           greetd-greeter.text = lib.mkForce ''
             auth     required   pam_permit.so
             account  required   pam_unix.so
-            session  optional   pam_exec.so quiet ${pin} splash
+            session  optional   pam_exec.so quiet ${splash}
             session  optional   pam_exec.so quiet ${pin} end-others
             ${sessionTail}
           '';
@@ -251,8 +258,8 @@ in
           KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
         '';
 
-        # The greeter reads the public view the service writes at start; the splash centres on the
-        # console size, final once the console font is set.
+        # The greeter reads the public view the service writes at start; the console font is set
+        # before the first splash (no vconsole setup on tty1 while it paints).
         systemd.services.greetd = {
           after = [
             "hinteros-system.service"
