@@ -1,0 +1,40 @@
+--- a/src/Backends/DRMBackend.cpp	2026-10-09 17:16:34.538453206 -0400
++++ b/src/Backends/DRMBackend.cpp	2026-10-09 17:16:54.227762670 -0400
+@@ -1813,12 +1813,17 @@
+ 			pPlane->GetProperties().AMD_PLANE_BLEND_LUT->SetPendingValue( req, 0, true );
+ 	}
+ 
+-	// We can't do a non-blocking commit here or else risk EBUSY in case the
+-	// previous page-flip is still in flight.
+-	uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+-	int ret = drmModeAtomicCommit( drm->fd, req, flags, nullptr );
+-	if ( ret != 0 ) {
+-		drm_log.errorf_errno( "finish_drm: drmModeAtomicCommit failed" );
++	// HinterOS: leave the output running as it is instead of committing the request above.
++	// Turning the CRTC off (and resetting "content type") makes the next DRM master (the
++	// console's fbdev, then the next gamescope) do a full modeset: on a TV that is a blank and
++	// an HDMI resync at every session change. Close the framebuffers on screen (CLOSEFB, not
++	// RmFB, which would turn the output off) so they stay up until the next master's first
++	// frame; the mode, connector and "content type" stay, so its commit can be a fastset.
++	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
++	{
++		uint32_t uFbId = (uint32_t) pPlane->GetProperties().FB_ID->GetCurrentValue();
++		if ( uFbId != 0 )
++			drmModeCloseFB( drm->fd, uFbId );
+ 	}
+ 	drmModeAtomicFree(req);
+ 
+@@ -2859,8 +2864,11 @@
+ 	}
+ 	CDRMFb::~CDRMFb()
+ 	{
+-		// I own the fbid.
+-		if ( drmModeRmFB( g_DRM.fd, m_uFbId ) != 0 )
++		// I own the fbid. Close it rather than remove it (HinterOS): drmModeRmFB on the fb
++		// being scanned out turns the output off, a blank and an HDMI resync on a TV; CLOSEFB
++		// leaves it on screen until the next DRM master shows its own. Kernels before 6.8 lack
++		// CLOSEFB: fall back to RmFB.
++		if ( drmModeCloseFB( g_DRM.fd, m_uFbId ) != 0 && drmModeRmFB( g_DRM.fd, m_uFbId ) != 0 )
+ 			drm_log.errorf_errno( "drmModeRmFB failed" );
+ 		m_uFbId = 0;
+ 	}

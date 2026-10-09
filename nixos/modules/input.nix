@@ -4,6 +4,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -35,6 +36,11 @@ in
   config = lib.mkIf cfg.enable {
     services.inputplumber.enable = true;
     systemd.services.inputplumber.environment.INPUTPLUMBER_POINTER_CURVE = toString cfg.pointerCurve;
+    # InputPlumber hides the physical pads it took over (a udev rule that runs chmod and
+    # `setfacl -b` on their device nodes) so games see only its virtual pad. It looks up setfacl
+    # on PATH; without it the hiding fails ("Unable to determine setfacl command location") and
+    # games see two pads, the physical one silent (InputPlumber grabs it).
+    systemd.services.inputplumber.path = [ pkgs.acl ];
 
     # Every InputPlumber DBus call, even reading a property, goes through polkit.
     security.polkit.enable = true;

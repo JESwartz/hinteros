@@ -14,6 +14,16 @@ final: prev: {
   # (the click answers and reaches the virtual mouse) and `daemon-eval` (the patch is applied).
   # pointer-response-curve.patch (HinterOS-only) makes stick->mouse speed = speed_pps * m^k, k from
   # INPUTPLUMBER_POINTER_CURVE (`hinteros.input.pointerCurve`).
+  # gamescope turns the output off when it exits (finish_drm: CRTC inactive, "content type"
+  # reset) and removes on-screen framebuffers with RmFB, which also turns it off. Each session
+  # change (greeter -> console splash -> session) then needed full modesets: a blank and an HDMI
+  # resync on a TV (i915 debug: "fastset requirement not met in avi infoframe", content type
+  # Game vs Graphics). keep-output-on-exit.patch leaves the output running and closes its
+  # framebuffers with CLOSEFB (kernel 6.8+), so the next DRM master takes over with a fastset.
+  gamescope = prev.gamescope.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./pkgs/gamescope/keep-output-on-exit.patch ];
+  });
+
   inputplumber = prev.inputplumber.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./pkgs/inputplumber/send-event-no-blocking-send.patch
