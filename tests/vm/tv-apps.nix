@@ -1,6 +1,6 @@
 # M4 TV apps under cage (no network in the sandbox): the Firefox kiosk wrapper with a
 # per-app profile, the User-Agent override that only the YouTube profile gets, the app
-# registry as the daemon reports it (apps.list over the session socket, API 0.9) and launching
+# registry as the daemon reports it (apps.list over the session socket, API 0.12) and launching
 # apps through apps.launch (also the Store-only streaming apps Netflix and Spotify). The YouTube,
 # Crunchyroll and Netflix URLs point at local pages. Firefox runs
 # on Xwayland (MOZ_ENABLE_WAYLAND=0), as under gamescope.
@@ -73,7 +73,7 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.9", "client": {"name": "tv-apps-test", "version": "0"}}}
+                 "params": {"api_version": "0.12", "client": {"name": "tv-apps-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
         out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
