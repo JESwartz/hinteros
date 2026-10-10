@@ -54,9 +54,9 @@ let
     ];
     text = ''
       bless_booted_entry() {
-        if compgen -G "/sys/firmware/efi/efivars/LoaderBootCountPath-*" >/dev/null; then
-          return 0 # systemd-bless-boot does it
-        fi
+        for var in /sys/firmware/efi/efivars/LoaderBootCountPath-*; do
+          [ -e "$var" ] && return 0 # systemd-bless-boot does it
+        done
         booted=$(readlink -f /run/booted-system)
         for entry in /boot/loader/entries/*+*.conf; do
           [ -e "$entry" ] || continue
