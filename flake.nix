@@ -11,10 +11,8 @@
 
     # Component repos. Their packages come in through their overlays (see overlays.default).
     # scripts/dev-override picks these up by input name.
-    # M7: the launcher and daemon follow their m7 branches and the catalog its format-3 branch;
-    # these refs revert (back to main) when M7 merges.
     hinteros-launcher = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git?ref=m7";
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -23,7 +21,7 @@
       };
     };
     hinteros-daemon = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git?ref=m7";
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -32,7 +30,7 @@
     # The App Store catalog (design/catalog.md): app entries, Store index and vendor terms, locked
     # per release like the other inputs.
     hinteros-catalog = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git?ref=format-3";
+      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";

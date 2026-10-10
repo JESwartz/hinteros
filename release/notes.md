@@ -4,11 +4,19 @@ Newest first. `promote` puts the top section (the text under the first `## <vers
 which must match `release/version`) into the release commit's message, which is what a box shows
 as the update's notes. Keep each section short and written for the person using the box.
 
-## 0.6.0
+## 0.7.0
 
 The first signed release: the first build of HinterOS meant to be installed on a box and kept
-up to date.
+up to date. (0.6.0 was prepared but never released; everything in it is here.)
 
+- Profiles: everyone in the household gets their own profile with its own apps, Steam account,
+  settings and an optional PIN; a Guest profile that starts fresh every time; a profile picker at
+  start and "Switch profile" that keeps the current profile running. A forgotten PIN is reset
+  by the box's administrator from the console (`sudo hinteros-system reset-pin`).
+- First-time setup on the TV: controllers, network, display resolution and your profile.
+- Games added to Steam as non-Steam games show up in the Games library and under Continue.
+- Smoother screen changes: a loading screen with a spinner when a profile starts, and no
+  blank screen or TV signal drop between the start screen, the profile picker and a profile.
 - Controller-driven home screen (the HinterOS launcher on gamescope) with Home, Games, Apps and
   Settings; the Guide button always brings you back home.
 - Apps from the HinterOS catalog: YouTube, Jellyfin and Firefox in a TV-friendly kiosk, Steam,
