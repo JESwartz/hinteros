@@ -110,13 +110,15 @@ profiles.mkTest {
         machine.succeed(f"runuser -u hinteros -- env {user_env} systemd-run --user --unit=leftover sleep 1000")
         machine.succeed("runuser -u hinteros -- setsid -f sleep 1001 </dev/null >/dev/null 2>&1")
         # Opening /dev/uinput works only through the active session's uaccess ACL.
+        print(machine.succeed("ls -l /dev/uinput; getfacl -p /dev/uinput; loginctl list-sessions --no-legend"))
+        machine.succeed("runuser -u hinteros -- python3 -c 'open(\"/dev/uinput\", \"wb\")'")
         machine.succeed(
             "runuser -u hinteros -- setsid -f python3 -c "
             "'import time; f = open(\"/dev/uinput\", \"wb\"); time.sleep(100000)' </dev/null >/dev/null 2>&1"
         )
         machine.wait_until_succeeds("pgrep -u hinteros -f 'sleep 1000'")
         machine.wait_until_succeeds("pgrep -u hinteros -f 'sleep 1001'")
-        holder = machine.wait_until_succeeds("pgrep -u hinteros -f 'dev/uinput'").split()[0]
+        holder = machine.wait_until_succeeds("pgrep -u hinteros -f 'dev/uinput'", timeout=30).split()[0]
         machine.succeed(f"ls -l /proc/{holder}/fd | grep -q /dev/uinput")
 
     with subtest("a stubborn app: no silent force-close; Cancel switch keeps the profile"):
@@ -188,7 +190,16 @@ profiles.mkTest {
             assert not groups & {"video", "input", "uinput", "inputplumber", "wheel"}, (u, groups)
 
     with subtest("InputPlumber: the active session's processes only"):
-        action = machine.succeed("pkaction | grep -m1 '^org.shadowblip'").strip()
+        # An InputPlumber action that is not open to everyone by its own defaults (implicit any
+        # is not "yes"): only our rule can grant it.
+        action = None
+        for a in machine.succeed("pkaction | grep '^org.shadowblip'").split():
+            v = machine.succeed(f"pkaction --action-id {a} --verbose")
+            anyv = [l.split(":", 1)[1].strip() for l in v.splitlines() if l.strip().startswith("implicit any:")]
+            if anyv and anyv[0] != "yes":
+                action = a
+                break
+        assert action, machine.succeed("pkaction --verbose | grep -A6 shadowblip")
         cage = machine.succeed("pgrep -u hinteros-p2 -o -f '/bin/cage '").strip()
         machine.succeed(f"pkcheck --action-id {action} --process {cage}")
         # A system service running as the active profile's user is not in its session.
