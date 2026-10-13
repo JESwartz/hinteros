@@ -449,6 +449,12 @@ pass "menus: nothing new anywhere is said and refused"
 export PROMOTE_REPO_URL=$work/legacy.git
 git init -q --bare "$work/legacy.git"
 git clone -q "$work/legacy.git" "$work/l" 2>/dev/null
+# A long history (more `git rev-list` output than a pipe holds), as the real repo has: checks
+# that read it through a pipe must read all of it.
+for i in $(seq 1 3000); do
+  printf 'commit refs/heads/main\ncommitter T <t@example.invalid> %d +0000\ndata 2\nc\n\n' "$((1700000000 + i))"
+done | git -C "$work/l" fast-import --quiet
+git -C "$work/l" reset -q --hard main
 cp -r "$work/m/release" "$work/m/flake.lock" "$work/l/"
 git -C "$work/l" add -A
 git -C "$work/l" commit -q -m "Before the version scheme"

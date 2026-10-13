@@ -880,7 +880,7 @@ promote_stable() {
   target=$(resolve "${want_rev:-$beta_tip}")
 
   step "Target: beta release commit $target"
-  if g rev-list --first-parent "$beta_tip" | grep -qx "$target"; then
+  if g rev-list --first-parent "$beta_tip" | grep -x "$target" >/dev/null; then
     ok "it is on origin/beta's first-parent chain"
   else
     fail "$target is not a first-parent commit of origin/beta (only beta release commits can go to stable)"
@@ -890,7 +890,7 @@ promote_stable() {
   is_beta_release "$target" \
     || fail "subject is '$(g log -1 --format=%s "$target")', not 'HinterOS $v beta': not a beta release commit"
   ok "beta release commit: HinterOS $v.${target:0:7} beta"
-  g cat-file commit "$target" | grep -q '^gpgsig ' || fail "$target is not signed"
+  g cat-file commit "$target" | grep '^gpgsig ' >/dev/null || fail "$target is not signed"
   ok "it carries a signature"
 
   if [ -n "$stable_tip" ]; then
