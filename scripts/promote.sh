@@ -576,7 +576,7 @@ confirm() {
 }
 
 # pick <question> <default> <choice>...: a numbered menu, asked until the answer is one of them
-# (q stops). Sets $picked (1-based).
+# (Ctrl+C or Ctrl+D stops). Sets $picked (1-based).
 picked=
 pick() {
   local question=$1 default=$2 ans i=0 choice
@@ -588,14 +588,8 @@ pick() {
     printf '    %d) %s\n' "$i" "$choice"
   done
   while :; do
-    read -r -p "  Choice [1-$i, default $default, q stops]: " ans || fail "no answer"
+    read -r -p "  Choice [1-$i, default $default]: " ans || fail "no answer"
     ans=${ans:-$default}
-    case "$ans" in
-      q | Q)
-        printf '\npromote: stopped. Nothing is signed or pushed.\n'
-        exit 0
-        ;;
-    esac
     if [[ $ans =~ ^[0-9]+$ ]] && ((ans >= 1 && ans <= i)); then
       picked=$ans
       return 0

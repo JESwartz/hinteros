@@ -393,15 +393,17 @@ run_menus() {
   fi
 }
 
+# "q" is no answer; the end of input (Ctrl+D) stops, as does Ctrl+C.
 run_menus 'q\n' --skip-ci --key "$work/k1"
 grep -q "1) Release main to beta" "$work/out" || {
   cat "$work/out"
   die "the menu does not offer the first beta"
 }
 grep -q "Release beta to stable" "$work/out" && die "the menu offers stable before there is a beta"
-grep -q "stopped. Nothing is signed or pushed" "$work/out" || die "q did not stop"
-[ -z "$(mo rev-parse -q --verify refs/heads/beta)" ] || die "q pushed something"
-pass "menus: the channels and only what can be released; q stops with nothing done"
+grep -q "q is not a choice" "$work/out" || die "q is taken as an answer"
+grep -q "no answer" "$work/out" || die "the end of input did not stop"
+[ -z "$(mo rev-parse -q --verify refs/heads/beta)" ] || die "stopping pushed something"
+pass "menus: the channels and only what can be released; the end of input stops with nothing done"
 
 run_menus 'x\n1\n1\n\n1\nn\n' --skip-ci --key "$work/k1"
 grep -q "x is not a choice" "$work/out" || die "a wrong answer is not asked again"
@@ -465,7 +467,7 @@ lmain=$(git -C "$work/l" rev-parse HEAD)
 lbeta=$(git -C "$work/l" -c gpg.format=ssh -c user.signingkey="$work/k1" \
   commit-tree -S "$lmain^{tree}" -p "$lmain" -m "HinterOS 0.7.0" -m "- Profiles.")
 git -C "$work/l" push -q origin "$lbeta:refs/heads/beta" 2>/dev/null
-run_menus '1\nq\n' --key "$work/k1"
+run_menus '1\n' --key "$work/k1"
 grep -q "1) HinterOS 0.7.0.${lbeta:0:7} beta" "$work/out" || {
   cat "$work/out"
   die "the menus do not offer the old-style beta release for stable"
