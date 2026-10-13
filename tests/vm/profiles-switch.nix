@@ -64,12 +64,12 @@ profiles.mkTest {
         return machine.succeed("systemctl show -p MainPID --value hinteros-system.service").strip()
     system_pid = service_pid()
 
-    def log(path):
+    def read_log(path):
         out = machine.succeed(f"cat {path} 2>/dev/null || true")
         return [json.loads(l) for l in out.splitlines() if l.strip()]
 
     def events(path, name):
-        return [m["params"] for m in log(path) if m.get("method") == name]
+        return [m["params"] for m in read_log(path) if m.get("method") == name]
 
     def start_switch(path, target, pin=None):
         machine.succeed("runuser -u hinteros -- mkdir -p /tmp/sw")
@@ -78,7 +78,7 @@ profiles.mkTest {
             f"python3 /etc/hinteros-test/switcher.py {path} {target} {pin or '''} >/dev/null 2>&1 &)"
         )
         machine.wait_until_succeeds(f"grep -q response {path}", timeout=60)
-        r = log(path)[0]["response"]
+        r = read_log(path)[0]["response"]
         assert r.get("result") == {}, r
 
     def press(path, command):
@@ -91,7 +91,7 @@ profiles.mkTest {
             if len(events(path, "switch_blocked")) >= n:
                 return events(path, "switch_blocked")
             machine.sleep(1)
-        raise AssertionError(f"no switch_blocked #{n}: {log(path)}")
+        raise AssertionError(f"no switch_blocked #{n}: {read_log(path)}")
 
     with subtest("boot: the picker; the unlocked p1 opens without a PIN"):
         picker_up()
@@ -136,7 +136,7 @@ profiles.mkTest {
         machine.succeed(f"kill -0 {app}")
         machine.succeed("pgrep -u hinteros -f '/bin/cage '")
         machine.fail("pgrep -u hinteros-p2")
-        assert len(events(L, "switch_blocked")) == 1, log(L)
+        assert len(events(L, "switch_blocked")) == 1, read_log(L)
         # Keep waiting: asked again after another 10 s.
         press(L, "wait")
         b = wait_blocked(L, 2)

@@ -193,12 +193,12 @@ in
         entries = [json.loads(l) for l in out.splitlines() if l.strip()]
         seen = {(e.get("HINTEROS_UID"), e.get("HINTEROS_DECISION")) for e in entries}
         print(sorted(seen, key=str))
-        uid = machine.succeed("id -u hinteros").strip()
+        huid = machine.succeed("id -u hinteros").strip()
         guid = machine.succeed("id -u guest").strip()
         assert (guid, "denied_seat") in seen, seen
-        assert (uid, "auth_required") in seen, seen
-        assert (uid, "denied_polkit") in seen, seen
-        assert (uid, "allowed") in seen, seen
+        assert (huid, "auth_required") in seen, seen
+        assert (huid, "denied_polkit") in seen, seen
+        assert (huid, "allowed") in seen, seen
         machine.fail("runuser -u hinteros -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
 
     # ---- two profiles (profiles.md "Authority"): a second box, schema 2 with the greeter -------

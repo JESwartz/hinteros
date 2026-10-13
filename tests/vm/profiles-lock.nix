@@ -87,7 +87,7 @@ profiles.mkTest {
         assert cur["id"] == "p2" and cur["locked"] and not cur["screen_locked"], cur
 
     with subtest("sleep locks a locked profile; resume keeps the lock until its PIN"):
-        machine.wait_until_succeeds(f"systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=60)
+        machine.wait_until_succeeds("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=60)
         assert inhibitor_of("hinteros-p2"), machine.succeed("systemd-inhibit --list --no-pager")
         W = "/tmp/lock-p2.log"
         start_watch("hinteros-p2", W)
@@ -96,10 +96,10 @@ profiles.mkTest {
         assert sess_ok("hinteros-p2", "profile.current")["screen_locked"] is True
         assert sess_ok("hinteros-p2", "session.lock_state") == {"locked": True}
         # The delay inhibitor was let go so the box can sleep...
-        machine.wait_until_fails(f"systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=30)
+        machine.wait_until_fails("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=30)
         sleep_signal(False)
         # ...and is taken again on resume; the lock stays up.
-        machine.wait_until_succeeds(f"systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=30)
+        machine.wait_until_succeeds("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=30)
         assert sess_ok("hinteros-p2", "session.lock_state") == {"locked": True}
         # The session (and what runs in it) is still there: a sleep is not a switch.
         machine.succeed("pgrep -u hinteros-p2 -f '/bin/cage '")
@@ -126,7 +126,7 @@ profiles.mkTest {
 
     with subtest("an unlocked profile is not locked by a sleep"):
         switch("hinteros-p2", "p3", "hinteros-p3")
-        machine.wait_until_succeeds(f"systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p3", timeout=60)
+        machine.wait_until_succeeds("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p3", timeout=60)
         W = "/tmp/lock-p3.log"
         start_watch("hinteros-p3", W)
         sleep_signal(True)
