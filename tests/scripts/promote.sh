@@ -445,4 +445,27 @@ run_menus '' --skip-ci --key "$work/k1"
 grep -q "nothing to release" "$work/out" || die "menus: nothing to release is not said"
 pass "menus: nothing new anywhere is said and refused"
 
+# --- a beta promoted before betas kept the stable version ("HinterOS 0.7.0") ------------------
+export PROMOTE_REPO_URL=$work/legacy.git
+git init -q --bare "$work/legacy.git"
+git clone -q "$work/legacy.git" "$work/l" 2>/dev/null
+cp -r "$work/m/release" "$work/m/flake.lock" "$work/l/"
+git -C "$work/l" add -A
+git -C "$work/l" commit -q -m "Before the version scheme"
+git -C "$work/l" push -q origin main 2>/dev/null
+lmain=$(git -C "$work/l" rev-parse HEAD)
+lbeta=$(git -C "$work/l" -c gpg.format=ssh -c user.signingkey="$work/k1" \
+  commit-tree -S "$lmain^{tree}" -p "$lmain" -m "HinterOS 0.7.0" -m "- Profiles.")
+git -C "$work/l" push -q origin "$lbeta:refs/heads/beta" 2>/dev/null
+run_menus '1\nq\n' --key "$work/k1"
+grep -q "1) HinterOS 0.7.0.${lbeta:0:7} beta" "$work/out" || {
+  cat "$work/out"
+  die "the menus do not offer the old-style beta release for stable"
+}
+expect_ok stable --bump keep --yes --key "$work/k1"
+lstable=$(git -C "$work/legacy.git" rev-parse refs/heads/stable)
+[ "$(git -C "$work/legacy.git" rev-list --parents -n1 "$lstable")" = "$lstable $lbeta" ] || die "legacy: stable's parent"
+[ "$(git -C "$work/legacy.git" log -1 --format=%s "$lstable")" = "HinterOS 0.7.0" ] || die "legacy: stable subject"
+pass "a beta release from the old script ('HinterOS 0.7.0') can go to stable"
+
 echo "all $n promote tests passed"

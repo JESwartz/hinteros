@@ -582,6 +582,7 @@ picked=
 pick() {
   local question=$1 default=$2 ans i=0 choice
   shift 2
+  [ "$#" -gt 0 ] || fail "nothing to choose from: $question"
   printf '\n  %s\n' "$question"
   for choice in "$@"; do
     i=$((i + 1))
@@ -862,6 +863,15 @@ promote_beta() {
 
 # --- stable --------------------------------------------------------------------------------
 
+# A beta release commit's subject: `HinterOS <version> beta`, or `HinterOS <version>` from before
+# betas kept the stable version (the first beta, 0.7.0, was promoted that way).
+is_beta_release() {
+  local s v
+  v=$(version_at "$1")
+  s=$(g log -1 --format=%s "$1")
+  [ "$s" = "HinterOS $v beta" ] || [ "$s" = "HinterOS $v" ]
+}
+
 promote_stable() {
   local beta_tip stable_tip target v sv="" tree new
   beta_tip=$(tip beta)
@@ -877,7 +887,7 @@ promote_stable() {
   fi
   v=$(version_at "$target")
   [[ $v =~ $semver_re ]] || fail "release/version of the target is '${v:-<missing>}'"
-  [ "$(g log -1 --format=%s "$target")" = "HinterOS $v beta" ] \
+  is_beta_release "$target" \
     || fail "subject is '$(g log -1 --format=%s "$target")', not 'HinterOS $v beta': not a beta release commit"
   ok "beta release commit: HinterOS $v.${target:0:7} beta"
   g cat-file commit "$target" | grep -q '^gpgsig ' || fail "$target is not signed"
@@ -1135,7 +1145,7 @@ choose_release() {
       while read -r c; do
         [ -z "$stable_tip" ] || ! is_ancestor "$c" "$stable_tip" || break
         # Below the first beta release the first-parent chain is main's history.
-        [ "$(g log -1 --format=%s "$c")" = "HinterOS $(version_at "$c") beta" ] || break
+        is_beta_release "$c" || break
         revs+=("$c")
         labels+=("HinterOS $(version_at "$c").${c:0:7} beta ($(g log -1 --format=%cs "$c"))")
         [ "${#revs[@]}" -lt 10 ] || break
