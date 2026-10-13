@@ -215,6 +215,7 @@
         profiles-greeter = import ./tests/vm/profiles-greeter.nix { inherit self pkgs; };
         profiles-switch = import ./tests/vm/profiles-switch.nix { inherit self pkgs; };
         profiles-pin = import ./tests/vm/profiles-pin.nix { inherit self pkgs; };
+        profiles-isolation = import ./tests/vm/profiles-isolation.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
         install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
         install-app-failure = import ./tests/vm/install-offline.nix {
