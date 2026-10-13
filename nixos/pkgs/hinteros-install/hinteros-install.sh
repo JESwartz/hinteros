@@ -3,6 +3,11 @@
 #
 #   hinteros-install --plan plan.json [--validate-only]
 #   hinteros-install --check-newer [--channel stable|beta]
+#   hinteros-install --info
+#
+# --info (offline, instant, no root): what this installer carries, as one JSON object,
+#   {"iso":{"rev":...,"version":...},"channel":"stable"}
+# (its revision, that revision's release/version and its default channel). Nothing is logged.
 #
 # --check-newer (online): is the channel's tip a newer HinterOS than this installer's revision,
 # verified as a box verifies an update (an SSH signature by a key in this revision's
@@ -272,6 +277,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: hinteros-install --plan FILE|- [--validate-only | --state-dir DIR]
        hinteros-install --check-newer [--channel stable|beta]
+       hinteros-install --info
 
 Installs HinterOS on the disk named in the plan, erasing it. The plan is a JSON object, see
 the README ("Installer"). With --validate-only the plan and the machine are checked and
@@ -281,6 +287,9 @@ produce are written to DIR (for tests).
 --check-newer (needs the network) prints one JSON object: this installer's revision and
 version and, if the channel (default: the installer's) has a newer, correctly signed release
 that follows it, that release ("newer"; else null). A plan's "rev" installs it.
+
+--info (offline, no root) prints one JSON object: this installer's revision and version and
+its default channel, {"iso":{"rev":...,"version":...},"channel":...}.
 USAGE
   exit 2
 }
@@ -290,6 +299,7 @@ validate_only=0
 state_dir=
 check_newer=0
 check_ch=$DEFAULT_CHANNEL
+info=0
 while [ $# -gt 0 ]; do
   case $1 in
     --plan)
@@ -299,6 +309,10 @@ while [ $# -gt 0 ]; do
       ;;
     --check-newer)
       check_newer=1
+      shift
+      ;;
+    --info)
+      info=1
       shift
       ;;
     --channel)
@@ -319,7 +333,14 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
-if [ "$check_newer" -eq 1 ]; then
+if [ "$info" -eq 1 ]; then
+  # Offline and instant: only what was built into this installer. No log, no root.
+  [ "$check_newer" -eq 0 ] && [ -z "$plan_file" ] && [ "$validate_only" -eq 0 ] \
+    && [ -z "$state_dir" ] && [ "$check_ch" = "$DEFAULT_CHANNEL" ] || usage
+  jq -nc --arg irev "$ISO_REV" --arg iver "$ISO_VERSION" --arg ch "$DEFAULT_CHANNEL" \
+    '{iso: {rev: $irev, version: $iver}, channel: $ch}' >&3
+  exit 0
+elif [ "$check_newer" -eq 1 ]; then
   [ -z "$plan_file" ] && [ "$validate_only" -eq 0 ] && [ -z "$state_dir" ] || usage
 else
   [ -n "$plan_file" ] || usage

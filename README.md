@@ -202,6 +202,23 @@ passes `--option substitute true`. NixOS test VMs always have a user-mode `eth0`
 went unnoticed: the install tests now run the installer with only its own store image and no NIC at
 all.
 
+### What the installer carries
+
+The UI asks the backend which HinterOS the stick carries and which channel it is for, so it can
+show that version and pick the channel before anything goes online:
+
+```
+hinteros-install --info
+{"iso":{"rev":"<40 hex>","version":"0.7.0"},"channel":"stable"}
+```
+
+`iso.rev` is the revision the installer is built from (`hinteros.installer.isoRev`; all zeros for
+an ISO built from a dirty tree), `iso.version` that revision's `release/version`, `channel` the
+installer's channel (`hinteros.installer.channel`, the default `channel` of a plan). It is built
+into the installer: no network, no root, nothing logged, one line on stdout, exit 0. A beta
+installer's `iso.version` is the stable version it builds on, as on a box. Tested by
+`install-validation`.
+
 ### A newer HinterOS than the ISO's
 
 With a network, the installer can install the newest release of its channel instead of the one
