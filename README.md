@@ -47,11 +47,11 @@ a key listed in `release/allowed_signers` of the generation they are running (de
 
 | Path or command | What it is |
 |---|---|
-| `release/version`, `release/notes.md` | The next release's version (`MAJOR.MINOR.PATCH`) and its notes, newest first: the `## <version>` section on top is the release commit's message. Bump both on `main` before promoting |
+| `release/version`, `release/notes.md` | The latest stable release's version (`MAJOR.MINOR.PATCH`) and the release notes, newest first, with what changed since then under `## Unreleased` on top (the release commit's message). Nobody bumps the version by hand: `promote stable` does |
 | `release/allowed_signers`, `release/cache-keys` | Release signing keys and binary cache keys every generation trusts (`nixos/modules/release.nix`). Release key fingerprint: `SHA256:NuERttXtUYjtSTqt7kHUqs7TW6rWSHjHOIUlOOADpCE` (ED25519, `hinteros-release`) |
-| `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. The very first one needs `--bootstrap` |
-| `nix run .#promote -- stable [--rev <beta release>]` | Fast-forwards `stable` to a beta release commit after the dogfood confirmation (`--expedite` for high/critical security releases) |
-| `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable` (patch version bump, `Security:` severity required); then merge `stable` into `main` |
+| `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. The version stays the stable one it builds on: a box shows `0.7.0.<commit> beta`. The very first one needs `--bootstrap` |
+| `nix run .#promote -- stable [--rev <beta release>]` | Shows the changes since the last stable release and asks for the new version (patch, minor, major or typed; `--bump <b>` or `--version <v>` without asking), then signs a commit on top of the beta release that only writes it to `release/version` and names the notes section, after the dogfood confirmation (`--expedite` for high/critical security releases). A box shows `0.8.0 stable`. Then merge `stable` into `main` |
+| `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable`, as the next patch version (the branch leaves `release/version` alone and adds an `## Unreleased` notes section; `Security:` severity required); then merge `stable` into `main` |
 | `sudo hinteros-bootstrap-channel <stable\|beta> <rev>` | On a box, over SSH: move it onto a channel at a rev once, outside the update UI (boxes installed before they trusted the release key). A box whose system predates the script runs it from that very rev: `sudo nix run "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros.git?ref=beta&rev=<rev>#hinteros-bootstrap-channel" -- beta <rev>` |
 
 `promote` works on a temporary clone of `origin`, prints every check, signs with

@@ -26,7 +26,7 @@ die() {
   exit 1
 }
 
-# Keys: k1 (the release key of 0.6.0), k2 (added by 0.7.0), bad (never listed), nopub (k1-less
+# Keys: k1 (the release key from the start), k2 (added later), bad (never listed), nopub (k1-less
 # key without a .pub, so promote cannot pre-check it and must catch it at verification).
 for k in k1 k2 bad; do ssh-keygen -q -t ed25519 -N '' -C "$k" -f "$work/$k"; done
 ssh-keygen -q -t ed25519 -N '' -C nopub -f "$work/nopub" && rm "$work/nopub.pub"
@@ -51,24 +51,38 @@ export PROMOTE_REPO_URL=$work/origin.git
 git init -q --bare "$work/origin.git"
 git clone -q "$work/origin.git" "$work/dev" 2>/dev/null
 dev() { git -C "$work/dev" "$@"; }
+o() { git -C "$work/origin.git" "$@"; }
 cd "$work"
 
-# A release on main: version, notes section, optional signers line, optional trailer.
-release() {
-  local version=$1 trailer=${2:-}
+# A change on the current branch, noted in the `## Unreleased` section of the release notes
+# (started if the top section is a released version). Optional trailer.
+change() {
+  local what=$1 trailer=${2:-} notes=$work/dev/release/notes.md
   mkdir -p "$work/dev/release"
-  echo "$version" >"$work/dev/release/version"
+  echo "$what" >>"$work/dev/file"
   {
-    printf '# Release notes\n\n## %s\n\nChanges in %s.\n\n' "$version" "$version"
-    [ ! -f "$work/dev/release/notes.md" ] || sed -n '/^## /,$p' "$work/dev/release/notes.md"
-  } >"$work/dev/release/notes.tmp"
-  mv "$work/dev/release/notes.tmp" "$work/dev/release/notes.md"
+    printf '# Release notes\n\n## Unreleased\n\n'
+    if [ -f "$notes" ] && [ "$(grep -m1 '^## ' "$notes")" = "## Unreleased" ]; then
+      sed -n '/^## Unreleased/,/^## [0-9]/p' "$notes" | sed -e '1d' -e '/^## /d' -e '/^$/d'
+      echo "- $what"
+      printf '\n'
+      sed -n '/^## [0-9]/,$p' "$notes"
+    else
+      printf -- '- %s\n\n' "$what"
+      [ ! -f "$notes" ] || sed -n '/^## /,$p' "$notes"
+    fi
+  } >"$notes.tmp"
+  mv "$notes.tmp" "$notes"
   dev add -A
   if [ -n "$trailer" ]; then
-    dev commit -q -m "Release $version" -m "$trailer"
+    dev commit -q -m "$what" -m "$trailer"
   else
-    dev commit -q -m "Release $version"
+    dev commit -q -m "$what"
   fi
+}
+set_version() {
+  echo "$1" >"$work/dev/release/version"
+  dev commit -q -am "release/version $1"
 }
 signers() {
   mkdir -p "$work/dev/release"
@@ -78,14 +92,15 @@ signers() {
   } >"$work/dev/release/allowed_signers"
 }
 push() { dev push -q origin "${1:-main}" 2>/dev/null; }
-remote() { git -C "$work/origin.git" rev-parse -q --verify "refs/heads/$1" || true; }
+remote() { o rev-parse -q --verify "refs/heads/$1" || true; }
+top_heading() { o show "$1:release/notes.md" | grep -m1 '^## '; }
 
 # The same check as a box: verify-commit against <rev>'s release/allowed_signers.
 box_verifies() {
   local rev=$1 against=$2
-  git -C "$work/origin.git" show "$against:release/allowed_signers" \
+  o show "$against:release/allowed_signers" \
     | grep -v '^#' | sed 's/^\([^ ]*\) /\1 namespaces="git" /' >"$work/box.signers"
-  git -C "$work/origin.git" -c gpg.ssh.allowedSignersFile="$work/box.signers" verify-commit "$rev" 2>/dev/null
+  o -c gpg.ssh.allowedSignersFile="$work/box.signers" verify-commit "$rev" 2>/dev/null
 }
 
 # PROMOTE_TEST_LOG=<file>: keep every promote run's output there.
@@ -117,13 +132,19 @@ expect_refused() {
   }
 }
 
-# --- main with the first release ----------------------------------------------------------
+# --- main, before the first release --------------------------------------------------------
 echo '{"nodes":{"nixpkgs":{"locked":{"rev":"1111111111111111111111111111111111111111"}},"root":{}},"root":"root","version":7}' >"$work/dev/flake.lock"
-echo one >"$work/dev/file"
+signers k1
+mkdir -p "$work/dev/release"
+echo 0.6.0 >"$work/dev/release/version"
+printf '# Release notes\n\n## 0.6.0\n\nNamed already.\n' >"$work/dev/release/notes.md"
 dev add -A
 dev commit -q -m "Initial"
-signers k1
-release 0.6.0
+push
+expect_refused "not '## Unreleased'" beta --bootstrap --key "$work/k1" --security none
+pass "notes without an Unreleased section on top: refused"
+printf '# Release notes\n\n' >"$work/dev/release/notes.md"
+change "Everything so far"
 push
 main1=$(dev rev-parse HEAD)
 
@@ -144,11 +165,13 @@ echo success >"$work/ci"
 
 expect_refused "needs --bootstrap" beta --key "$work/k1" --security none
 pass "first beta without --bootstrap: refused"
+expect_refused "only apply to promote stable" beta --bootstrap --key "$work/k1" --security none --bump minor
+pass "--bump on beta: refused"
 
 expect_ok beta --bootstrap --key "$work/k1" --dry-run
 [ -z "$(remote beta)" ] || die "dry run created beta"
 grep -q "would run: git push" "$work/out" || die "dry run did not show the push"
-grep -q "HinterOS 0.6.0" "$work/out" || die "dry run did not show the message"
+grep -q "HinterOS 0.6.0 beta" "$work/out" || die "dry run did not show the message"
 pass "dry run: shows the commit and the push, creates nothing"
 
 expect_refused "is not in the allowed_signers" beta --bootstrap --key "$work/bad" --security none
@@ -157,29 +180,23 @@ pass "bootstrap with a key the new tree does not list: refused before signing"
 expect_ok beta --bootstrap --key "$work/k1" --security none
 beta1=$(remote beta)
 [ -n "$beta1" ] || die "no beta after bootstrap"
-[ "$(git -C "$work/origin.git" rev-parse "$beta1^{tree}")" = "$(dev rev-parse "$main1^{tree}")" ] || die "bootstrap tree differs from main"
-[ "$(git -C "$work/origin.git" rev-list --parents -n1 "$beta1")" = "$beta1 $main1" ] || die "bootstrap parents are not just main"
-[ "$(git -C "$work/origin.git" log -1 --format=%s "$beta1")" = "HinterOS 0.6.0" ] || die "bad subject"
-git -C "$work/origin.git" log -1 --format=%B "$beta1" | grep -q "Changes in 0.6.0" || die "notes not in the message"
-! git -C "$work/origin.git" log -1 --format=%B "$beta1" | grep -q "^Security:" || die "Security: none must add no trailer"
+[ "$(o rev-parse "$beta1^{tree}")" = "$(dev rev-parse "$main1^{tree}")" ] || die "bootstrap tree differs from main"
+[ "$(o rev-list --parents -n1 "$beta1")" = "$beta1 $main1" ] || die "bootstrap parents are not just main"
+[ "$(o log -1 --format=%s "$beta1")" = "HinterOS 0.6.0 beta" ] || die "bad subject"
+o log -1 --format=%B "$beta1" | grep -q "Everything so far" || die "notes not in the message"
+! o log -1 --format=%B "$beta1" | grep -q "^Security:" || die "Security: none must add no trailer"
+grep -q "beta is HinterOS 0.6.0.${beta1:0:7} beta" "$work/out" || die "the beta's name is not shown"
 box_verifies "$beta1" "$beta1" || die "bootstrap commit does not verify against its own signers"
-pass "bootstrap: beta = signed commit, tree = main, parent = main, verifies against its own signers"
+pass "bootstrap: 'HinterOS 0.6.0 beta', tree = main, parent = main, shown as 0.6.0.<hash> beta, verifies"
 
 expect_refused "already exists" beta --bootstrap --key "$work/k1" --security none
 pass "--bootstrap when beta exists: refused"
 
-# --- second beta -----------------------------------------------------------------------------
-echo two >"$work/dev/file"
-dev commit -q -am "A change without a version bump"
-push
-expect_refused "is the current beta's" beta --key "$work/k1" --security none
-pass "reused version: refused"
-
-echo three >"$work/dev/file"
-dev commit -q -am "Fix a browser hole" -m "Security: medium"
+# --- second beta: no version bump needed ---------------------------------------------------------
+change "Fix a browser hole" "Security: medium"
 signers k1 k2
 echo '{"nodes":{"nixpkgs":{"locked":{"rev":"2222222222222222222222222222222222222222"}},"root":{}},"root":"root","version":7}' >"$work/dev/flake.lock"
-release 0.7.0
+dev commit -q -am "Add k2, bump nixpkgs"
 push
 main2=$(dev rev-parse HEAD)
 expect_refused "not interactive: pass --security" beta --key "$work/k1"
@@ -188,81 +205,149 @@ expect_ok beta --key "$work/k1" --security medium
 beta2=$(remote beta)
 grep -q "Security: medium in" "$work/out" || die "trailer not listed"
 grep -q "nixpkgs: 111111111111 -> 222222222222" "$work/out" || die "nixpkgs change not shown"
-[ "$(git -C "$work/origin.git" rev-list --parents -n1 "$beta2")" = "$beta2 $beta1 $main2" ] || die "parents are not beta, main"
-[ "$(git -C "$work/origin.git" rev-parse "$beta2^{tree}")" = "$(dev rev-parse "$main2^{tree}")" ] || die "tree differs from main"
-git -C "$work/origin.git" merge-base --is-ancestor "$beta1" "$beta2" || die "not a fast-forward"
-git -C "$work/origin.git" log -1 --format=%B "$beta2" | grep -qx "Security: medium" || die "no Security trailer"
-box_verifies "$beta2" "$beta1" || die "beta 0.7.0 does not verify against the old tip's signers"
-pass "beta 0.7.0: fast-forward, tree = main, parents beta+main, trailer, verifies against the old tip's signers"
+grep -q "Fix a browser hole" "$work/out" || die "the commits are not listed"
+[ "$(o rev-list --parents -n1 "$beta2")" = "$beta2 $beta1 $main2" ] || die "parents are not beta, main"
+[ "$(o rev-parse "$beta2^{tree}")" = "$(dev rev-parse "$main2^{tree}")" ] || die "tree differs from main"
+[ "$(o log -1 --format=%s "$beta2")" = "HinterOS 0.6.0 beta" ] || die "the second beta has another version"
+o log -1 --format=%B "$beta2" | grep -qx "Security: medium" || die "no Security trailer"
+box_verifies "$beta2" "$beta1" || die "beta does not verify against the old tip's signers"
+pass "second beta, same version: fast-forward, tree = main, parents beta+main, trailer, verifies"
 
 # A key only the new tree lists is not enough; nor is a key that the script cannot pre-check.
-echo four >"$work/dev/file"
-dev commit -q -am "More"
-release 0.8.0
+change "More"
 push
-main3=$(dev rev-parse HEAD)
 expect_refused "is not in the allowed_signers" beta --key "$work/bad" --security none
 expect_refused "does not verify against these signers" beta --key "$work/nopub" --security none
 [ "$(remote beta)" = "$beta2" ] || die "beta moved after a refused promotion"
 pass "a key the old tip does not list: refused (pre-check, and at verification)"
 
-# --- stable --------------------------------------------------------------------------------
-expect_refused "not a first-parent commit of origin/beta" stable --rev "$main2" --yes
+# --- the first stable ----------------------------------------------------------------------
+expect_refused "not a first-parent commit of origin/beta" stable --rev "$main2" --bump keep --yes
 pass "stable from a main commit (not a release commit): refused"
-expect_refused "needs --yes" stable --rev "$beta1"
+expect_refused "pass --bump or --version" stable --rev "$beta1" --yes --key "$work/k1"
+pass "stable without a tty and without --bump/--version: refused"
+expect_refused "or --version, not both" stable --rev "$beta1" --bump minor --version 0.9.0
+pass "--bump and --version together: refused"
+expect_refused "needs --yes" stable --rev "$beta1" --bump keep --key "$work/k1"
 pass "stable without the dogfood confirmation: refused"
-expect_refused "only for Security: high or critical" stable --rev "$beta2" --expedite --yes
+expect_refused "only for Security: high or critical" stable --rev "$beta2" --expedite --bump keep --yes
 pass "--expedite on a medium release: refused"
-expect_ok stable --rev "$beta1" --yes
-[ "$(remote stable)" = "$beta1" ] || die "stable is not at the first beta release"
+expect_refused "is lower than 0.6.0" stable --rev "$beta1" --version 0.5.9 --yes --key "$work/k1"
+pass "a version below the beta's: refused"
+
+expect_ok stable --rev "$beta1" --dry-run --key "$work/k1"
+grep -q "1) keep   0.6.0" "$work/out" || die "the menu does not offer keep"
+grep -q "3) minor  0.7.0" "$work/out" || die "the menu does not offer minor"
+grep -q "5) other" "$work/out" || die "the menu does not offer other"
+grep -q "using 0.6.0" "$work/out" || die "the dry run does not default to keep"
+grep -q "Everything so far" "$work/out" || die "the release notes are not shown"
+[ -z "$(remote stable)" ] || die "dry run created stable"
+pass "dry run: the version menu (keep, patch, minor, major, other) and the notes, creates nothing"
+
+expect_ok stable --rev "$beta1" --bump keep --yes --key "$work/k1"
+stable1=$(remote stable)
+[ "$(o rev-list --parents -n1 "$stable1")" = "$stable1 $beta1" ] || die "first stable's parent is not the beta release"
+[ "$(o show "$stable1:release/version")" = 0.6.0 ] || die "first stable's version"
+[ "$(top_heading "$stable1")" = "## 0.6.0" ] || die "first stable's notes heading: $(top_heading "$stable1")"
+[ "$(o log -1 --format=%s "$stable1")" = "HinterOS 0.6.0" ] || die "first stable's subject"
+[ -z "$(o diff --name-only "$beta1" "$stable1" | grep -vx -e release/version -e release/notes.md)" ] \
+  || die "first stable changes more than the version"
 grep -q "OWN release/allowed_signers" "$work/out" || die "first stable did not say what it verified against"
-pass "first stable: created at the beta release, verified against its own signers"
-expect_ok stable --yes
-[ "$(remote stable)" = "$beta2" ] || die "stable did not move to the beta tip"
-pass "stable fast-forwards to the latest beta release"
-expect_refused "already" stable --yes
-pass "stable already at the target: refused"
+box_verifies "$stable1" "$beta1" || die "first stable does not verify"
+pass "first stable, kept at 0.6.0: signed on top of the beta release, notes named, nothing else changed"
+
+expect_refused "already contains" stable --rev "$beta1" --bump patch --yes --key "$work/k1"
+pass "stable at that beta release again: refused"
+expect_refused "is not an ancestor" stable --bump minor --yes --key "$work/k1"
+pass "stable from a beta that does not contain the last stable release: refused"
+expect_refused "merge stable" beta --key "$work/k1" --security none
+pass "beta before stable is merged into main: refused"
+
+# --- merge stable into main, then the next stable --------------------------------------------
+dev fetch -q origin
+dev merge -q -X theirs --no-edit origin/stable
+change "After 0.6.0"
+set_version 0.7.0
+push
+expect_refused "main carries the latest stable's version" beta --key "$work/k1" --security none
+pass "beta with a hand-bumped release/version: refused"
+set_version 0.6.0
+push
+main3=$(dev rev-parse HEAD)
+expect_ok beta --key "$work/k1" --security none
+beta3=$(remote beta)
+o merge-base --is-ancestor "$stable1" "$beta3" || die "stable is not an ancestor of beta"
+[ "$(o log -1 --format=%s "$beta3")" = "HinterOS 0.6.0 beta" ] || die "beta 3 subject"
+[ "$(o rev-parse "$beta3^{tree}")" = "$(dev rev-parse "$main3^{tree}")" ] || die "tree differs"
+pass "after merging stable into main: beta 0.6.0.<hash>, stable is an ancestor"
+
+expect_refused "already released on stable" stable --bump keep --yes --key "$work/k1"
+pass "--bump keep after the first stable: refused"
+expect_refused "not greater than stable's 0.6.0" stable --version 0.6.0 --yes --key "$work/k1"
+pass "the same version again: refused"
+expect_ok stable --dry-run --key "$work/k1"
+grep -q "1) patch  0.6.1" "$work/out" || die "the menu does not offer patch first"
+! grep -q "keep" "$work/out" || die "the menu offers keep after the first stable"
+grep -q "using 0.7.0" "$work/out" || die "the dry run does not default to minor"
+grep -q "After 0.6.0" "$work/out" || die "the changes since stable are not listed"
+pass "dry run after the first stable: patch/minor/major/other, minor by default"
+expect_ok stable --bump minor --yes --key "$work/k1"
+stable2=$(remote stable)
+[ "$(o rev-list --parents -n1 "$stable2")" = "$stable2 $beta3" ] || die "stable 0.7.0's parent"
+[ "$(o show "$stable2:release/version")" = 0.7.0 ] || die "stable 0.7.0's version"
+[ "$(top_heading "$stable2")" = "## 0.7.0" ] || die "stable 0.7.0's notes heading"
+[ "$(o log -1 --format=%s "$stable2")" = "HinterOS 0.7.0" ] || die "stable 0.7.0's subject"
+o log -1 --format=%B "$stable2" | grep -q "After 0.6.0" || die "stable 0.7.0's notes"
+o merge-base --is-ancestor "$stable1" "$stable2" || die "not a fast-forward"
+box_verifies "$stable2" "$stable1" || die "stable 0.7.0 does not verify against the old stable's signers"
+pass "stable --bump minor: 0.6.0 -> 0.7.0, fast-forward, verifies against the old stable's signers"
 
 # --- hotfix --------------------------------------------------------------------------------
 dev fetch -q origin
-dev checkout -q -b hotfix/bad "$beta2"
-release 0.8.0 "Security: high"
+dev checkout -q -b hotfix/bad "$stable2"
+change "Bad hotfix" "Security: high"
+set_version 0.7.1
 push hotfix/bad
-expect_refused "not a patch bump" hotfix hotfix/bad --key "$work/k1" --security high
-pass "hotfix with a minor bump: refused"
+expect_refused "leave it at 0.7.0" hotfix hotfix/bad --key "$work/k1" --security high --yes
+pass "hotfix that sets release/version itself: refused"
 
-dev checkout -q -b hotfix/fw "$beta2"
-echo patched >"$work/dev/file"
-dev commit -q -am "Firewall fix" -m "Security: high"
-release 0.7.1
+dev checkout -q -b hotfix/fw "$stable2"
+change "Firewall fix" "Security: high"
 push hotfix/fw
 hot=$(dev rev-parse HEAD)
-expect_refused "needs a Security severity" hotfix hotfix/fw --key "$work/k1" --security none
+expect_refused "needs a Security severity" hotfix hotfix/fw --key "$work/k1" --security none --yes
 pass "hotfix without a severity: refused"
-expect_ok hotfix hotfix/fw --key "$work/k2" --security high
-stable2=$(remote stable)
-[ "$(git -C "$work/origin.git" rev-list --parents -n1 "$stable2")" = "$stable2 $beta2" ] || die "hotfix parent is not stable"
-[ "$(git -C "$work/origin.git" rev-parse "$stable2^{tree}")" = "$(dev rev-parse "$hot^{tree}")" ] || die "hotfix tree differs"
-[ "$(git -C "$work/origin.git" log -1 --format=%s "$stable2")" = "HinterOS 0.7.1" ] || die "bad hotfix subject"
-box_verifies "$stable2" "$beta2" || die "hotfix does not verify against the old stable's signers"
-pass "hotfix: signed (with the key 0.7.0 added) on top of stable, tree = hotfix tip, verifies"
+expect_refused "needs --yes" hotfix hotfix/fw --key "$work/k2" --security high
+pass "hotfix without confirming the version: refused"
+expect_ok hotfix hotfix/fw --key "$work/k2" --security high --yes
+stable3=$(remote stable)
+grep -q "0.7.0 -> 0.7.1" "$work/out" || die "the hotfix version is not shown"
+[ "$(o rev-list --parents -n1 "$stable3")" = "$stable3 $stable2" ] || die "hotfix parent is not stable"
+[ "$(o show "$stable3:release/version")" = 0.7.1 ] || die "hotfix version"
+[ "$(top_heading "$stable3")" = "## 0.7.1" ] || die "hotfix notes heading"
+[ "$(o log -1 --format=%s "$stable3")" = "HinterOS 0.7.1" ] || die "bad hotfix subject"
+[ -z "$(o diff --name-only "$hot" "$stable3" | grep -vx -e release/version -e release/notes.md)" ] \
+  || die "hotfix tree differs beyond the version"
+box_verifies "$stable3" "$stable2" || die "hotfix does not verify against the old stable's signers"
+pass "hotfix: 0.7.1, signed (with the key added later) on top of stable, verifies"
 
-expect_refused "is not an ancestor" stable --yes
-pass "stable while the hotfix is not on beta: refused"
+expect_refused "already contains" stable --bump patch --yes --key "$work/k1"
+pass "stable again after the hotfix (no new beta yet): refused"
 expect_refused "merge stable" beta --key "$work/k1" --security none
 pass "beta while the hotfix is not on main: refused"
 
 dev checkout -q main
 dev fetch -q origin
-dev merge -q -X ours --no-edit origin/stable
+dev merge -q -X theirs --no-edit origin/stable
+change "After 0.7.1"
 push
 main4=$(dev rev-parse HEAD)
 expect_ok beta --key "$work/k1" --security none
-beta3=$(remote beta)
-[ "$(git -C "$work/origin.git" rev-parse "$beta3^{tree}")" = "$(dev rev-parse "$main4^{tree}")" ] || die "tree differs"
-git -C "$work/origin.git" merge-base --is-ancestor "$stable2" "$beta3" || die "stable is not an ancestor of beta"
-box_verifies "$beta3" "$beta2" || die "beta 0.8.0 does not verify"
-pass "after merging stable into main: beta 0.8.0, stable is an ancestor again"
-[ "$main3" != "$main4" ]
+beta4=$(remote beta)
+[ "$(o rev-parse "$beta4^{tree}")" = "$(dev rev-parse "$main4^{tree}")" ] || die "tree differs"
+[ "$(o log -1 --format=%s "$beta4")" = "HinterOS 0.7.1 beta" ] || die "beta after the hotfix"
+o merge-base --is-ancestor "$stable3" "$beta4" || die "stable is not an ancestor of beta"
+box_verifies "$beta4" "$beta3" || die "beta 0.7.1.<hash> does not verify"
+pass "after merging stable into main: beta 0.7.1.<hash>, stable is an ancestor again"
 
 echo "all $n promote tests passed"
