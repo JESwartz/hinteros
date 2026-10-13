@@ -151,7 +151,7 @@ r = c.call("hello", {"api_version": "0.5", "client": {"name": "x", "version": "0
 print("hello with an extra field ->", "error" if "error" in r else "accepted, ignored")
 
 # Methods that do not exist (including ones the design keeps out of the API, and path-ish names).
-for method in ["ssh.keys.add", "profiles.create", "exec", "system.exec", "", "../x",
+for method in ["ssh.keys.add", "profiles.exec", "exec", "system.exec", "", "../x",
                "rebuild\n", "__proto__", "power", "system.power", "update.apply ", "settings.set/x"]:
     refused(method, {}, code=NOT_FOUND_METHOD)
 
