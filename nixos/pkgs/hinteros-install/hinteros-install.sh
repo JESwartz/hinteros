@@ -2,6 +2,14 @@
 # hinteros-install: installs HinterOS from the installer ISO according to a JSON plan.
 #
 #   hinteros-install --plan plan.json [--validate-only]
+#   hinteros-install --check-newer [--channel stable|beta]
+#
+# --check-newer (online): is the channel's tip a newer HinterOS than this installer's revision,
+# verified as a box verifies an update (an SSH signature by a key in this revision's
+# release/allowed_signers, and a fast-forward from this revision)? Prints one JSON object,
+#   {"channel":"stable","iso":{"rev":...,"version":...},"newer":{"rev","version","date","signer"}|null}
+# or one error line (below) and exits non-zero. A plan's optional `rev` installs that newer
+# revision instead of this installer's (online only; verified again before anything is touched).
 #
 # Two stages. The SYSTEM stage installs HinterOS (state.json schema 2: one spare account, p1 =
 # hinteros, no profile, the box features the picked apps need), offline from this medium's store
@@ -32,6 +40,9 @@ CATALOG_INDEX=@catalogIndex@
 STATE_VERSION=@stateVersion@
 REPO_URL=@repoUrl@
 ISO_REV=@isoRev@
+ISO_VERSION=@isoVersion@
+# Keys a newer channel tip must be signed by (ssh-keygen allowed_signers, namespace git).
+ALLOWED_SIGNERS=@allowedSigners@
 # The channel a plan without one gets (hinteros.installer.channel).
 DEFAULT_CHANNEL=@defaultChannel@
 LOG=${HINTEROS_INSTALL_LOG:-/var/log/hinteros-install.log}
@@ -40,6 +51,8 @@ TARGET_LINK=/dev/hinteros-target
 MIN_DISK_GIB=16
 # Test hook: the command that writes the hardware report (VM tests feed a fixture).
 FACTER=${HINTEROS_INSTALL_FACTER:-nixos-facter}
+# Test hook: the URL whose answer means "online" (VM tests have no network; curl reads file://).
+ONLINE_PROBE=${HINTEROS_INSTALL_ONLINE_PROBE:-https://cache.nixos.org/nix-cache-info}
 
 # Progress goes to the original stdout; anything a tool prints to stdout is moved to stderr.
 exec 3>&1 1>&2
@@ -110,14 +123,164 @@ run() {
   fi
 }
 
+# ---------------------------------------------------------------------------------------------
+# A newer HinterOS on the channel: fetch the channel's tip from REPO_URL and verify it as a box
+# verifies an update (hinteros-system's update.rs): an SSH signature by a key in this installer
+# revision's allowed signers, and a fast-forward from ISO_REV. Only commits and the tip's
+# release/version are downloaded (a partial clone), every git step has a time limit.
+# ---------------------------------------------------------------------------------------------
+SHORT_REV=12 # as update.rs: a tip without a readable release/version is named by its short rev
+repo_scheme=${REPO_URL%%://*}
+chk_dir=
+tmp_dirs=()
+# shellcheck disable=SC2329 # the EXIT trap
+cleanup_tmp() { [ "${#tmp_dirs[@]}" -eq 0 ] || rm -rf "${tmp_dirs[@]}"; }
+trap cleanup_tmp EXIT
+# Results of check_channel: the tip, and the newer release (empty: none newer).
+TIP_REV=
+NEWER_REV=
+NEWER_VERSION=
+NEWER_DATE=0
+NEWER_SIGNER=
+
+# The steps that talk to the repo end within CHECK_BUDGET seconds together.
+CHECK_BUDGET=120
+chk_deadline=0
+
+# lgit SECONDS ARGS...: git against chk_dir with no user or system config, only the repo's
+# transport allowed, never prompting, killed after SECONDS (exit 124). stdout is the caller's.
+# For local steps (no fetching of missing objects either); cgit for those that may download.
+lgit() {
+  local t=$1
+  shift
+  echo "+ git $*" >>"$LOG"
+  timeout -k 5 "$t" env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    GIT_ASKPASS=false SSH_ASKPASS=false LC_ALL=C GIT_NO_LAZY_FETCH="${no_lazy_fetch:-1}" \
+    SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}" \
+    git -c protocol.allow=never -c "protocol.$repo_scheme.allow=always" \
+    -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 -c core.askPass=false \
+    --git-dir "$chk_dir" "$@" </dev/null
+}
+# cgit SECONDS ARGS...: lgit that may fetch (also missing objects of the partial clone on demand),
+# killed at the check's deadline too.
+cgit() {
+  local t=$1 left=$((chk_deadline - SECONDS))
+  shift
+  [ "$left" -gt 0 ] || return 124
+  [ "$t" -le "$left" ] || t=$left
+  no_lazy_fetch=0 lgit "$t" "$@"
+}
+
+# git_failed RC EXIT WHAT: a git step that could not reach the repo (or took too long).
+git_failed() {
+  if [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; then
+    fail "$2" timeout "$3: no answer from $REPO_URL in time; check the network connection"
+  fi
+  fail "$2" repo-unreachable "$3: cannot reach $REPO_URL (exit $1); check the network connection"
+}
+
+# The release version in a release/version file, as update.rs parses it: its only non-empty
+# line, MAJOR.MINOR.PATCH with an optional -suffix, at most 32 characters; else nothing.
+parse_version() {
+  local lines
+  lines=$(printf '%s\n' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | { grep -v '^$' || true; })
+  [ "$(grep -c . <<<"$lines" || true)" -eq 1 ] || return 0
+  if [ "${#lines}" -le 32 ] && [[ $lines =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    printf '%s' "$lines"
+  fi
+}
+
+# check_channel CHANNEL EXIT: sets TIP_REV and, if the tip is a verified newer release, NEWER_*.
+# A tip that is ISO_REV or older than it is not newer. Every failure is an error line and exit
+# EXIT (2 during plan validation: nothing was touched).
+check_channel() {
+  local ch=$1 ex=$2 branch=$1 out rc tip raw size ver
+  TIP_REV=
+  NEWER_REV=
+  if ! [[ $ISO_REV =~ ^[0-9a-f]{40}$ ]] || [ "$ISO_REV" = 0000000000000000000000000000000000000000 ]; then
+    fail 2 iso-rev-unknown "this installer was built from an uncommitted tree and knows no revision to compare with"
+  fi
+  chk_deadline=$((SECONDS + CHECK_BUDGET))
+  chk_dir=$(mktemp -d)
+  tmp_dirs+=("$chk_dir")
+  chk_dir=$chk_dir/repo.git
+  env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git init -q --bare "$chk_dir" >>"$LOG" 2>&1
+  lgit 10 config remote.origin.url "$REPO_URL"
+
+  rc=0
+  out=$(cgit 30 ls-remote origin "refs/heads/$branch" 2>>"$LOG") || rc=$?
+  [ "$rc" -eq 0 ] || git_failed "$rc" "$ex" "Checking the $ch channel"
+  tip=$(printf '%s\n' "$out" | awk -v r="refs/heads/$branch" '$2 == r {print $1}')
+  [[ $tip =~ ^[0-9a-f]{40}$ ]] || fail "$ex" channel-missing "$REPO_URL has no $ch channel (branch $branch)"
+  TIP_REV=$tip
+  [ "$tip" != "$ISO_REV" ] || return 0
+
+  # Commits and trees only; the one blob read below (release/version) is fetched on demand.
+  rc=0
+  cgit 90 fetch -q --no-tags --filter=blob:none origin "+refs/heads/$branch:refs/remotes/origin/$branch" \
+    >>"$LOG" 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || git_failed "$rc" "$ex" "Downloading the $ch channel"
+  tip=$(lgit 10 rev-parse -q --verify "refs/remotes/origin/$branch^{commit}" 2>>"$LOG") \
+    || fail "$ex" repo-unreachable "the $ch channel could not be read from $REPO_URL"
+  TIP_REV=$tip
+  [ "$tip" != "$ISO_REV" ] || return 0
+  # Older than this installer (the channel was moved back): nothing newer. This revision is not
+  # in the fetched history then; the partial clone asks the repo for it.
+  if cgit 20 cat-file -e "$ISO_REV^{commit}" 2>>"$LOG" \
+    && cgit 60 merge-base --is-ancestor "$tip" "$ISO_REV" 2>>"$LOG"; then
+    return 0
+  fi
+
+  # The signature (update.rs Git::verify): present, SSH, by an allowed principal.
+  raw=$(lgit 10 cat-file commit "$tip" 2>>"$LOG") || fail "$ex" repo-unreachable "cannot read the $ch channel's tip $tip"
+  grep -q '^gpgsig ' <<<"$raw" \
+    || fail "$ex" unsigned "the $ch channel's tip $tip is not signed; it is not offered"
+  grep -q 'BEGIN SSH SIGNATURE' <<<"$raw" \
+    || fail "$ex" unknown-signer "the $ch channel's tip $tip is not signed with an SSH key this installer trusts"
+  rc=0
+  out=$(lgit 30 -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen \
+    -c "gpg.ssh.allowedSignersFile=$ALLOWED_SIGNERS" verify-commit --raw "$tip" 2>&1) || rc=$?
+  printf '%s\n' "$out" >>"$LOG"
+  NEWER_SIGNER=$(sed -n '/Good "git" signature for /{s/.*Good "git" signature for \(.*\) with .* key .*/\1/p;q;}' <<<"$out")
+  if [ "$rc" -ne 0 ] || [ -z "$NEWER_SIGNER" ]; then
+    fail "$ex" unknown-signer "the $ch channel's tip $tip is not signed by a key this installer trusts"
+  fi
+  # Fast-forward only: the tip descends from this installer's revision.
+  if ! { lgit 10 cat-file -e "$ISO_REV^{commit}" 2>>"$LOG" \
+    && lgit 60 merge-base --is-ancestor "$ISO_REV" "$tip" 2>>"$LOG"; }; then
+    fail "$ex" not-fast-forward "the $ch channel's tip $tip does not descend from this installer's revision $ISO_REV"
+  fi
+
+  # release/version (on demand from the partial clone; if the server will not hand out single
+  # objects, the whole branch once).
+  ver=
+  if ! size=$(cgit 30 cat-file -s "$tip:release/version" 2>>"$LOG"); then
+    cgit 60 fetch -q --no-tags --refetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" \
+      >>"$LOG" 2>&1 || true
+    size=$(cgit 30 cat-file -s "$tip:release/version" 2>>"$LOG") || size=
+  fi
+  if [[ $size =~ ^[0-9]+$ ]] && [ "$size" -le 256 ]; then
+    ver=$(parse_version "$(cgit 30 cat-file blob "$tip:release/version" 2>>"$LOG" || true)")
+  fi
+  NEWER_VERSION=${ver:-${tip:0:SHORT_REV}}
+  NEWER_DATE=$(sed -n '/^$/q; s/^committer .* \([0-9][0-9]*\) [-+][0-9]*$/\1/p' <<<"$raw")
+  NEWER_DATE=${NEWER_DATE:-0}
+  NEWER_REV=$tip
+}
+
 usage() {
   cat >&2 <<'USAGE'
 usage: hinteros-install --plan FILE|- [--validate-only | --state-dir DIR]
+       hinteros-install --check-newer [--channel stable|beta]
 
 Installs HinterOS on the disk named in the plan, erasing it. The plan is a JSON object, see
 the README ("Installer"). With --validate-only the plan and the machine are checked and
 nothing is touched. With --state-dir the plan is checked and the state.json files it would
 produce are written to DIR (for tests).
+
+--check-newer (needs the network) prints one JSON object: this installer's revision and
+version and, if the channel (default: the installer's) has a newer, correctly signed release
+that follows it, that release ("newer"; else null). A plan's "rev" installs it.
 USAGE
   exit 2
 }
@@ -125,11 +288,22 @@ USAGE
 plan_file=
 validate_only=0
 state_dir=
+check_newer=0
+check_ch=$DEFAULT_CHANNEL
 while [ $# -gt 0 ]; do
   case $1 in
     --plan)
       [ $# -ge 2 ] || usage
       plan_file=$2
+      shift 2
+      ;;
+    --check-newer)
+      check_newer=1
+      shift
+      ;;
+    --channel)
+      [ $# -ge 2 ] || usage
+      check_ch=$2
       shift 2
       ;;
     --validate-only)
@@ -145,11 +319,35 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
-[ -n "$plan_file" ] || usage
+if [ "$check_newer" -eq 1 ]; then
+  [ -z "$plan_file" ] && [ "$validate_only" -eq 0 ] && [ -z "$state_dir" ] || usage
+else
+  [ -n "$plan_file" ] || usage
+fi
 
+if [ "$check_newer" -eq 1 ] && ! { mkdir -p "$(dirname "$LOG")" && : >>"$LOG"; } 2>/dev/null; then
+  LOG=$(mktemp) # the check does not need root; without access to the install log it logs aside
+fi
 mkdir -p "$(dirname "$LOG")"
 : >>"$LOG"
 chmod 0600 "$LOG"
+
+if [ "$check_newer" -eq 1 ]; then
+  phase=check
+  stage=check
+  echo "=== hinteros-install --check-newer --channel $check_ch ($(date -u +%Y-%m-%dT%H:%M:%SZ))" >>"$LOG"
+  case $check_ch in
+    stable | beta) ;;
+    *) fail 2 channel-invalid "channel must be stable or beta" ;;
+  esac
+  check_channel "$check_ch" 1
+  jq -nc --arg ch "$check_ch" --arg irev "$ISO_REV" --arg iver "$ISO_VERSION" --arg rev "$NEWER_REV" \
+    --arg ver "$NEWER_VERSION" --argjson date "$NEWER_DATE" --arg signer "$NEWER_SIGNER" \
+    '{channel: $ch, iso: {rev: $irev, version: $iver},
+      newer: (if $rev == "" then null else {rev: $rev, version: $ver, date: $date, signer: $signer} end)}' >&3
+  echo "channel $check_ch: tip ${TIP_REV:-?}, newer: ${NEWER_REV:-none}" >>"$LOG"
+  exit 0
+fi
 
 [ -n "$state_dir" ] || [ "$(id -u)" -eq 0 ] || fail 2 not-root "hinteros-install must run as root"
 
@@ -176,7 +374,8 @@ PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   network: (.network // "auto"),
   apps: (.apps // []),
   acceptedTerms: (.acceptedTerms // {}),
-  unknown: (keys - ["disk", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms"])
+  rev: (.rev // null),
+  unknown: (keys - ["disk", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev"])
 }')
 
 # Plan-level problems, all at once: [{field, code, message}].
@@ -217,6 +416,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
         then bad("ssh.enable"; "ssh-invalid"; "ssh.enable must be true or false") else empty end),
       (if (.channel | IN("stable", "beta") | not)
         then bad("channel"; "channel-invalid"; "channel must be stable or beta") else empty end),
+      (if .rev != null and ((.rev | type) != "string" or (.rev | test("^[0-9a-f]{40}$") | not))
+        then bad("rev"; "rev-invalid"; "rev must be a full 40-character commit id, as --check-newer reports it") else empty end),
       (if .base != "unstable"
         then bad("base"; "base-invalid"; "base must be unstable (the only base there is)") else empty end),
       (if (.acceptedTerms | type) != "object" or any(.acceptedTerms[]; type != "string")
@@ -271,6 +472,14 @@ base=$(plan .base)
 network_pref=$(plan .network)
 mapfile -t apps < <(plan '.apps[]')
 wifi_ssid=$(plan '.wifi.ssid // empty')
+# The revision to install: this installer's (default), or a newer one --check-newer offered.
+plan_rev=$(plan '.rev // empty')
+newer=0
+if [ -n "$plan_rev" ] && [ "$plan_rev" != "$ISO_REV" ]; then
+  newer=1
+fi
+install_rev=$ISO_REV
+install_version=$ISO_VERSION
 
 # state.json (schema 2, profiles.md "Installer"): one spare account (p1 = hinteros) and no
 # profile (first-boot mode creates the admin profile), no apps (each profile has its own; the
@@ -293,9 +502,12 @@ write_state() {
   chmod 0644 "$dir/state.json"
 }
 json_array() { jq -nc '$ARGS.positional' --args "$@"; }
-# The box features of the picked apps (catalog index v3 `box`), sorted.
-requirements=$(json_array "${apps[@]}" | jq -c --slurpfile idx "$CATALOG_INDEX" \
-  '. as $a | [$idx[0].apps[] | select(.id as $i | $a | index($i)) | (.box // [])[]] | unique')
+# The box features of these apps (JSON array of ids; catalog index v3 `box`), sorted.
+app_requirements() {
+  jq -c --slurpfile idx "$CATALOG_INDEX" \
+    '. as $a | [$idx[0].apps[] | select(.id as $i | $a | index($i)) | (.box // [])[]] | unique' <<<"$1"
+}
+requirements=$(app_requirements "$(json_array "${apps[@]}")")
 # The starter set (apps.md "Starter set"): which apps new profiles and guests start with.
 write_starter() { # JSON array of app ids, [DIR]
   local dir=${2:-$MNT/var/lib/hinteros}
@@ -349,7 +561,7 @@ if [ "$network_pref" != offline ]; then
         || progress validate 2 "Could not connect to Wi-Fi \"$wifi_ssid\"" warn wifi-failed
     fi
   fi
-  if curl -fsS --max-time 8 -o /dev/null https://cache.nixos.org/nix-cache-info >>"$LOG" 2>&1; then
+  if curl -fsS --max-time 8 -o /dev/null "$ONLINE_PROBE" >>"$LOG" 2>&1; then
     online=1
   fi
 fi
@@ -400,11 +612,85 @@ if mountpoint -q "$MNT"; then
   esac
 fi
 
-progress validate 8 "Plan accepted: install on $disk ($((disk_bytes / 1024 / 1024 / 1024)) GiB), host name $hostname, apps: ${apps[*]:-none}"
+# A newer revision than this installer's: online only, and only the channel's verified tip (the
+# UI's word for it is not enough; the channel may also have moved on since it asked).
+if [ "$newer" -eq 1 ]; then
+  [ "$online" -eq 1 ] \
+    || fail 2 rev-needs-network "the newer HinterOS ($plan_rev) is not on this installer and needs a network connection; connect to a network or install the version on this installer"
+  progress validate 6 "Checking the newer HinterOS on the $channel channel"
+  check_channel "$channel" 2
+  if [ "$NEWER_REV" != "$plan_rev" ]; then
+    newest=${NEWER_REV:-$ISO_REV}
+    fail 2 rev-not-tip "$plan_rev is not the newest release on the $channel channel (that is $newest); check again"
+  fi
+  install_rev=$NEWER_REV
+  install_version=$NEWER_VERSION
+  progress validate 7 "HinterOS $install_version ($install_rev) on the $channel channel is signed by $NEWER_SIGNER and follows this installer's version"
+fi
+
+progress validate 8 "Plan accepted: install HinterOS $install_version on $disk ($((disk_bytes / 1024 / 1024 / 1024)) GiB), host name $hostname, apps: ${apps[*]:-none}"
 
 if [ "$validate_only" -eq 1 ]; then
   progress "done" 100 "Plan and machine are fine (validate only; nothing was touched)" info "" '{"failed_apps": []}'
   exit 0
+fi
+
+# ---------------------------------------------------------------------------------------------
+# 1b. A newer revision: download it and lock the device flake to it before the disk is touched,
+# and read its catalog (the apps stage installs that revision's apps, with its vendor terms).
+# ---------------------------------------------------------------------------------------------
+staged=
+# Apps of the plan the newer revision cannot install: id -> reason (warned in the apps stage).
+declare -A skip_apps=()
+if [ "$newer" -eq 1 ]; then
+  progress fetch 9 "Downloading HinterOS $install_version"
+  staged=$(mktemp -d)
+  tmp_dirs+=("$staged")
+  install -d "$staged/flake"
+  sed -e "s|%CHANNEL%|$channel|g" -e "s|%REPO%|$REPO_URL|g" -e "s|%EXTRA%||g" "$TEMPLATE" >"$staged/flake/flake.nix"
+  write_state "$staged/flake"
+  echo "+ nix flake lock --override-input hinteros git+$REPO_URL?ref=$channel&rev=$install_rev" >>"$LOG"
+  if ! timeout -k 10 1800 nix --extra-experimental-features 'nix-command flakes' flake lock \
+    --option substitute true --override-input hinteros "git+$REPO_URL?ref=$channel&rev=$install_rev" \
+    "path:$staged/flake" >>"$LOG" 2>&1 </dev/null; then
+    fail 1 fetch-failed "could not download HinterOS $install_version ($install_rev); nothing was touched; see $LOG"
+  fi
+  locked=$(jq -r '.nodes[.nodes[.root].inputs.hinteros].locked.rev // ""' "$staged/flake/flake.lock")
+  [ "$locked" = "$install_rev" ] \
+    || fail 1 fetch-failed "the downloaded HinterOS is locked at '$locked', not $install_rev; nothing was touched"
+  # That revision's catalog, in the shape of the Store index the rest of this script reads.
+  # shellcheck disable=SC2016 # Nix, not shell
+  catalog_apply='es: {
+    apps = map (id: let e = es.${id}; in {
+      inherit id;
+      box = e.box or [ ];
+      offered = (e.kind or "app") == "app" && e.status == "available" && (e.starter or null) != null;
+      terms = if (e.terms or null) == null then null else { inherit (e.terms) version title; };
+    }) (builtins.attrNames es);
+  }'
+  echo "+ nix eval (the catalog of $install_rev)" >>"$LOG"
+  if ! timeout -k 10 900 nix --extra-experimental-features 'nix-command flakes' eval --json \
+    --option substitute true --no-update-lock-file \
+    "path:$staged/flake#nixosConfigurations.hinteros.config.hinteros.catalog.entries" \
+    --apply "$catalog_apply" >"$staged/catalog.json" 2>>"$LOG" </dev/null; then
+    fail 1 fetch-failed "could not read the app catalog of HinterOS $install_version; nothing was touched; see $LOG"
+  fi
+  CATALOG_INDEX=$staged/catalog.json
+  # Picked apps that revision no longer offers, or whose vendor terms changed since the ones
+  # accepted on this installer: not installed (the Store asks again later).
+  while IFS=$'\t' read -r a why; do
+    [ -n "$a" ] && skip_apps[$a]=$why
+  done < <(json_array "${apps[@]}" | jq -r --slurpfile idx "$CATALOG_INDEX" \
+    --argjson acc "$(plan -c .acceptedTerms)" --arg v "$install_version" '
+    .[] as $a | ($idx[0].apps | map(select(.id == $a)) | first) as $e
+    | if $e == null or ($e.offered | not) then "\($a)\tHinterOS \($v) does not offer \($a) in the installer"
+      elif $e.terms != null and ($acc[$a] // null) != $e.terms.version then
+        "\($a)\tthe terms of \($a) changed in HinterOS \($v) (\($e.terms.title), version \($e.terms.version)); accept them in the Store to add it"
+      else empty end')
+  keep=()
+  for a in "${apps[@]}"; do [ -n "${skip_apps[$a]:-}" ] || keep+=("$a"); done
+  requirements=$(app_requirements "$(json_array "${keep[@]}")")
+  progress fetch 9 "HinterOS $install_version is downloaded"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -510,10 +796,15 @@ if [ ! -w /sys/firmware/efi/efivars ]; then
   progress config 29 "EFI variables are not writable here; the boot loader goes to the fallback path only" warn efivars-unavailable
 fi
 # The lock pins hinteros (and everything it locks) to the revision on this installer, so the
-# evaluation needs no network; `nix flake update hinteros` later moves it to the channel.
-jq --arg ref "$channel" \
-  '.nodes.hinteros.original.ref = $ref | .nodes.hinteros.locked.ref = "refs/heads/" + $ref' \
-  "$OFFLINE_LOCK" >"$cfg/flake.lock"
+# evaluation needs no network; `nix flake update hinteros` later moves it to the channel. A newer
+# revision: the lock made for it above (same inputs: flake.nix differs only in its modules).
+if [ "$newer" -eq 1 ]; then
+  install -m 0644 "$staged/flake/flake.lock" "$cfg/flake.lock"
+else
+  jq --arg ref "$channel" \
+    '.nodes.hinteros.original.ref = $ref | .nodes.hinteros.locked.ref = "refs/heads/" + $ref' \
+    "$OFFLINE_LOCK" >"$cfg/flake.lock"
+fi
 chmod 0644 "$cfg/flake.lock"
 chmod 0644 "$cfg"/facter.*  2>/dev/null || true
 
@@ -662,6 +953,16 @@ while :; do
     progress install 36 "Installing the boot loader failed; retrying without EFI variables" warn bootloader-retry
     continue
   fi
+  if [ "$newer" -eq 1 ]; then
+    # This installer does not carry the newer system, so there is no offline fallback; only the
+    # hardware report can be left out (the box applies it with its next rebuild).
+    if [ "$facter_ok" -eq 1 ] && [ ! -e "$cfg/facter.deferred" ]; then
+      : >"$cfg/facter.deferred"
+      progress install 36 "The install with the hardware report failed; retrying with generic hardware support" warn system-retry
+      continue
+    fi
+    break
+  fi
   if [ "$sys_online" -eq 1 ] || { [ "$facter_ok" -eq 1 ] && [ ! -e "$cfg/facter.deferred" ]; }; then
     # Online (or with the hardware report applied) something could not be fetched or built:
     # fall back to exactly the generic system that is on this medium.
@@ -722,11 +1023,17 @@ finish() { # leaves the run: flush, unmount, final line
   if ! umount -R "$MNT" >>"$LOG" 2>&1; then
     progress finalize 98 "Could not unmount $MNT cleanly; reboot after the disk activity stops" warn unmount-failed
   fi
-  msg="HinterOS is installed (installer revision $ISO_REV). Remove the installer medium and reboot."
-  if [ "${#failed_apps[@]}" -gt 0 ]; then
-    msg="HinterOS is installed, but these apps could not be installed: ${failed_apps[*]} (they can be added later from the Store). Remove the installer medium and reboot."
+  if [ "$newer" -eq 1 ]; then
+    msg="HinterOS $install_version is installed (revision $install_rev, downloaded from the $channel channel)."
+  else
+    msg="HinterOS $install_version is installed (revision $install_rev, from this installer)."
   fi
-  progress "done" 100 "$msg" info "" "{\"failed_apps\": $failed_json}"
+  if [ "${#failed_apps[@]}" -gt 0 ]; then
+    msg="$msg These apps could not be installed: ${failed_apps[*]} (they can be added later from the Store)."
+  fi
+  msg="$msg Remove the installer medium and reboot."
+  progress "done" 100 "$msg" info "" "$(jq -nc --argjson f "$failed_json" --arg rev "$install_rev" \
+    --arg v "$install_version" '{failed_apps: $f, rev: $rev, version: $v}')"
   exit 0
 }
 
@@ -797,6 +1104,11 @@ for a in "${apps[@]}"; do
   lo=$((76 + (n - 1) * 14 / apps_total))
   hi=$((76 + n * 14 / apps_total))
   step_pct=
+  if [ -n "${skip_apps[$a]:-}" ]; then
+    failed_apps+=("$a")
+    progress apps "$hi" "$a could not be installed: ${skip_apps[$a]}" warn app-failed
+    continue
+  fi
   progress apps "$lo" "Installing $a ($n of $apps_total)"
   if build_env "$(json_array "${good[@]}" "$a")" "$lo" "$hi"; then
     good+=("$a")

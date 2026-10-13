@@ -16,6 +16,8 @@
   diffutils,
   curl,
   jq,
+  git,
+  openssh,
   mkpasswd,
   networkmanager,
   nixos-install,
@@ -34,6 +36,11 @@
   stateVersion,
   repoUrl ? "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git",
   isoRev ? "unknown",
+  # The release version of that revision (its release/version), shown next to a newer one.
+  isoVersion ? "0.0.0",
+  # ssh-keygen allowed_signers file: the keys whose signature a newer channel tip must carry to be
+  # offered and installed (the ISO revision's release/allowed_signers, as every box checks it).
+  allowedSigners,
   # The channel of a plan that names none (hinteros.installer.channel).
   defaultChannel ? "stable",
 }:
@@ -50,6 +57,8 @@ let
       stateVersion
       repoUrl
       isoRev
+      isoVersion
+      allowedSigners
       defaultChannel
       ;
   };
@@ -83,6 +92,8 @@ stdenvNoCC.mkDerivation {
           diffutils
           curl
           jq
+          git
+          openssh
           mkpasswd
           networkmanager
           nixos-install
