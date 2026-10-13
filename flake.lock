@@ -112,11 +112,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791580838,
-        "narHash": "sha256-GsqdvZHLIUCMO8t/o21bH0VDELtqHNJCBpyREGKIGWQ=",
+        "lastModified": 1791921782,
+        "narHash": "sha256-PIbeeE6LBVC35urWOXhw11FMzD12J/yk+76EZoVVfP8=",
         "ref": "refs/heads/main",
-        "rev": "2d70f53da15748a7299698cf4b5d60d18f63bbb9",
-        "revCount": 114,
+        "rev": "aefc4e911a83c0d209b52cc5611f9855be0fd8e9",
+        "revCount": 117,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git"
       },

@@ -1,10 +1,25 @@
 # promote: move a HinterOS channel (hinteros-docs/design/distribution.md, "The release pipeline",
 # "Promote script checks"). Run by the owner on the dev machine:
 #
+#   nix run .#promote                [--dry-run] [--skip-ci] [--key <path>]
+#
+# asks for everything with numbered menus: it shows where main, beta and stable are, what can be
+# released where, which commit, the security severity, the version, the release notes (which can
+# be edited before signing), and always shows the finished commit for review before it is signed
+# and pushed. The same steps without questions, for scripts and tests:
+#
 #   nix run .#promote -- beta   [--rev <main commit>] [--bootstrap] [--security <sev>]
-#   nix run .#promote -- stable [--rev <beta release commit>] [--expedite]
+#   nix run .#promote -- stable [--rev <beta release commit>] [--expedite] [--bump <b> | --version <v>]
 #   nix run .#promote -- hotfix <branch> [--rev <commit>] [--security <sev>]
 #   common: [--dry-run] [--skip-ci] [--key <path>] [--yes]
+#
+# Versions: `release/version` on main is the latest stable release, and main's release notes keep
+# an `## Unreleased` section on top. A beta release keeps both: a box shows it as
+# `<version>.<commit> beta` (the release commit's short hash). `promote stable` shows what changed
+# and asks the promoter for the new version (patch, minor, major or typed; --bump/--version
+# without asking), then signs a commit on top of the beta release that only writes it to
+# release/version and renames `## Unreleased`; a box shows `<version> stable`. A hotfix is the
+# next patch version, written the same way.
 #
 # It works on a fresh bare clone of the remote in a temporary directory (never on the checkout it
 # is started from), prints every check it makes, signs the release commit with the release key
@@ -21,17 +36,20 @@
 
 usage() {
   cat <<'USAGE'
-usage: promote beta   [--rev <sha>] [--bootstrap] [--security <sev>] [options]
-       promote stable [--rev <sha>] [--expedite] [options]
+usage: promote [--dry-run] [--skip-ci] [--key <path>]   (menus ask for all values)
+       promote beta   [--rev <sha>] [--bootstrap] [--security <sev>] [options]
+       promote stable [--rev <sha>] [--expedite] [--bump <bump> | --version <v>] [options]
        promote hotfix <branch> [--rev <sha>] [--security <sev>] [options]
 options: --dry-run  --skip-ci  --key <path>  --yes
-  --dry-run    everything except signing and pushing
-  --skip-ci    do not require green Forgejo commit statuses (until the CI runner exists)
-  --key        signing key file (default $HINTEROS_RELEASE_KEY or ~/.ssh/hinteros/release_ed25519)
-  --security   none|low|medium|high|critical: the release's Security trailer (otherwise asked)
-  --bootstrap  first beta release: no previous beta tip to verify against
-  --expedite   stable: a high/critical release after an hour on box #2
-  --yes        answer the confirmation questions with yes (non-interactive use)
+  --bump       stable only: patch, minor, major, or keep (before the first stable release)
+  --version    stable only: the new version (MAJOR.MINOR.PATCH)
+  --dry-run    do all steps, but do not sign or push
+  --skip-ci    do not require a CI result (use until the CI runner exists)
+  --key        the signing key file (default: $HINTEROS_RELEASE_KEY or ~/.ssh/hinteros/release_ed25519)
+  --security   none, low, medium, high or critical (if not given, the script asks)
+  --bootstrap  the first beta release (the beta branch does not exist)
+  --expedite   stable only: a high or critical release after 1 hour on box #2
+  --yes        answer yes to all questions, also at the review (for scripts)
 USAGE
 }
 
@@ -45,7 +63,7 @@ info() { printf '  [info] %s\n' "$*"; }
 warn() { printf '  [WARN] %s\n' "$*"; }
 fail() {
   printf '  [FAIL] %s\n' "$*"
-  printf '\npromote: refused, nothing was signed or pushed.\n' >&2
+  printf '\npromote: stopped. Nothing is signed or pushed.\n' >&2
   exit 1
 }
 
@@ -61,13 +79,22 @@ expedite=0
 skip_ci=0
 assume_yes=0
 security=
+want_bump=
+want_version=
+interactive=0
+notes_edited=0
 key=${HINTEROS_RELEASE_KEY:-$HOME/.ssh/hinteros/release_ed25519}
 
-[ "$#" -gt 0 ] || {
-  usage >&2
-  exit 2
-}
-case "$1" in
+case "${1:-}" in
+  "" | --dry-run | --skip-ci | --key)
+    # No mode: the menus ask for everything.
+    [ -t 0 ] || {
+      usage >&2
+      die "no terminal for the menus. Give beta, stable or hotfix and the options."
+    }
+    interactive=1
+    set -- interactive "$@"
+    ;;
   beta | stable) mode=$1 ;;
   hotfix)
     mode=hotfix
@@ -102,6 +129,16 @@ while [ "$#" -gt 0 ]; do
       security=$2
       shift
       ;;
+    --bump)
+      [ "$#" -ge 2 ] || die "--bump needs patch, minor, major or keep"
+      want_bump=$2
+      shift
+      ;;
+    --version)
+      [ "$#" -ge 2 ] || die "--version needs a version"
+      want_version=$2
+      shift
+      ;;
     --dry-run) dry_run=1 ;;
     --bootstrap) bootstrap=1 ;;
     --expedite) expedite=1 ;;
@@ -115,8 +152,19 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+if [ "$interactive" = 1 ]; then
+  [ -z "$want_rev$security$want_bump$want_version" ] && [ "$bootstrap$expedite$assume_yes" = 000 ] \
+    || die "the menus ask for the commit, severity, version and confirmations: only --dry-run, --skip-ci and --key go with them"
+fi
 [ "$bootstrap" = 0 ] || [ "$mode" = beta ] || die "--bootstrap only applies to promote beta"
 [ "$expedite" = 0 ] || [ "$mode" = stable ] || die "--expedite only applies to promote stable"
+[ -z "$want_bump$want_version" ] || [ "$mode" = stable ] \
+  || die "--bump and --version only apply to promote stable (beta keeps the version, hotfix is a patch)"
+[ -z "$want_bump" ] || [ -z "$want_version" ] || die "--bump or --version, not both"
+case "$want_bump" in
+  "" | patch | minor | major | keep) ;;
+  *) die "--bump must be patch, minor, major or keep" ;;
+esac
 case "$security" in
   "" | none | low | medium | high | critical) ;;
   *) die "--security must be none, low, medium, high or critical" ;;
@@ -147,7 +195,7 @@ if [[ $url =~ ^https://([^/]+)/(.+)$ ]]; then
 fi
 
 if [ "$dry_run" = 1 ]; then
-  printf 'promote %s: DRY RUN (nothing is signed or pushed)\n' "$mode"
+  printf 'promote: DRY RUN. Nothing is signed or pushed.\n'
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/promote.XXXXXX")
@@ -155,11 +203,11 @@ trap 'rm -rf "$tmp"' EXIT
 repo=$tmp/repo
 g() { git -C "$repo" "$@"; }
 
-step "Fetching $url"
+step "Get $url"
 clone_args=(--bare --quiet)
 [ -z "$local_repo" ] || clone_args+=(--reference-if-able "$local_repo" --dissociate)
-git clone "${clone_args[@]}" "$url" "$repo" || fail "could not clone $url"
-ok "fresh clone in a temporary directory; every ref below is the remote's (origin/*)"
+git clone "${clone_args[@]}" "$url" "$repo" || fail "cannot clone $url"
+ok "new clone in a temporary directory. All refs are from the remote (origin/*)."
 for b in main beta stable; do
   if r=$(g rev-parse -q --verify "refs/heads/$b^{commit}"); then
     info "origin/$b = $r"
@@ -220,6 +268,124 @@ semver_gt() {
   ((a3 > b3))
 }
 
+# bump <MAJOR.MINOR.PATCH> patch|minor|major|keep
+bump() {
+  local a b c
+  IFS=. read -r a b c <<<"$1"
+  case "$2" in
+    keep) echo "$1" ;;
+    patch) echo "$a.$b.$((c + 1))" ;;
+    minor) echo "$a.$((b + 1)).0" ;;
+    major) echo "$((a + 1)).0.0" ;;
+  esac
+}
+
+# The new stable version, from --bump/--version or the promoter's pick from a menu. $1: the
+# version the beta release is based on (the latest stable's, or the never released first one);
+# $2: the current stable's version ("" before the first stable). Sets $new_version.
+new_version=
+choose_version() {
+  local base=$1 current=$2 default=minor ans i choices=(patch minor major)
+  if [ -z "$current" ]; then
+    choices=(keep patch minor major)
+    default=keep
+  fi
+  if [ -n "$want_version" ]; then
+    new_version=$want_version
+    info "--version $want_version"
+  elif [ -n "$want_bump" ]; then
+    [ "$want_bump" != keep ] || [ -z "$current" ] \
+      || fail "--bump keep: $base is already on stable. Use patch, minor or major."
+    new_version=$(bump "$base" "$want_bump")
+    info "--bump $want_bump"
+  else
+    printf '\n  Select the new stable version%s:\n' "${current:+ (the current stable is $current)}"
+    i=0
+    for c in "${choices[@]}"; do
+      i=$((i + 1))
+      if [ "$c" = keep ]; then
+        printf '    %d) keep   %s\n' "$i" "$base"
+      else
+        printf '    %d) %-6s %s\n' "$i" "$c" "$(bump "$base" "$c")"
+      fi
+    done
+    printf '    %d) other  (type a version)\n' "$((i + 1))"
+    if [ ! -t 0 ]; then
+      new_version=$(bump "$base" "$default")
+      info "no terminal: using $new_version (the default, $default)"
+      [ "$dry_run" = 1 ] || fail "no terminal: give --bump or --version"
+    else
+      read -r -p "  Version [1-$((i + 1)) or name, default $default]: " ans
+      ans=${ans:-$default}
+      case "$ans" in
+        keep | patch | minor | major)
+          printf '%s\n' "${choices[@]}" | grep -qx "$ans" || fail "$ans is not a choice"
+          new_version=$(bump "$base" "$ans")
+          ;;
+        "$((i + 1))" | other) read -r -p "  Version (MAJOR.MINOR.PATCH): " new_version ;;
+        *)
+          if ! [[ $ans =~ ^[0-9]+$ ]] || ((ans < 1 || ans > i)); then fail "$ans is not a choice"; fi
+          new_version=$(bump "$base" "${choices[ans - 1]}")
+          ;;
+      esac
+    fi
+  fi
+  [[ $new_version =~ $semver_re ]] || fail "'$new_version' is not MAJOR.MINOR.PATCH"
+  if [ -n "$current" ]; then
+    semver_gt "$new_version" "$current" || fail "$new_version is not more than the stable version $current"
+  elif [ "$new_version" != "$base" ]; then
+    semver_gt "$new_version" "$base" || fail "$new_version is less than $base"
+  fi
+  ok "new stable version: ${current:-none} -> $new_version"
+}
+
+# The tree of commit $1 with release/version set to $2 and the top section of release/notes.md
+# (`## Unreleased`) replaced by `## $2` with the release's notes ($tmp/notes.top, as edited).
+# Prints the tree id.
+versioned_tree() {
+  local rev=$1 version=$2 vblob nblob
+  export GIT_INDEX_FILE=$tmp/index
+  rm -f "$GIT_INDEX_FILE"
+  g read-tree "$rev^{tree}"
+  vblob=$(printf '%s\n' "$version" | g hash-object -w --stdin)
+  nblob=$(g show "$rev:release/notes.md" \
+    | awk -v v="$version" -v top="$tmp/notes.top" '
+        /^## / { s++ }
+        s == 0 { print; next }
+        s == 1 && !done {
+          print "## " v
+          print ""
+          while ((getline line < top) > 0) print line
+          print ""
+          done = 1
+          next
+        }
+        s == 1 { next }
+        { print }' \
+    | g hash-object -w --stdin)
+  g update-index --cacheinfo "100644,$vblob,release/version" \
+    --cacheinfo "100644,$nblob,release/notes.md"
+  g write-tree
+  unset GIT_INDEX_FILE
+}
+
+# The release commit $1 changes nothing but release/version and release/notes.md from $2.
+only_version_changed() {
+  local other
+  other=$(g diff --name-only "$2" "$1" | grep -vx -e release/version -e release/notes.md || true)
+  [ -z "$other" ] || fail "the release commit changes other files: $other"
+  ok "only release/version and release/notes.md are different from ${2:0:12}"
+}
+
+# The subjects of the commits in a range (merges and release commits left out), at most 40.
+list_changes() {
+  local n
+  n=$(g rev-list --no-merges --count "$@")
+  info "$n commit(s):"
+  g log --no-merges --format='           %h %s' "$@" | { grep -v ' HinterOS [0-9]' || true; } | head -40 || true
+  [ "$n" -le 40 ] || info "... and $((n - 40)) more"
+}
+
 # release/allowed_signers of a commit, in ssh-keygen's format with the namespace pinned to git,
 # exactly as nixos/modules/daemon.nix writes it for a box.
 signers_of() {
@@ -235,7 +401,7 @@ signers_of() {
     printf '%s namespaces="git" %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" >>"$out"
     n=$((n + 1))
   done <"$tmp/signers.src"
-  [ "$n" -gt 0 ] || fail "release/allowed_signers of $rev lists no key: no box could verify anything"
+  [ "$n" -gt 0 ] || fail "release/allowed_signers of $rev has no keys. No box can verify a release."
   info "$n key(s) in release/allowed_signers of ${rev:0:12}: $(cut -d' ' -f1 "$out" | tr '\n' ' ')"
 }
 
@@ -244,20 +410,20 @@ key_preflight() {
   local signers=$1 pub
   if [ ! -f "$key" ]; then
     if [ "$dry_run" = 1 ]; then
-      warn "signing key $key does not exist (a real run needs it)"
+      warn "the signing key $key does not exist. A real run must have it."
       return 0
     fi
-    fail "signing key $key does not exist (--key or HINTEROS_RELEASE_KEY)"
+    fail "the signing key $key does not exist. Use --key or HINTEROS_RELEASE_KEY."
   fi
   if [ ! -f "$key.pub" ]; then
-    info "no $key.pub next to the key: cannot check in advance that it is listed"
+    info "$key.pub does not exist. The script cannot check the key before it signs."
     return 0
   fi
   pub=$(cut -d' ' -f1,2 "$key.pub")
   if grep -qF " $pub" "$signers"; then
-    ok "signing key $key is listed as: $(grep -F " $pub" "$signers" | cut -d' ' -f1)"
+    ok "the signing key $key is in the list as: $(grep -F " $pub" "$signers" | cut -d' ' -f1)"
   else
-    fail "the public half of $key is not in the allowed_signers the result is verified against"
+    fail "the public key of $key is not in the allowed signers for this release"
   fi
 }
 
@@ -269,7 +435,7 @@ verify() {
     ok "git verify-commit ${rev:0:12}: $(printf '%s\n' "$out" | grep -m1 -i 'good' || printf 'good')"
   else
     printf '%s\n' "$out" | sed 's/^/         /'
-    fail "${rev:0:12} does not verify against these signers: a box would reject it (unknown_signer)"
+    fail "${rev:0:12} does not verify against these signers. A box rejects it (unknown_signer)."
   fi
 }
 
@@ -278,32 +444,55 @@ ci_check() {
   local sha=$1 what=$2 json state total
   step "CI status of $what ${sha:0:12}"
   if [ "$skip_ci" = 1 ]; then
-    warn "************************************************************************"
-    warn "CI CHECK SKIPPED (--skip-ci): nothing has tested ${sha:0:12} for you."
-    warn "Run the checks yourself before promoting (TESTING.md), and drop --skip-ci"
-    warn "once the Forgejo runner exists."
-    warn "************************************************************************"
+    ci_skipped "$sha"
     return 0
   fi
   if [ -n "${PROMOTE_STATUS_CMD:-}" ]; then
     json=$("$PROMOTE_STATUS_CMD" "$sha") || fail "PROMOTE_STATUS_CMD failed for $sha"
   else
     [ -n "$api" ] && [ -n "$api_repo" ] \
-      || fail "cannot derive the Forgejo API from $url: set PROMOTE_FORGEJO_API and PROMOTE_FORGEJO_REPO, or pass --skip-ci"
+      || fail "cannot find the Forgejo API from $url. Set PROMOTE_FORGEJO_API and PROMOTE_FORGEJO_REPO, or use --skip-ci."
     info "GET $api/repos/$api_repo/commits/$sha/status"
     json=$(curl -fsS --max-time 30 "$api/repos/$api_repo/commits/$sha/status") \
-      || fail "could not read the commit status from Forgejo"
+      || fail "cannot read the commit status from Forgejo"
   fi
   total=$(jq -r '.total_count // 0' <<<"$json")
   state=$(jq -r '.state // ""' <<<"$json")
   if [ "$total" = 0 ]; then
-    fail "no CI statuses at all for ${sha:0:12}. There is no CI runner yet: pass --skip-ci until it exists (and test by hand)."
+    ci_skip_or_fail "$sha" "no CI result for ${sha:0:12}. There is no CI runner. Test by hand and use --skip-ci."
+    return 0
   fi
   jq -r '.statuses[] | "  [ci]   \(.context): \(.status)\(if .description then " (\(.description))" else "" end)"' <<<"$json"
-  if [ "$state" != success ]; then
-    fail "CI is '$state', not success. 'pending'/'Waiting to run' means no runner picked the job up: pass --skip-ci until the runner exists."
-  fi
-  ok "all $total CI statuses are success"
+  case "$state" in
+    success) ok "all $total CI statuses are success" ;;
+    pending)
+      ci_skip_or_fail "$sha" "CI is 'pending'. No runner started the job. Use --skip-ci until the runner exists."
+      ;;
+    *) fail "CI is '$state'. It must be 'success'." ;;
+  esac
+}
+
+ci_skipped() {
+  warn "************************************************************************"
+  warn "NO CI CHECK: nothing tested ${1:0:12}."
+  warn "Do the checks by hand before you release (TESTING.md)."
+  warn "Stop this when the Forgejo runner exists."
+  warn "************************************************************************"
+}
+
+# No CI result (no runner yet): the menus ask whether to go on without it; otherwise refused.
+ci_skip_or_fail() {
+  local sha=$1 why=$2 ans
+  [ "$interactive" = 1 ] || fail "$why"
+  warn "$why"
+  read -r -p "  Continue without CI? You must do the checks by hand (TESTING.md). [y/N] " ans || ans=
+  case "$ans" in
+    y | Y | yes)
+      skip_ci=1
+      ci_skipped "$sha"
+      ;;
+    *) fail "no CI result for ${sha:0:12}" ;;
+  esac
 }
 
 sev_rank() {
@@ -352,18 +541,18 @@ choose_security() {
   if [ -n "$security" ]; then
     release_sev=$security
     if (($(sev_rank "$security") < $(sev_rank "$default"))); then
-      warn "--security $security is lower than the highest trailer in range ($default)"
+      warn "--security $security is less than the highest trailer in the range ($default)"
     fi
-  elif [ "$dry_run" = 1 ] || [ ! -t 0 ]; then
+  elif [ ! -t 0 ]; then
     release_sev=$default
-    info "would ask for the release severity (default: $default); using $default"
-    [ "$dry_run" = 1 ] || fail "not interactive: pass --security"
+    info "no terminal: using the default severity ($default)"
+    [ "$dry_run" = 1 ] || fail "no terminal: give --security"
   else
-    read -r -p "  Security severity of this release [none/low/medium/high/critical] (default $default): " ans
+    read -r -p "  Security severity [none/low/medium/high/critical, default $default]: " ans
     release_sev=${ans:-$default}
     case "$release_sev" in
       none | low | medium | high | critical) ;;
-      *) fail "not a severity: $release_sev" ;;
+      *) fail "$release_sev is not a severity" ;;
     esac
   fi
   ok "release severity: $release_sev"
@@ -374,26 +563,110 @@ confirm() {
   if [ "$assume_yes" = 1 ]; then
     ok "$1 yes (--yes)"
   elif [ "$dry_run" = 1 ]; then
-    info "would ask: $1"
+    info "dry run, no question: $1"
   elif [ -t 0 ]; then
     read -r -p "  $1 [y/N] " ans
     case "$ans" in
       y | Y | yes) ok "confirmed" ;;
-      *) fail "not confirmed" ;;
+      *) fail "the answer is no" ;;
     esac
   else
-    fail "not interactive: '$1' needs --yes"
+    fail "no terminal: '$1' needs --yes"
   fi
 }
 
-# The top section of release/notes.md (under the first "## <version>" heading), which must be
-# for $2.
+# pick <question> <default> <choice>...: a numbered menu, asked until the answer is one of them
+# (Ctrl+C or Ctrl+D stops). Sets $picked (1-based).
+picked=
+pick() {
+  local question=$1 default=$2 ans i=0 choice
+  shift 2
+  [ "$#" -gt 0 ] || fail "no choices for: $question"
+  printf '\n  %s\n' "$question"
+  for choice in "$@"; do
+    i=$((i + 1))
+    printf '    %d) %s\n' "$i" "$choice"
+  done
+  while :; do
+    read -r -p "  Choice [1-$i, default $default]: " ans || fail "no answer"
+    ans=${ans:-$default}
+    if [[ $ans =~ ^[0-9]+$ ]] && ((ans >= 1 && ans <= i)); then
+      picked=$ans
+      return 0
+    fi
+    printf '  %s is not a choice.\n' "$ans"
+  done
+}
+
+# The release notes ($tmp/notes.top) as they will be signed, with the chance to change them in
+# an editor first ($VISUAL, $EDITOR, else nano). Only on a terminal and without --yes.
+review_notes() {
+  local editor
+  sed 's/^/  | /' "$tmp/notes.top"
+  [ -t 0 ] && [ "$assume_yes" = 0 ] || return 0
+  while :; do
+    pick "Release notes:" 1 "Use these notes" "Edit the notes"
+    [ "$picked" = 2 ] || return 0
+    editor=${VISUAL:-${EDITOR:-nano}}
+    cp "$tmp/notes.top" "$tmp/notes.edit"
+    # The editor may come with arguments ("code --wait").
+    # shellcheck disable=SC2086
+    $editor "$tmp/notes.edit" || fail "the editor ($editor) failed"
+    sed -e '/./,$!d' "$tmp/notes.edit" | sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' >"$tmp/notes.new"
+    if [ ! -s "$tmp/notes.new" ]; then
+      warn "the notes are empty. The script keeps the old text."
+    elif cmp -s "$tmp/notes.new" "$tmp/notes.top"; then
+      info "no change"
+    else
+      mv "$tmp/notes.new" "$tmp/notes.top"
+      notes_edited=1
+      ok "the release notes are changed"
+    fi
+    step "Release notes to sign"
+    sed 's/^/  | /' "$tmp/notes.top"
+  done
+}
+
+# The release commit for review, then (after "yes") the same commit signed: an unsigned draft
+# is shown in full with where it goes; nothing is signed before the promoter agrees. With
+# --dry-run the draft is the result. Sets $new.
+# review_and_sign <branch> <what a box shows> <tree> <commit-tree parent args>...
+new=
+review_and_sign() {
+  local branch=$1 shown=$2 tree=$3 draft old
+  shift 3
+  draft=$(g commit-tree "$tree" "$@" -F "$tmp/msg")
+  old=$(tip "$branch")
+  step "Review"
+  info "channel:   $branch (origin/$branch ${old:+${old:0:12} }-> this commit, fast-forward)"
+  info "release:   $shown"
+  info "security:  $release_sev"
+  if [ "$notes_edited" = 1 ]; then info "notes:     changed here"; fi
+  info "remote:    $url"
+  [ "$dry_run" = 1 ] || info "key:       $key"
+  info "the commit before signing (the signature changes the hash):"
+  show_commit "$draft"
+  if [ "$dry_run" = 1 ]; then
+    new=$draft
+    info "dry run: no signature and no push"
+    return 0
+  fi
+  confirm "Sign this commit and push it to $branch?"
+  info "sign with $key. ssh-keygen asks for the passphrase."
+  new=$(make_commit "$tree" "$@") || fail "the signature failed"
+  [ "$(g rev-parse "$new^{tree}")" = "$tree" ] || fail "the signed commit has a different tree"
+  ok "signed: $new"
+}
+
+# The top section of release/notes.md (under the first "## " heading), which must be
+# `## Unreleased`: what changed since the last stable release.
 notes_of() {
-  local rev=$1 version=$2 heading
+  local rev=$1 named=${2:-} version heading
   g show "$rev:release/notes.md" >"$tmp/notes.md" 2>/dev/null || fail "$rev has no release/notes.md"
   heading=$(grep -m1 '^## ' "$tmp/notes.md" | sed -e 's/^## *//' -e 's/[[:space:]]*$//') || true
-  [ "$heading" = "$version" ] \
-    || fail "release/notes.md: the top section is '## ${heading:-<none>}', release/version is $version"
+  version=$heading
+  [ "$heading" = Unreleased ] || { [ -n "$named" ] && [ "$heading" = "$named" ]; } \
+    || fail "release/notes.md: the top section is '## ${heading:-<none>}'. It must be '## Unreleased'."
   awk 'BEGIN { s = 0 } /^## / { s++; next } s == 1 { print }' "$tmp/notes.md" \
     | sed -e '/./,$!d' | sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' >"$tmp/notes.top"
   [ -s "$tmp/notes.top" ] || fail "release/notes.md: the $version section is empty"
@@ -425,27 +698,17 @@ compose_message() {
   } >"$tmp/msg"
 }
 
-# Creates the release commit (signed; unsigned with --dry-run) and prints its hash.
+# Creates the signed release commit and prints its hash.
 make_commit() {
   local tree=$1
   shift
-  if [ "$dry_run" = 1 ]; then
-    g commit-tree "$tree" "$@" -F "$tmp/msg"
-  else
-    env -u SSH_AUTH_SOCK git -C "$repo" -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen \
-      -c "user.signingkey=$key" commit-tree -S "$tree" "$@" -F "$tmp/msg"
-  fi
+  env -u SSH_AUTH_SOCK git -C "$repo" -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen \
+    -c "user.signingkey=$key" commit-tree -S "$tree" "$@" -F "$tmp/msg"
 }
 
 show_commit() {
-  local sha=$1
-  if [ "$dry_run" = 1 ]; then
-    step "The commit that would be signed (shown unsigned)"
-  else
-    step "The signed release commit $sha"
-  fi
   # The headers without the signature block, then the message as is.
-  g cat-file -p "$sha" | awk '
+  g cat-file -p "$1" | awk '
     h == 0 && /^$/ { h = 1 }
     h == 0 && /^gpgsig / { s = 1; next }
     h == 0 && s && /^ / { next }
@@ -459,7 +722,7 @@ push_branch() {
     info "would run: git push $url $sha:refs/heads/$branch (no force)"
     return 0
   fi
-  g "${cred_args[@]}" push "$url" "$sha:refs/heads/$branch" || fail "push refused (someone moved $branch? it is never forced)"
+  g "${cred_args[@]}" push "$url" "$sha:refs/heads/$branch" || fail "the push failed. Maybe $branch changed. The script never forces a push."
   now=$(git ls-remote "$url" "refs/heads/$branch" | cut -f1)
   [ "$now" = "$sha" ] || fail "after the push, origin/$branch is '$now', not $sha"
   ok "origin/$branch = $sha"
@@ -468,7 +731,7 @@ push_branch() {
 # --- beta ----------------------------------------------------------------------------------
 
 promote_beta() {
-  local main beta_tip stable_tip target v bv sv tree new hot c listed=0
+  local main beta_tip stable_tip target v sv tree new hot c listed=0
   main=$(tip main)
   [ -n "$main" ] || fail "origin/main does not exist"
   beta_tip=$(tip beta)
@@ -479,10 +742,11 @@ promote_beta() {
   info "$(g log -1 --format='%s (%an, %ad)' --date=short "$target")"
   if is_ancestor "$target" "$main"; then ok "it is on origin/main"; else fail "$target is not on origin/main"; fi
   if [ -z "$beta_tip" ]; then
-    [ "$bootstrap" = 1 ] || fail "origin/beta does not exist yet: the first beta release needs --bootstrap"
-    warn "BOOTSTRAP: no previous beta tip. The release commit's only parent is main."
+    [ "$bootstrap" = 1 ] || fail "origin/beta does not exist. The first beta release needs --bootstrap."
+    warn "BOOTSTRAP: there is no beta branch. The only parent of the release commit is main."
   else
-    [ "$bootstrap" = 0 ] || fail "--bootstrap, but origin/beta already exists ($beta_tip)"
+    [ "$bootstrap" = 0 ] || fail "--bootstrap: origin/beta already exists ($beta_tip)"
+    ! is_ancestor "$target" "$beta_tip" || fail "${target:0:12} is already on beta"
     ok "previous beta tip: $beta_tip"
   fi
 
@@ -490,31 +754,22 @@ promote_beta() {
 
   step "Version"
   v=$(version_at "$target")
-  [[ $v =~ $semver_re ]] || fail "release/version of the target is '${v:-<missing>}', not MAJOR.MINOR.PATCH"
-  ok "release/version = $v"
-  if [ -n "$beta_tip" ]; then
-    bv=$(version_at "$beta_tip")
-    [ "$v" != "$bv" ] || fail "release/version $v is the current beta's: bump it (every beta release has a new version)"
-    if [[ $bv =~ $semver_re ]]; then
-      semver_gt "$v" "$bv" || fail "release/version $v is not greater than beta's $bv"
-      ok "$v > beta's $bv"
-    else
-      info "beta's tip has no valid release/version ('$bv')"
-    fi
-  fi
+  [[ $v =~ $semver_re ]] || fail "release/version of the target is '${v:-<missing>}'. It must be MAJOR.MINOR.PATCH."
   if [ -n "$stable_tip" ]; then
     sv=$(version_at "$stable_tip")
-    if [[ $sv =~ $semver_re ]]; then
-      semver_gt "$v" "$sv" || fail "release/version $v is not greater than stable's $sv"
-      ok "$v > stable's $sv"
-    fi
+    [ "$v" = "$sv" ] \
+      || fail "release/version of the target is $v. Stable is $sv. Main must have the stable version: merge stable into main. Only promote changes the version."
+    ok "release/version = $v (the stable version this beta starts from)"
+  else
+    ok "release/version = $v (there is no stable release)"
   fi
+  info "a box shows this release as $v.<release commit> beta"
 
-  step "Hotfixes on beta/stable are on main"
+  step "Hotfixes and stable releases on main"
   hot=()
   for b in beta stable; do [ -z "$(tip "$b")" ] || hot+=("refs/heads/$b"); done
   if [ "${#hot[@]}" -eq 0 ]; then
-    ok "no beta or stable branch yet"
+    ok "there is no beta or stable branch"
   else
     while read -r c; do
       [ -n "$c" ] || continue
@@ -523,13 +778,13 @@ promote_beta() {
       warn "not on main: ${c:0:12} $(g log -1 --format=%s "$c")"
       listed=1
     done < <(g rev-list --no-merges "${hot[@]}" --not "$target")
-    [ "$listed" = 0 ] || fail "merge stable (and beta) into main first, then promote that main commit"
-    ok "every commit on ${hot[*]#refs/heads/} is reachable from the target"
+    [ "$listed" = 0 ] || fail "merge stable (and beta) into main. Then release that main commit."
+    ok "all commits on ${hot[*]#refs/heads/} are in the target"
   fi
 
   step "Changes"
   if [ -n "$beta_tip" ]; then
-    info "$(g rev-list --count "$beta_tip..$target") commit(s) since the last beta release"
+    list_changes "$beta_tip..$target"
     lock_changes "$beta_tip" "$target"
   else
     lock_changes "" "$target"
@@ -540,49 +795,49 @@ promote_beta() {
   choose_security "$range_sev"
 
   step "Release notes"
-  notes_of "$target" "$v"
-  compose_message "$v"
+  notes_of "$target"
+  review_notes
+  if [ "$notes_edited" = 1 ]; then
+    info "the change is only in the message of this beta. release/notes.md on main does not change."
+  fi
+  compose_message "$v beta"
 
-  step "Signers the result is verified against"
+  step "Signers that verify the result"
   if [ -n "$beta_tip" ]; then
-    info "the previous beta tip's release/allowed_signers (what a box on beta trusts)"
+    info "release/allowed_signers of the current beta (a box on beta trusts these keys)"
     signers_of "$beta_tip" "$tmp/verify.signers"
   else
-    warn "BOOTSTRAP: no previous tip, so the NEW tree's own release/allowed_signers is used."
-    warn "That only proves the commit is signed by a key this release lists; boxes take it on"
-    warn "trust once, via hinteros-bootstrap-channel and the rev printed below."
+    warn "BOOTSTRAP: there is no beta, so the signers come from the NEW tree."
+    warn "This only shows that a key of this release signed the commit."
+    warn "A box trusts it one time, with hinteros-bootstrap-channel and the rev below."
     signers_of "$target" "$tmp/verify.signers"
   fi
   key_preflight "$tmp/verify.signers"
 
-  step "Release commit"
   tree=$(g rev-parse "$target^{tree}")
   if [ -n "$beta_tip" ]; then
-    info "tree of $target, parents $beta_tip (beta) and $target (main)"
-    [ "$dry_run" = 1 ] || info "signing with $key: ssh-keygen asks for the passphrase"
-    new=$(make_commit "$tree" -p "$beta_tip" -p "$target") || fail "signing failed"
+    info "the release commit: tree of $target, parents $beta_tip (beta) and $target (main)"
+    review_and_sign beta "HinterOS $v.<commit> beta" "$tree" -p "$beta_tip" -p "$target"
   else
-    info "tree of $target, single parent $target (main)"
-    [ "$dry_run" = 1 ] || info "signing with $key: ssh-keygen asks for the passphrase"
-    new=$(make_commit "$tree" -p "$target") || fail "signing failed"
+    info "the release commit: tree of $target, one parent $target (main)"
+    review_and_sign beta "HinterOS $v.<commit> beta" "$tree" -p "$target"
   fi
-  show_commit "$new"
 
   step "Checks on the result"
-  [ "$(g rev-parse "$new^{tree}")" = "$tree" ] || fail "the result's tree is not $tree"
-  ok "tree equals the tested main commit's ($tree)"
+  [ "$(g rev-parse "$new^{tree}")" = "$tree" ] || fail "the tree of the result is not $tree"
+  ok "the tree is the same as the tested main commit ($tree)"
   if [ -n "$beta_tip" ]; then
     is_ancestor "$beta_tip" "$new" || fail "not a fast-forward from $beta_tip"
-    ok "fast-forward from the previous beta tip"
+    ok "fast-forward from the current beta"
   fi
   if [ -n "$stable_tip" ]; then
     is_ancestor "$stable_tip" "$new" || fail "origin/stable ($stable_tip) is not an ancestor of the result"
     ok "origin/stable is an ancestor of the result"
   else
-    info "no origin/stable yet"
+    info "there is no origin/stable"
   fi
   if [ "$dry_run" = 1 ]; then
-    info "would verify the signed commit against the signers above"
+    info "dry run: no signature to verify"
   else
     verify "$new" "$tmp/verify.signers"
   fi
@@ -591,98 +846,152 @@ promote_beta() {
 
   step "Done"
   if [ "$dry_run" = 1 ]; then
-    info "dry run: beta would get a signed HinterOS $v commit with the tree above"
+    info "dry run: no change to beta"
   else
-    ok "beta is HinterOS $v: $new"
-    info "move a box onto beta (once): sudo hinteros-bootstrap-channel beta $new"
-    info "then dogfood on box #2 and run: nix run .#promote -- stable"
+    ok "beta is HinterOS $v.${new:0:7} beta: $new"
+    info "to move a box to beta one time: sudo hinteros-bootstrap-channel beta $new"
+    info "test it on box #2. Then run nix run .#promote again for stable."
+    if [ "$notes_edited" = 1 ]; then info "for stable, put the changed notes in release/notes.md on main"; fi
   fi
 }
 
 # --- stable --------------------------------------------------------------------------------
 
+# A beta release commit's subject: `HinterOS <version> beta`, or `HinterOS <version>` from before
+# betas kept the stable version (the first beta, 0.7.0, was promoted that way).
+is_beta_release() {
+  local s v
+  v=$(version_at "$1")
+  s=$(g log -1 --format=%s "$1")
+  [ "$s" = "HinterOS $v beta" ] || [ "$s" = "HinterOS $v" ]
+}
+
 promote_stable() {
-  local beta_tip stable_tip target v sv
+  local beta_tip stable_tip target v sv="" tree new
   beta_tip=$(tip beta)
   stable_tip=$(tip stable)
-  [ -n "$beta_tip" ] || fail "origin/beta does not exist: promote beta first"
+  [ -n "$beta_tip" ] || fail "origin/beta does not exist. Release main to beta first."
   target=$(resolve "${want_rev:-$beta_tip}")
 
   step "Target: beta release commit $target"
-  if g rev-list --first-parent "$beta_tip" | grep -qx "$target"; then
-    ok "it is on origin/beta's first-parent chain"
+  if g rev-list --first-parent "$beta_tip" | grep -x "$target" >/dev/null; then
+    ok "it is a release commit on origin/beta"
   else
-    fail "$target is not a first-parent commit of origin/beta (only beta release commits can go to stable)"
+    fail "$target is not a release commit on origin/beta. Only beta releases go to stable."
   fi
   v=$(version_at "$target")
   [[ $v =~ $semver_re ]] || fail "release/version of the target is '${v:-<missing>}'"
-  [ "$(g log -1 --format=%s "$target")" = "HinterOS $v" ] \
-    || fail "subject is '$(g log -1 --format=%s "$target")', not 'HinterOS $v': not a release commit"
-  ok "release commit: HinterOS $v"
-  g cat-file commit "$target" | grep -q '^gpgsig ' || fail "$target is not signed"
-  ok "it carries a signature"
+  is_beta_release "$target" \
+    || fail "the subject is '$(g log -1 --format=%s "$target")'. It must be 'HinterOS $v beta'."
+  ok "beta release commit: HinterOS $v.${target:0:7} beta"
+  g cat-file commit "$target" | grep '^gpgsig ' >/dev/null || fail "$target is not signed"
+  ok "it has a signature"
 
   if [ -n "$stable_tip" ]; then
-    [ "$target" != "$stable_tip" ] || fail "origin/stable is already $target"
+    is_ancestor "$target" "$stable_tip" && fail "origin/stable already contains $target"
     is_ancestor "$stable_tip" "$target" \
-      || fail "origin/stable ($stable_tip) is not an ancestor: a hotfix is not on beta yet (merge stable into main, promote beta)"
-    ok "fast-forward from origin/stable $stable_tip"
+      || fail "origin/stable ($stable_tip) is not an ancestor. A stable release is not on beta: merge stable into main, then release main to beta."
+    ok "origin/stable $stable_tip is an ancestor"
     sv=$(version_at "$stable_tip")
-    info "stable goes from ${sv:-?} to $v"
+    [[ $sv =~ $semver_re ]] || fail "stable's release/version is '${sv:-<missing>}'"
   else
-    warn "origin/stable does not exist yet: it is created at $target"
+    warn "origin/stable does not exist. This release makes it."
   fi
 
   ci_check "$target" "the beta release (both bases)"
 
-  step "Security (inherited from the beta releases)"
+  step "Changes since the last stable release"
+  if [ -n "$stable_tip" ]; then
+    list_changes "$stable_tip..$target"
+  else
+    info "$(g rev-list --no-merges --count "$target") commit(s): all commits"
+  fi
+  lock_changes "$stable_tip" "$target"
+
+  step "Security (from the beta releases)"
   if [ -n "$stable_tip" ]; then scan_security "$stable_tip..$target"; else scan_security "$target" --max-count=200; fi
   release_sev=$range_sev
   ok "severity of this stable release: $release_sev"
 
-  step "Changes"
-  lock_changes "$stable_tip" "$target"
+  step "Release notes"
+  # A beta from before betas kept the stable version has its section named already.
+  notes_of "$target" "$v"
+  review_notes
 
-  step "Dogfood"
+  step "Version"
+  choose_version "$v" "$sv"
+  compose_message "$new_version"
+
+  step "Test on box #2"
+  if [ "$interactive" = 1 ]; then
+    case "$release_sev" in
+      high | critical)
+        pick "This is a $release_sev security release. Select the test on box #2:" 1 \
+          "Normal: all couch checklists passed" \
+          "Expedite: it ran for 1 hour or more with no problems"
+        [ "$picked" = 1 ] || expedite=1
+        ;;
+    esac
+  fi
   if [ "$expedite" = 1 ]; then
     case "$release_sev" in
       high | critical) ok "--expedite with a $release_sev release" ;;
-      *) fail "--expedite is only for Security: high or critical releases (this is $release_sev)" ;;
+      *) fail "--expedite is only for Security: high or critical releases. This release is $release_sev." ;;
     esac
-    confirm "Has box #2 run HinterOS $v ($target) for at least an hour without problems?"
+    confirm "Did box #2 run HinterOS $v.${target:0:7} beta for 1 hour or more with no problems?"
   else
-    confirm "Has box #2 run HinterOS $v ($target) and passed the couch checklists for the changes?"
+    confirm "Did box #2 run HinterOS $v.${target:0:7} beta and pass the couch checklists for the changes?"
   fi
 
-  step "Signature"
+  step "Signers that verify the result"
   if [ -n "$stable_tip" ]; then
-    info "against the current stable tip's release/allowed_signers (what a box on stable trusts)"
+    info "release/allowed_signers of the current stable (a box on stable trusts these keys)"
     signers_of "$stable_tip" "$tmp/verify.signers"
   else
-    warn "no previous stable tip: verifying against the target's OWN release/allowed_signers;"
-    warn "boxes take the first stable on trust (ISO or hinteros-bootstrap-channel)."
+    warn "there is no stable, so the signers come from the OWN release/allowed_signers of the target."
+    warn "A box trusts the first stable from the ISO or hinteros-bootstrap-channel."
     signers_of "$target" "$tmp/verify.signers"
   fi
-  verify "$target" "$tmp/verify.signers"
+  key_preflight "$tmp/verify.signers"
 
-  push_branch "$target" stable
+  tree=$(versioned_tree "$target" "$new_version")
+  info "the release commit: the tree of the beta release with release/version $new_version, one parent $target (beta)"
+  review_and_sign stable "HinterOS $new_version stable" "$tree" -p "$target"
+
+  step "Checks on the result"
+  only_version_changed "$new" "$target"
+  [ "$(version_at "$new")" = "$new_version" ] || fail "release/version of the result is not $new_version"
+  ok "release/version = $new_version"
+  if [ -n "$stable_tip" ]; then
+    is_ancestor "$stable_tip" "$new" || fail "not a fast-forward from $stable_tip"
+    ok "fast-forward from origin/stable"
+  fi
+  if [ "$dry_run" = 1 ]; then
+    info "dry run: no signature to verify"
+  else
+    verify "$new" "$tmp/verify.signers"
+  fi
+
+  push_branch "$new" stable
 
   step "Done"
   if [ "$dry_run" = 1 ]; then
-    info "dry run: stable would move to HinterOS $v ($target)"
+    info "dry run: no change to stable"
   else
-    ok "stable is HinterOS $v: $target"
+    ok "stable is HinterOS $new_version stable: $new"
   fi
+  info "next: merge stable into main. Then release/version on main is $new_version."
+  info "Add a new '## Unreleased' section to release/notes.md before the next beta."
   # TODO(M6 phase 3, ISO publishing): wait for CI's stable ISO, fetch its SHA256SUMS, create the
   # signed tag v<version> carrying them (git tag -s with the release key, no agent), push it and,
   # with a Forgejo token in the environment, create the release page.
-  warn "TODO: the signed tag v$v with the ISO's SHA256SUMS and the release page are not automated yet."
+  warn "TODO: the script does not make the signed tag v$new_version (ISO SHA256SUMS) or the release page."
 }
 
 # --- hotfix --------------------------------------------------------------------------------
 
 promote_hotfix() {
-  local stable_tip hot target v sv tree new
+  local stable_tip hot target sv tree new
   stable_tip=$(tip stable)
   [ -n "$stable_tip" ] || fail "origin/stable does not exist"
   case "$hotfix_branch" in hotfix/*) ;; *) warn "branch '$hotfix_branch' is not named hotfix/<name>" ;; esac
@@ -694,23 +1003,14 @@ promote_hotfix() {
   info "$(g log -1 --format='%s (%an, %ad)' --date=short "$target")"
   is_ancestor "$target" "$hot" || fail "$target is not on origin/$hotfix_branch"
   is_ancestor "$stable_tip" "$target" \
-    || fail "$hotfix_branch is not based on the current origin/stable ($stable_tip): rebase it"
-  [ "$target" != "$stable_tip" ] || fail "$hotfix_branch has nothing on top of stable"
-  ok "based on origin/stable $stable_tip ($(g rev-list --count "$stable_tip..$target") commit(s) on top)"
+    || fail "$hotfix_branch does not start from the current origin/stable ($stable_tip). Rebase it."
+  [ "$target" != "$stable_tip" ] || fail "$hotfix_branch has no commits after stable"
+  ok "starts from origin/stable $stable_tip ($(g rev-list --count "$stable_tip..$target") commit(s) after it)"
 
   ci_check "$target" "the hotfix (both bases)"
 
-  step "Version"
-  v=$(version_at "$target")
-  sv=$(version_at "$stable_tip")
-  [[ $v =~ $semver_re ]] || fail "release/version of the target is '${v:-<missing>}'"
-  [[ $sv =~ $semver_re ]] || fail "stable's release/version is '${sv:-<missing>}'"
-  if [ "${v%.*}" != "${sv%.*}" ] || ! semver_gt "$v" "$sv"; then
-    fail "release/version $v is not a patch bump of stable's $sv"
-  fi
-  ok "$sv -> $v (patch bump)"
-
   step "Changes"
+  list_changes "$stable_tip..$target"
   lock_changes "$stable_tip" "$target"
 
   step "Security"
@@ -718,35 +1018,41 @@ promote_hotfix() {
   choose_security "$range_sev"
   if [ "$release_sev" = none ]; then
     if [ "$dry_run" = 1 ]; then
-      warn "a hotfix needs a Security severity (a real run refuses none)"
+      warn "a hotfix must have a Security severity. A real run stops with none."
     else
-      fail "a hotfix needs a Security severity (low, medium, high or critical)"
+      fail "a hotfix must have a Security severity: low, medium, high or critical"
     fi
   fi
 
   step "Release notes"
-  notes_of "$target" "$v"
-  compose_message "$v"
+  notes_of "$target"
+  review_notes
 
-  step "Signers the result is verified against"
-  info "the current stable tip's release/allowed_signers (what a box on stable trusts)"
+  step "Version"
+  sv=$(version_at "$stable_tip")
+  [[ $sv =~ $semver_re ]] || fail "stable's release/version is '${sv:-<missing>}'"
+  [ "$(version_at "$target")" = "$sv" ] \
+    || fail "the hotfix changes release/version to $(version_at "$target"). Keep it at $sv. The script sets the version."
+  new_version=$(bump "$sv" patch)
+  ok "a hotfix is a patch release: $sv -> $new_version"
+  confirm "Release this hotfix as HinterOS $new_version stable?"
+  compose_message "$new_version"
+
+  step "Signers that verify the result"
+  info "release/allowed_signers of the current stable (a box on stable trusts these keys)"
   signers_of "$stable_tip" "$tmp/verify.signers"
   key_preflight "$tmp/verify.signers"
 
-  step "Release commit"
-  tree=$(g rev-parse "$target^{tree}")
-  info "tree of $target, single parent $stable_tip (stable)"
-  [ "$dry_run" = 1 ] || info "signing with $key: ssh-keygen asks for the passphrase"
-  new=$(make_commit "$tree" -p "$stable_tip") || fail "signing failed"
-  show_commit "$new"
+  tree=$(versioned_tree "$target" "$new_version")
+  info "the release commit: tree of $target with release/version $new_version, one parent $stable_tip (stable)"
+  review_and_sign stable "HinterOS $new_version stable (hotfix)" "$tree" -p "$stable_tip"
 
   step "Checks on the result"
-  [ "$(g rev-parse "$new^{tree}")" = "$tree" ] || fail "the result's tree is not $tree"
-  ok "tree equals the hotfix commit's ($tree)"
+  only_version_changed "$new" "$target"
   is_ancestor "$stable_tip" "$new" || fail "not a fast-forward from $stable_tip"
   ok "fast-forward from origin/stable"
   if [ "$dry_run" = 1 ]; then
-    info "would verify the signed commit against the signers above"
+    info "dry run: no signature to verify"
   else
     verify "$new" "$tmp/verify.signers"
   fi
@@ -755,13 +1061,110 @@ promote_hotfix() {
 
   step "Done"
   if [ "$dry_run" = 1 ]; then
-    info "dry run: stable would get a signed HinterOS $v hotfix commit"
+    info "dry run: no change to stable"
   else
-    ok "stable is HinterOS $v: $new"
+    ok "stable is HinterOS $new_version stable: $new"
   fi
-  info "next: merge stable into main (ordinary merge), let CI run, then promote beta;"
-  info "until then promote stable refuses and beta boxes see stable as not a fast-forward."
+  info "next: merge stable into main. Let CI run. Then release main to beta."
+  info "Before that, a stable release stops, and beta boxes see stable as not a fast-forward."
 }
+
+# --- menus (no mode given) -----------------------------------------------------------------
+
+# One line per channel branch: where it is and what a box calls it.
+describe_branch() {
+  local b=$1 r v n
+  r=$(tip "$b")
+  if [ -z "$r" ]; then
+    printf '  %-7s does not exist\n' "$b"
+    return 0
+  fi
+  v=$(version_at "$r")
+  case "$b" in
+    main)
+      if [ -n "$(tip beta)" ]; then n=$(g rev-list --no-merges --count "refs/heads/beta..$r"); else n=$(g rev-list --no-merges --count "$r"); fi
+      printf '  %-7s %s  release/version %s, %s commit(s) not on beta. Last: %s\n' "$b" "${r:0:7}" "${v:-?}" "$n" \
+        "$(g log -1 --format=%s "$r")"
+      ;;
+    beta) printf '  %-7s %s  HinterOS %s.%s beta (%s)\n' "$b" "${r:0:7}" "${v:-?}" "${r:0:7}" "$(g log -1 --format=%cs "$r")" ;;
+    stable) printf '  %-7s %s  HinterOS %s stable (%s)\n' "$b" "${r:0:7}" "${v:-?}" "$(g log -1 --format=%cs "$r")" ;;
+  esac
+}
+
+# Asks what to release where and which commit; sets $mode, $want_rev, $hotfix_branch,
+# $bootstrap and, if the default key file is missing, $key.
+choose_release() {
+  local main beta_tip stable_tip labels=() modes=() revs=() names=() c b
+  main=$(tip main)
+  beta_tip=$(tip beta)
+  stable_tip=$(tip stable)
+  step "Channels"
+  for b in main beta stable; do describe_branch "$b"; done
+  mapfile -t names < <(g for-each-ref --format='%(refname:short)' refs/heads/hotfix/)
+
+  if [ -n "$main" ] && { [ -z "$beta_tip" ] || ! is_ancestor "$main" "$beta_tip"; }; then
+    labels+=("Release main to beta")
+    modes+=(beta)
+  fi
+  if [ -n "$beta_tip" ] && { [ -z "$stable_tip" ] || ! is_ancestor "$beta_tip" "$stable_tip"; }; then
+    labels+=("Release beta to stable")
+    modes+=(stable)
+  fi
+  if [ -n "$stable_tip" ] && [ "${#names[@]}" -gt 0 ]; then
+    labels+=("Release a hotfix branch to stable")
+    modes+=(hotfix)
+  fi
+  [ "${#modes[@]}" -gt 0 ] || fail "nothing to release. Beta has all of main, and stable has all of beta."
+  pick "Select the release:" 1 "${labels[@]}"
+  mode=${modes[picked - 1]}
+
+  case "$mode" in
+    beta)
+      labels=()
+      revs=()
+      while read -r c; do
+        [ -z "$beta_tip" ] || ! is_ancestor "$c" "$beta_tip" || break
+        revs+=("$c")
+        labels+=("$(g log -1 --format='%h %s (%cs)' "$c")")
+      done < <(g rev-list --first-parent --max-count=10 "$main")
+      pick "Select the main commit for beta (newest first):" 1 "${labels[@]}"
+      want_rev=${revs[picked - 1]}
+      if [ -z "$beta_tip" ]; then
+        bootstrap=1
+        info "there is no beta branch. This release makes it."
+      fi
+      ;;
+    stable)
+      labels=()
+      revs=()
+      while read -r c; do
+        [ -z "$stable_tip" ] || ! is_ancestor "$c" "$stable_tip" || break
+        # Below the first beta release the first-parent chain is main's history.
+        is_beta_release "$c" || break
+        revs+=("$c")
+        labels+=("HinterOS $(version_at "$c").${c:0:7} beta ($(g log -1 --format=%cs "$c"))")
+        [ "${#revs[@]}" -lt 10 ] || break
+      done < <(g rev-list --first-parent "$beta_tip")
+      pick "Select the beta release for stable (newest first):" 1 "${labels[@]}"
+      want_rev=${revs[picked - 1]}
+      ;;
+    hotfix)
+      labels=()
+      for b in "${names[@]}"; do labels+=("$b: $(g log -1 --format='%h %s (%cs)' "refs/heads/$b")"); done
+      pick "Select the hotfix branch:" 1 "${labels[@]}"
+      hotfix_branch=${names[picked - 1]}
+      ;;
+  esac
+
+  if [ "$dry_run" = 0 ] && [ ! -f "$key" ]; then
+    warn "the signing key $key does not exist"
+    read -r -p "  Signing key file: " key || fail "no key"
+    key=${key/#\~/$HOME}
+    case "$key" in /*) ;; *) key=$PWD/$key ;; esac
+  fi
+}
+
+if [ "$interactive" = 1 ]; then choose_release; fi
 
 case "$mode" in
   beta) promote_beta ;;

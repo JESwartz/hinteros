@@ -8,6 +8,7 @@ pkgs.runCommand "hinteros-promote-test"
       pkgs.git
       pkgs.openssh
       pkgs.jq
+      pkgs.util-linux # script: promote on a terminal, for the menus
     ];
   }
   ''

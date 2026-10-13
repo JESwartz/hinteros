@@ -1,10 +1,12 @@
 # HinterOS release notes
 
-Newest first. `promote` puts the top section (the text under the first `## <version>` heading,
-which must match `release/version`) into the release commit's message, which is what a box shows
-as the update's notes. Keep each section short and written for the person using the box.
+Newest first. Changes since the last stable release go under `## Unreleased` on top: `promote`
+puts that section into the release commit's message, which is what a box shows as the update's
+notes, and `promote stable` renames it to the version the promoter picks. Start a new
+`## Unreleased` section after merging a stable release into `main`. Keep each section short and
+written for the person using the box.
 
-## 0.7.0
+## Unreleased
 
 The first signed release: the first build of HinterOS meant to be installed on a box and kept
 up to date. (0.6.0 was prepared but never released; everything in it is here.)
