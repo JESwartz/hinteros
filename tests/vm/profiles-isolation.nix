@@ -14,10 +14,11 @@
 #     group's NetworkManager rule.
 #   - Box-wide: the display mode and the audio output p1 saved are what p2's session starts with
 #     (gamescope's mode file is copied by the display-env wrapper; the audio output node is
-#     published at /run/hinteros/audio-output); p2's choice replaces it for everyone; no profile
-#     can write the published files itself.
-# Not covered in a VM: real gamescope modes and PipeWire sinks (the default-sink handover at
-# session start is a known gap); per-profile volume (WirePlumber state in the home).
+#     published at /run/hinteros/audio-output, and p2's session daemon makes it PipeWire's default
+#     sink at start, over two null sinks of which PipeWire itself prefers the other); p2's choice
+#     replaces it for everyone; no profile can write the published files itself.
+# Not covered in a VM: real gamescope modes and real outputs (HDMI, headphones plugged in);
+# per-profile volume (WirePlumber state in the home).
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
@@ -54,6 +55,36 @@ profiles.mkTest {
     empty.ids = [ ];
     moonlight.ids = [ "moonlight" ];
   };
+  # Two virtual outputs (PipeWire null sinks, as in runtime-settings); WirePlumber prefers a.
+  extraModule =
+    { pkgs, ... }:
+    {
+      services.pipewire.extraConfig.pipewire."99-hinteros-null-sinks"."context.objects" =
+        map
+          (n: {
+            factory = "adapter";
+            args = {
+              "factory.name" = "support.null-audio-sink";
+              "node.name" = "hinteros_sink_${n.name}";
+              "node.description" = "Test output ${n.name}";
+              "media.class" = "Audio/Sink";
+              "audio.position" = "FL,FR";
+              "priority.session" = n.priority;
+              "priority.driver" = n.priority;
+            };
+          })
+          [
+            {
+              name = "a";
+              priority = 2000;
+            }
+            {
+              name = "b";
+              priority = 1000;
+            }
+          ];
+      environment.systemPackages = [ pkgs.pulseaudio ];
+    };
   appProfiles = {
     hinteros = "p1";
     hinteros-p2 = "empty";
@@ -74,6 +105,11 @@ profiles.mkTest {
           "/home/hinteros/notes.txt",
       ]
 
+      def default_sink(user):
+          return machine.succeed(
+              f"runuser -u {user} -- env XDG_RUNTIME_DIR=/run/user/{uid(user)} pactl get-default-sink"
+          ).strip()
+
       def as_p2(cmd):
           return f"runuser -u hinteros-p2 -- sh -c {json.dumps(cmd)}"
 
@@ -83,9 +119,14 @@ profiles.mkTest {
               machine.succeed(f"runuser -u hinteros -- sh -c 'mkdir -p \"$(dirname {f})\" && echo secret-of-p1 > {f}'")
           u1 = uid("hinteros")
           assert sess_ok("hinteros", "system.display.save_mode", {"display": "QEMU Monitor", "width": 1280, "height": 720, "refresh": 60}) == {}
-          assert sess_ok("hinteros", "system.audio.save_output", {"node": "alsa_output.hdmi-stereo"}) == {}
+          # Before any choice: PipeWire's own default (the sink with the higher priority).
+          machine.wait_until_succeeds(
+              f"runuser -u hinteros -- env XDG_RUNTIME_DIR=/run/user/{u1} pactl get-default-sink | grep -qx hinteros_sink_a",
+              timeout=60,
+          )
+          assert sess_ok("hinteros", "system.audio.save_output", {"node": "hinteros_sink_b"}) == {}
           assert machine.succeed("cat /run/hinteros/gamescope-modes") == "QEMU Monitor:1280x720@60\n"
-          assert machine.succeed("cat /run/hinteros/audio-output") == "alsa_output.hdmi-stereo\n"
+          assert machine.succeed("cat /run/hinteros/audio-output") == "hinteros_sink_b\n"
           for f in ["gamescope-modes", "audio-output"]:
               assert machine.succeed(f"stat -c '%a %U' /run/hinteros/{f}").strip() == "644 root", f
           p1_env = machine.succeed(f"readlink -f {P1}").strip()
@@ -160,7 +201,7 @@ profiles.mkTest {
               e = sys_err("hinteros", method, params, 3002)
               assert e["data"]["reason"] == "seat", (method, e)
           assert profiles_file()["profiles"]["p1"]["name"] == "James"
-          assert machine.succeed("cat /run/hinteros/audio-output") == "alsa_output.hdmi-stereo\n"
+          assert machine.succeed("cat /run/hinteros/audio-output") == "hinteros_sink_b\n"
 
       with subtest("no lingering for profiles; the group's grants follow the active session"):
           cage = machine.succeed("pgrep -u hinteros-p2 -o -f '/bin/cage '").strip()
@@ -176,16 +217,23 @@ profiles.mkTest {
               f"{DISPLAY_ENV} sh -c 'cat \"$GAMESCOPE_MODE_SAVE_FILE\"'"
           )
           assert out == "QEMU Monitor:1280x720@60\n", out
-          assert machine.succeed(as_p2("cat /run/hinteros/audio-output")) == "alsa_output.hdmi-stereo\n"
+          assert machine.succeed(as_p2("cat /run/hinteros/audio-output")) == "hinteros_sink_b\n"
+          # p2's session daemon made the box's output its default sink when it started.
+          u2 = uid("hinteros-p2")
+          machine.wait_until_succeeds(
+              f"runuser -u hinteros-p2 -- env XDG_RUNTIME_DIR=/run/user/{u2} pactl get-default-sink | grep -qx hinteros_sink_b",
+              timeout=90,
+          )
+          assert default_sink("hinteros-p2") == "hinteros_sink_b"
           machine.fail(as_p2("echo x > /run/hinteros/audio-output"))
           machine.fail(as_p2("echo x > /run/hinteros/gamescope-modes"))
           # p2's choice is the box's from now on (not a per-profile copy).
           assert sess_ok("hinteros-p2", "system.display.save_mode", {"display": "QEMU Monitor", "width": 1920, "height": 1080, "refresh": 50}) == {}
-          assert sess_ok("hinteros-p2", "system.audio.save_output", {"node": "alsa_output.usb-headset"}) == {}
+          assert sess_ok("hinteros-p2", "system.audio.save_output", {"node": "hinteros_sink_a"}) == {}
           assert machine.succeed("cat /run/hinteros/gamescope-modes") == "QEMU Monitor:1920x1080@50\n"
-          assert machine.succeed("cat /run/hinteros/audio-output") == "alsa_output.usb-headset\n"
+          assert machine.succeed("cat /run/hinteros/audio-output") == "hinteros_sink_a\n"
           rt = json.loads(machine.succeed("cat /var/lib/hinteros/runtime.json"))
-          assert rt["audio_output"] == "alsa_output.usb-headset", rt
+          assert rt["audio_output"] == "hinteros_sink_a", rt
           assert rt["display_modes"] == {"QEMU Monitor": "1920x1080@50"}, rt
           # p1's next session starts with it too.
           out = machine.succeed(
