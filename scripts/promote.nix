@@ -9,6 +9,8 @@
   gnused,
   gnugrep,
   gawk,
+  diffutils,
+  nano,
 }:
 writeShellApplication {
   name = "promote";
@@ -21,6 +23,8 @@ writeShellApplication {
     gnused
     gnugrep
     gawk
+    diffutils
+    nano
   ];
   text = builtins.readFile ./promote.sh;
   meta.description = "Sign and move the HinterOS beta and stable channels";

@@ -177,7 +177,13 @@ pass "dry run: shows the commit and the push, creates nothing"
 expect_refused "is not in the allowed_signers" beta --bootstrap --key "$work/bad" --security none
 pass "bootstrap with a key the new tree does not list: refused before signing"
 
-expect_ok beta --bootstrap --key "$work/k1" --security none
+expect_refused "needs --yes" beta --bootstrap --key "$work/k1" --security none
+[ -z "$(remote beta)" ] || die "beta was pushed without the review being answered"
+grep -q "== Review" "$work/out" || die "no review before signing"
+grep -q "Sign this commit and push it to beta" "$work/out" || die "the review does not ask to sign and push"
+pass "the review comes before signing: without an answer nothing is signed or pushed"
+
+expect_ok beta --bootstrap --key "$work/k1" --security none --yes
 beta1=$(remote beta)
 [ -n "$beta1" ] || die "no beta after bootstrap"
 [ "$(o rev-parse "$beta1^{tree}")" = "$(dev rev-parse "$main1^{tree}")" ] || die "bootstrap tree differs from main"
@@ -201,7 +207,7 @@ push
 main2=$(dev rev-parse HEAD)
 expect_refused "not interactive: pass --security" beta --key "$work/k1"
 pass "non-interactive without --security: refused"
-expect_ok beta --key "$work/k1" --security medium
+expect_ok beta --key "$work/k1" --security medium --yes
 beta2=$(remote beta)
 grep -q "Security: medium in" "$work/out" || die "trailer not listed"
 grep -q "nixpkgs: 111111111111 -> 222222222222" "$work/out" || die "nixpkgs change not shown"
@@ -217,7 +223,7 @@ pass "second beta, same version: fast-forward, tree = main, parents beta+main, t
 change "More"
 push
 expect_refused "is not in the allowed_signers" beta --key "$work/bad" --security none
-expect_refused "does not verify against these signers" beta --key "$work/nopub" --security none
+expect_refused "does not verify against these signers" beta --key "$work/nopub" --security none --yes
 [ "$(remote beta)" = "$beta2" ] || die "beta moved after a refused promotion"
 pass "a key the old tip does not list: refused (pre-check, and at verification)"
 
@@ -274,7 +280,7 @@ pass "beta with a hand-bumped release/version: refused"
 set_version 0.6.0
 push
 main3=$(dev rev-parse HEAD)
-expect_ok beta --key "$work/k1" --security none
+expect_ok beta --key "$work/k1" --security none --yes
 beta3=$(remote beta)
 o merge-base --is-ancestor "$stable1" "$beta3" || die "stable is not an ancestor of beta"
 [ "$(o log -1 --format=%s "$beta3")" = "HinterOS 0.6.0 beta" ] || die "beta 3 subject"
@@ -333,6 +339,9 @@ pass "hotfix: 0.7.1, signed (with the key added later) on top of stable, verifie
 
 expect_refused "already contains" stable --bump patch --yes --key "$work/k1"
 pass "stable again after the hotfix (no new beta yet): refused"
+dev checkout -q main
+change "Work on main during the hotfix"
+push
 expect_refused "merge stable" beta --key "$work/k1" --security none
 pass "beta while the hotfix is not on main: refused"
 
@@ -342,12 +351,98 @@ dev merge -q -X theirs --no-edit origin/stable
 change "After 0.7.1"
 push
 main4=$(dev rev-parse HEAD)
-expect_ok beta --key "$work/k1" --security none
+expect_ok beta --key "$work/k1" --security none --yes
 beta4=$(remote beta)
 [ "$(o rev-parse "$beta4^{tree}")" = "$(dev rev-parse "$main4^{tree}")" ] || die "tree differs"
 [ "$(o log -1 --format=%s "$beta4")" = "HinterOS 0.7.1 beta" ] || die "beta after the hotfix"
 o merge-base --is-ancestor "$stable3" "$beta4" || die "stable is not an ancestor of beta"
 box_verifies "$beta4" "$beta3" || die "beta 0.7.1.<hash> does not verify"
 pass "after merging stable into main: beta 0.7.1.<hash>, stable is an ancestor again"
+
+# --- the menus (no mode given), on a terminal ----------------------------------------------
+# A fresh remote. `script` gives promote a terminal; the answers are typed in advance.
+expect_refused "no terminal to ask on" --skip-ci
+pass "no mode and no terminal: refused with the usage"
+
+export PROMOTE_REPO_URL=$work/menus.git
+git init -q --bare "$work/menus.git"
+git clone -q "$work/menus.git" "$work/m" 2>/dev/null
+m() { git -C "$work/m" "$@"; }
+mo() { git -C "$work/menus.git" "$@"; }
+mkdir -p "$work/m/release"
+echo 0.7.0 >"$work/m/release/version"
+printf '# Release notes\n\n## Unreleased\n\n- Profiles.\n\n## 0.1.0\n\nOld.\n' >"$work/m/release/notes.md"
+echo "k1 $(pub k1) k1@test" >"$work/m/release/allowed_signers"
+cp "$work/dev/flake.lock" "$work/m/flake.lock"
+m add -A
+m commit -q -m "Profiles"
+m push -q origin main 2>/dev/null
+# The "editor": adds a line to the notes it is given.
+printf '#!%s\necho "- Edited at the promote prompt." >>"$1"\n' "$BASH" >"$work/editor"
+chmod +x "$work/editor"
+
+# run_menus <answers, one per line> <args>: promote on a terminal; output in $work/out.
+run_menus() {
+  local answers=$1 rc=0
+  shift
+  printf '%b' "$answers" | EDITOR=$work/editor script -qec "$(printf '%q ' "$PROMOTE" "$@")" /dev/null \
+    | tr -d '\r' >"$work/out" 2>&1 || rc=$?
+  if [ -n "${PROMOTE_TEST_LOG:-}" ]; then
+    printf '\n######## promote (menus) %s (exit %s)\n' "$*" "$rc" >>"$PROMOTE_TEST_LOG"
+    cat "$work/out" >>"$PROMOTE_TEST_LOG"
+  fi
+}
+
+run_menus 'q\n' --skip-ci --key "$work/k1"
+grep -q "1) Release main to beta (the first beta release)" "$work/out" || {
+  cat "$work/out"
+  die "the menu does not offer the first beta"
+}
+grep -q "Release beta to stable" "$work/out" && die "the menu offers stable before there is a beta"
+grep -q "stopped, nothing was signed or pushed" "$work/out" || die "q did not stop"
+[ -z "$(mo rev-parse -q --verify refs/heads/beta)" ] || die "q pushed something"
+pass "menus: the channels and only what can be released; q stops with nothing done"
+
+run_menus 'x\n1\n1\n\n1\nn\n' --skip-ci --key "$work/k1"
+grep -q "Not one of the choices: x" "$work/out" || die "a wrong answer is not asked again"
+grep -q "== Review" "$work/out" || die "no review"
+grep -q "not confirmed" "$work/out" || die "answering no did not stop"
+[ -z "$(mo rev-parse -q --verify refs/heads/beta)" ] || die "beta was pushed after answering no"
+pass "menus: a wrong answer is asked again; no at the review leaves nothing signed or pushed"
+
+# 1 release main to beta, 1 newest commit, default severity, 1 notes as they are, yes to sign.
+run_menus '1\n1\n\n1\ny\n' --skip-ci --key "$work/k1"
+mbeta=$(mo rev-parse -q --verify refs/heads/beta) || {
+  cat "$work/out"
+  die "the menus did not release beta"
+}
+[ "$(mo log -1 --format=%s "$mbeta")" = "HinterOS 0.7.0 beta" ] || die "menus: beta subject"
+grep -q "first beta release" "$work/out" || die "menus: the first beta was not explained"
+grep -q "beta is HinterOS 0.7.0.${mbeta:0:7} beta" "$work/out" || die "menus: the beta's name"
+pass "menus: release main to beta, the first one started without --bootstrap"
+
+# 1 release beta to stable, 1 newest beta, 2 edit the notes then 1 use them, 1 keep 0.7.0,
+# y box #2, y sign.
+run_menus '1\n1\n2\n1\n1\ny\ny\n' --skip-ci --key "$work/k1"
+mstable=$(mo rev-parse -q --verify refs/heads/stable) || {
+  cat "$work/out"
+  die "the menus did not release stable"
+}
+grep -q "1) Release beta to stable (the first stable release)" "$work/out" || die "menus: stable not offered"
+grep -q "2) HinterOS" "$work/out" && die "menus: a main commit is offered as a beta release"
+grep -q "Release main to beta" "$work/out" && die "menus: beta offered with nothing new on main"
+grep -q "notes:     edited here" "$work/out" || die "menus: the review does not say the notes were edited"
+[ "$(mo show "$mstable:release/version")" = 0.7.0 ] || die "menus: stable version"
+mo show "$mstable:release/notes.md" | grep -qx -- "- Edited at the promote prompt." || die "menus: the edit is not in release/notes.md"
+mo log -1 --format=%B "$mstable" | grep -qx -- "- Edited at the promote prompt." || die "menus: the edit is not in the message"
+[ "$(mo show "$mstable:release/notes.md" | grep -m1 '^## ')" = "## 0.7.0" ] || die "menus: notes heading"
+mo show "$mstable:release/notes.md" | grep -qx "## 0.1.0" || die "menus: the older notes are gone"
+[ -z "$(mo diff --name-only "$mbeta" "$mstable" | grep -vx -e release/version -e release/notes.md)" ] \
+  || die "menus: stable changes more than the version and notes"
+pass "menus: release beta to stable, notes edited before signing, kept at 0.7.0"
+
+run_menus '' --skip-ci --key "$work/k1"
+grep -q "nothing to release" "$work/out" || die "menus: nothing to release is not said"
+pass "menus: nothing new anywhere is said and refused"
 
 echo "all $n promote tests passed"
