@@ -7,6 +7,8 @@
 #     exactly one rebuild (state.json `requirements`, 32-bit graphics drivers, Valve's udev rules),
 #     then p1's env has Steam.
 #   - p2 installs Steam too: no rebuild (the features are on), same system generation.
+#   - A rollback (admin PIN) to the generation before the features turns them back on in a
+#     `box` stage (generations.list `readds_features`, job result `features_readded`).
 #   - Both remove Steam: the features stay on (no rebuild only to drop them).
 #   - The next system job that rebuilds anyway (`rebuild`) drops them: requirements [] and the
 #     32-bit drivers and udev rules gone.
@@ -125,6 +127,25 @@ profiles.mkTest {
         assert current_system() == systems["box"]
         assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/apps/hinteros-p2").strip() == env_path("steam")
 
+    with subtest("a rollback to before the features turns them back on (box stage)"):
+        gens = sys_ok("hinteros-p2", "generations.list")["generations"]
+        old = [g for g in gens if not g["current"]]
+        assert len(old) == 1, gens
+        assert old[0].get("readds_features") == FEATURES, gens
+        # A box-wide action: the admin PIN.
+        e = sys_err("hinteros-p2", "rollback", {"generation": old[0]["generation"]}, 3016)
+        assert e["data"] == {"pin": "admin"}, e
+        stub_build(systems["box"])
+        j = sys_ok("hinteros-p2", "rollback", {"generation": old[0]["generation"], "admin_pin": "2468"})["job_id"]
+        done = wait_job("hinteros-p2", j)
+        assert done["state"] == "succeeded" and done["kind"] == "rollback", done
+        assert done["result"]["features_readded"] == FEATURES, done
+        assert current_system() == systems["box"]
+        assert state_json()["requirements"] == FEATURES, state_json()
+        assert features_on() == (True, True), features_on()
+        assert len(builds()) == 2, builds()
+        assert system_generations() == gens0 + 2
+
     with subtest("removing Steam everywhere leaves the features on until a rebuild"):
         remove_steam("hinteros-p2")
         assert state_json()["requirements"] == FEATURES
@@ -132,8 +153,8 @@ profiles.mkTest {
         remove_steam("hinteros")
         assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/apps/hinteros").strip() == env_path("empty")
         assert state_json()["requirements"] == FEATURES, state_json()
-        assert len(builds()) == 1, builds()
-        assert system_generations() == gens0 + 1
+        assert len(builds()) == 2, builds()
+        assert system_generations() == gens0 + 2
         assert features_on() == (True, True)
 
     with subtest("the next system job that rebuilds anyway drops them"):
