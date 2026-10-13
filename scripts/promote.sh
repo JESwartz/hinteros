@@ -15,7 +15,7 @@
 #
 # Versions: `release/version` on main is the latest stable release, and main's release notes keep
 # an `## Unreleased` section on top. A beta release keeps both: a box shows it as
-# `<version>.<commit> beta` (the release commit's short hash). `promote stable` shows what changed
+# `<version + 1 patch>.<commit> beta` (0.7.1.1a2b3c4 beta on top of 0.7.0). `promote stable` shows what changed
 # and asks the promoter for the new version (patch, minor, major or typed; --bump/--version
 # without asking), then signs a commit on top of the beta release that only writes it to
 # release/version and renames `## Unreleased`; a box shows `<version> stable`. A hotfix is the
@@ -285,7 +285,7 @@ bump() {
 # $2: the current stable's version ("" before the first stable). Sets $new_version.
 new_version=
 choose_version() {
-  local base=$1 current=$2 default=minor ans i choices=(patch minor major)
+  local base=$1 current=$2 default=patch ans i choices=(patch minor major)
   if [ -z "$current" ]; then
     choices=(keep patch minor major)
     default=keep
@@ -763,7 +763,7 @@ promote_beta() {
   else
     ok "release/version = $v (there is no stable release)"
   fi
-  info "a box shows this release as $v.<release commit> beta"
+  info "a box shows this release as $(bump "$v" patch).<release commit> beta"
 
   step "Hotfixes and stable releases on main"
   hot=()
@@ -800,7 +800,7 @@ promote_beta() {
   if [ "$notes_edited" = 1 ]; then
     info "the change is only in the message of this beta. release/notes.md on main does not change."
   fi
-  compose_message "$v beta"
+  compose_message "$(bump "$v" patch) beta"
 
   step "Signers that verify the result"
   if [ -n "$beta_tip" ]; then
@@ -817,10 +817,10 @@ promote_beta() {
   tree=$(g rev-parse "$target^{tree}")
   if [ -n "$beta_tip" ]; then
     info "the release commit: tree of $target, parents $beta_tip (beta) and $target (main)"
-    review_and_sign beta "HinterOS $v.<commit> beta" "$tree" -p "$beta_tip" -p "$target"
+    review_and_sign beta "HinterOS $(bump "$v" patch).<commit> beta" "$tree" -p "$beta_tip" -p "$target"
   else
     info "the release commit: tree of $target, one parent $target (main)"
-    review_and_sign beta "HinterOS $v.<commit> beta" "$tree" -p "$target"
+    review_and_sign beta "HinterOS $(bump "$v" patch).<commit> beta" "$tree" -p "$target"
   fi
 
   step "Checks on the result"
@@ -848,7 +848,7 @@ promote_beta() {
   if [ "$dry_run" = 1 ]; then
     info "dry run: no change to beta"
   else
-    ok "beta is HinterOS $v.${new:0:7} beta: $new"
+    ok "beta is HinterOS $(beta_name "$new"): $new"
     info "to move a box to beta one time: sudo hinteros-bootstrap-channel beta $new"
     info "test it on box #2. Then run nix run .#promote again for stable."
     if [ "$notes_edited" = 1 ]; then info "for stable, put the changed notes in release/notes.md on main"; fi
@@ -857,13 +857,22 @@ promote_beta() {
 
 # --- stable --------------------------------------------------------------------------------
 
-# A beta release commit's subject: `HinterOS <version> beta`, or `HinterOS <version>` from before
-# betas kept the stable version (the first beta, 0.7.0, was promoted that way).
+# A beta release commit's subject: `HinterOS <next patch> beta`; `HinterOS <version> beta` and
+# `HinterOS <version>` from earlier schemes (the first beta, 0.7.0, was promoted as the latter).
 is_beta_release() {
   local s v
   v=$(version_at "$1")
   s=$(g log -1 --format=%s "$1")
-  [ "$s" = "HinterOS $v beta" ] || [ "$s" = "HinterOS $v" ]
+  [ "$s" = "HinterOS $(bump "$v" patch) beta" ] || [ "$s" = "HinterOS $v beta" ] || [ "$s" = "HinterOS $v" ]
+}
+
+# How a box names a beta release: the next patch of its release/version, its short hash, "beta"
+# (0.7.1.1a2b3c4 beta on top of 0.7.0 stable).
+beta_name() {
+  local v
+  v=$(version_at "$1")
+  if [[ $v =~ $semver_re ]]; then v=$(bump "$v" patch); fi
+  printf '%s.%s beta' "${v:-?}" "${1:0:7}"
 }
 
 promote_stable() {
@@ -882,8 +891,8 @@ promote_stable() {
   v=$(version_at "$target")
   [[ $v =~ $semver_re ]] || fail "release/version of the target is '${v:-<missing>}'"
   is_beta_release "$target" \
-    || fail "the subject is '$(g log -1 --format=%s "$target")'. It must be 'HinterOS $v beta'."
-  ok "beta release commit: HinterOS $v.${target:0:7} beta"
+    || fail "the subject is '$(g log -1 --format=%s "$target")'. It must be 'HinterOS $(bump "$v" patch) beta'."
+  ok "beta release commit: HinterOS $(beta_name "$target")"
   g cat-file commit "$target" | grep '^gpgsig ' >/dev/null || fail "$target is not signed"
   ok "it has a signature"
 
@@ -938,9 +947,9 @@ promote_stable() {
       high | critical) ok "--expedite with a $release_sev release" ;;
       *) fail "--expedite is only for Security: high or critical releases. This release is $release_sev." ;;
     esac
-    confirm "Did box #2 run HinterOS $v.${target:0:7} beta for 1 hour or more with no problems?"
+    confirm "Did box #2 run HinterOS $(beta_name "$target") for 1 hour or more with no problems?"
   else
-    confirm "Did box #2 run HinterOS $v.${target:0:7} beta and pass the couch checklists for the changes?"
+    confirm "Did box #2 run HinterOS $(beta_name "$target") and pass the couch checklists for the changes?"
   fi
 
   step "Signers that verify the result"
@@ -1086,7 +1095,7 @@ describe_branch() {
       printf '  %-7s %s  release/version %s, %s commit(s) not on beta. Last: %s\n' "$b" "${r:0:7}" "${v:-?}" "$n" \
         "$(g log -1 --format=%s "$r")"
       ;;
-    beta) printf '  %-7s %s  HinterOS %s.%s beta (%s)\n' "$b" "${r:0:7}" "${v:-?}" "${r:0:7}" "$(g log -1 --format=%cs "$r")" ;;
+    beta) printf '  %-7s %s  HinterOS %s (%s)\n' "$b" "${r:0:7}" "$(beta_name "$r")" "$(g log -1 --format=%cs "$r")" ;;
     stable) printf '  %-7s %s  HinterOS %s stable (%s)\n' "$b" "${r:0:7}" "${v:-?}" "$(g log -1 --format=%cs "$r")" ;;
   esac
 }
@@ -1142,7 +1151,7 @@ choose_release() {
         # Below the first beta release the first-parent chain is main's history.
         is_beta_release "$c" || break
         revs+=("$c")
-        labels+=("HinterOS $(version_at "$c").${c:0:7} beta ($(g log -1 --format=%cs "$c"))")
+        labels+=("HinterOS $(beta_name "$c") ($(g log -1 --format=%cs "$c"))")
         [ "${#revs[@]}" -lt 10 ] || break
       done < <(g rev-list --first-parent "$beta_tip")
       pick "Select the beta release for stable (newest first):" 1 "${labels[@]}"
