@@ -668,10 +668,11 @@ review_and_sign() {
 # The top section of release/notes.md (under the first "## " heading), which must be
 # `## Unreleased`: what changed since the last stable release.
 notes_of() {
-  local rev=$1 version=Unreleased heading
+  local rev=$1 named=${2:-} version heading
   g show "$rev:release/notes.md" >"$tmp/notes.md" 2>/dev/null || fail "$rev has no release/notes.md"
   heading=$(grep -m1 '^## ' "$tmp/notes.md" | sed -e 's/^## *//' -e 's/[[:space:]]*$//') || true
-  [ "$heading" = "$version" ] \
+  version=$heading
+  [ "$heading" = Unreleased ] || { [ -n "$named" ] && [ "$heading" = "$named" ]; } \
     || fail "release/notes.md: the top section is '## ${heading:-<none>}', not '## Unreleased' (promote names it)"
   awk 'BEGIN { s = 0 } /^## / { s++; next } s == 1 { print }' "$tmp/notes.md" \
     | sed -e '/./,$!d' | sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' >"$tmp/notes.top"
@@ -920,7 +921,8 @@ promote_stable() {
   ok "severity of this stable release: $release_sev"
 
   step "Release notes"
-  notes_of "$target"
+  # A beta from before betas kept the stable version has its section named already.
+  notes_of "$target" "$v"
   review_notes
 
   step "Version"

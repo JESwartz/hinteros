@@ -456,6 +456,8 @@ for i in $(seq 1 3000); do
 done | git -C "$work/l" fast-import --quiet
 git -C "$work/l" reset -q --hard main
 cp -r "$work/m/release" "$work/m/flake.lock" "$work/l/"
+# The old script wanted the notes section named after the version.
+sed -i "s/^## Unreleased$/## 0.7.0/" "$work/l/release/notes.md"
 git -C "$work/l" add -A
 git -C "$work/l" commit -q -m "Before the version scheme"
 git -C "$work/l" push -q origin main 2>/dev/null
@@ -472,6 +474,7 @@ expect_ok stable --bump keep --yes --key "$work/k1"
 lstable=$(git -C "$work/legacy.git" rev-parse refs/heads/stable)
 [ "$(git -C "$work/legacy.git" rev-list --parents -n1 "$lstable")" = "$lstable $lbeta" ] || die "legacy: stable's parent"
 [ "$(git -C "$work/legacy.git" log -1 --format=%s "$lstable")" = "HinterOS 0.7.0" ] || die "legacy: stable subject"
+[ "$(git -C "$work/legacy.git" show "$lstable:release/notes.md" | grep -m1 "^## ")" = "## 0.7.0" ] || die "legacy: notes heading"
 pass "a beta release from the old script ('HinterOS 0.7.0') can go to stable"
 
 echo "all $n promote tests passed"
