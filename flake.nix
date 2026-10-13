@@ -217,6 +217,7 @@
         profiles-pin = import ./tests/vm/profiles-pin.nix { inherit self pkgs; };
         profiles-isolation = import ./tests/vm/profiles-isolation.nix { inherit self pkgs; };
         profiles-lifecycle = import ./tests/vm/profiles-lifecycle.nix { inherit self pkgs; };
+        profiles-lock = import ./tests/vm/profiles-lock.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
         install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
         install-app-failure = import ./tests/vm/install-offline.nix {
