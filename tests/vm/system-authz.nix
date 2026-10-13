@@ -3,8 +3,18 @@
 # (the hinteros group rule), and `ssh.set` needs the admin password (auth_admin), so the session
 # user gets authentication_required. A rules file returning NO is honored; pkcheck agrees per
 # action; every decision is in the system journal.
+#
+# Two profiles (profiles.md "Authority"), on a second box (schema 2, greeter mode; p1 = James, the
+# admin profile, PIN 2468; p2 = Sam, PIN 1357, on screen; p3 = Alex): p2 cannot rename, remove or
+# reset the PIN of another profile, change the starter set or the guest with its own PIN or
+# another profile's, only with the admin PIN; the admin profile is never removable and its PIN
+# needs polkit `profiles.recover`; own settings check the own PIN; apps act on the caller's own
+# env only; p1 and p3 (not on screen) are refused by the seat check; the greeter's socket is the
+# greeter's; no PIN reaches the journal.
 { self, pkgs }:
 let
+  profiles = import ./system/profiles.nix { inherit self pkgs; };
+  P3_PIN = "86420975";
   denyRule = pkgs.writeText "deny.rules" ''
     polkit.addRule(function (action, subject) {
       if (action.id === "org.hinteros.system.settings" && subject.user === "hinteros") {
@@ -16,10 +26,46 @@ in
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
   name = "hinteros-system-authz";
 
-  nodes.machine = import ./system/node.nix { inherit self pkgs; };
+  nodes = {
+    machine = import ./system/node.nix { inherit self pkgs; };
+    # Started only after `machine` is shut down.
+    twoprofiles = profiles.node {
+      state = profiles.mkState {
+        accounts = [
+          "p1"
+          "p2"
+          "p3"
+        ];
+        guest = false;
+      };
+      profiles = {
+        p1 = {
+          name = "James";
+          admin = true;
+          pin = "2468";
+        };
+        p2 = {
+          name = "Sam";
+          color = "orange";
+          pin = "1357";
+        };
+        p3 = {
+          name = "Alex";
+          color = "purple";
+          pin = P3_PIN;
+        };
+      };
+      envs.empty.ids = [ ];
+      appProfiles = {
+        hinteros = "empty";
+        hinteros-p2 = "empty";
+        hinteros-p3 = "empty";
+      };
+    };
+  };
 
-  testScript = ''
-    import json
+  testScript = profiles.python + ''
+    P3_PIN = "${P3_PIN}"
 
     ACTIONS = ["settings", "rebuild", "update.check", "update.apply", "rollback", "channel", "jobs.cancel"]
 
@@ -153,5 +199,79 @@ in
         assert (uid, "denied_polkit") in seen, seen
         assert (uid, "allowed") in seen, seen
         machine.fail("runuser -u hinteros -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
+
+    # ---- two profiles (profiles.md "Authority"): a second box, schema 2 with the greeter -------
+    machine.shutdown()
+    machine = twoprofiles
+    boot_box()
+    enter("p2", "hinteros-p2")
+    jobs_idle("hinteros-p2")
+
+    def held():
+        # Everything root keeps per profile: metadata, PINs, app profiles.
+        return machine.succeed(
+            "cd /var/lib/hinteros && find profiles.json pins -type f ! -name '*.state' | sort | xargs sha256sum; "
+            "ls -l /nix/var/nix/profiles/hinteros/apps"
+        )
+
+    def admin_refused(user, method, params):
+        r = sess(user, "system." + method, params)
+        assert "error" in r and r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", (method, params, r)
+
+    with subtest("two profiles: the active one cannot act on another without the admin PIN"):
+        before = held()
+        rev = sys_ok("hinteros-p2", "settings.get")["revision"]
+        for pin in [None, "1357", P3_PIN]:  # none, its own, the other profile's
+            extra = {} if pin is None else {"pin": pin}
+            admin_refused("hinteros-p2", "profiles.rename", {"id": "p1", "name": "Mallory", **extra})
+            admin_refused("hinteros-p2", "profiles.rename", {"id": "p3", "name": "Mallory", **extra})
+            if pin is not None:
+                admin_refused("hinteros-p2", "profiles.reset_pin", {"id": "p3", "new_pin": "0000", "admin_pin": pin})
+                admin_refused("hinteros-p2", "profiles.remove", {"id": "p3", "confirm_id": "p3", "pin": pin, "revision": rev})
+                admin_refused("hinteros-p2", "starter_set.set", {"ids": [], "pin": pin})
+                admin_refused("hinteros-p2", "guest.set", {"enabled": False, "admin_pin": pin})
+        # The admin profile: never removable; its PIN only with the admin account's password.
+        r = sess("hinteros-p2", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "pin": "2468", "revision": rev})
+        assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "admin", r
+        r = sysrpc("hinteros-p2", "profiles.reset_pin", {"id": "p1", "new_pin": "0000", "admin_pin": "2468"})
+        assert r["error"]["code"] in (3002, 3012), r
+        assert r["error"]["data"]["action"] == "org.hinteros.system.profiles.recover", r
+        # Own settings check the caller's own PIN, never another's.
+        r = sess("hinteros-p2", "system.profiles.set_locked", {"locked": True, "pin": P3_PIN})
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "self"}, r
+        # Apps: only the caller's own; another profile's revision does not reach its env.
+        mine = sys_ok("hinteros-p2", "apps.list")
+        assert mine["ids"] == [], mine
+        e = sys_err("hinteros-p2", "apps.install", {"ids": ["moonlight"], "revision": "0" * 64}, 3007)
+        assert e["data"]["reason"] == "revision", e
+        assert [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"] == []
+        assert held() == before
+        # With the admin PIN it works (from p2's session).
+        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Alexis", "pin": "2468"}) == {}
+        assert profiles_file()["profiles"]["p3"]["name"] == "Alexis"
+
+    with subtest("two profiles: the others, not on screen, cannot act at all"):
+        for user in ["hinteros", "hinteros-p3"]:
+            own_rev = sys_ok(user, "apps.list")["revision"]
+            for method, params in [
+                ("profiles.rename", {"id": "p2", "name": "Mallory", "pin": "2468"}),
+                ("profiles.set_appearance", {"color": "red"}),
+                ("apps.install", {"ids": ["moonlight"], "revision": own_rev}),
+                ("profiles.switch", {"id": "p1"}),
+            ]:
+                e = sys_err(user, method, params, 3002)
+                assert e["data"]["reason"] == "seat", (user, method, e)
+        assert profiles_file()["profiles"]["p2"]["name"] == "Sam"
+
+    with subtest("two profiles: the greeter's socket is the greeter's, system.sock the profiles'"):
+        machine.fail(
+            "runuser -u hinteros-p2 -- python3 -c "
+            "'import socket; socket.socket(socket.AF_UNIX).connect(\"/run/hinteros/greeter.sock\")'"
+        )
+        assert rpc("hinteros-greeter", "system.info") == {"connect_error": "EACCES"}
+        assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/greeter.sock").strip() == "660 root:hinteros-greeter"
+
+    with subtest("two profiles: PINs never reach the journal"):
+        machine.fail(f"journalctl -o cat --no-pager | grep -q {P3_PIN}")
   '';
 }
