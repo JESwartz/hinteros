@@ -29,17 +29,12 @@ let
 
   # "<principal> <ssh-ed25519 key> [comment]" to ssh-keygen's allowed_signers format. The
   # namespace is pinned, so these keys can only vouch for git commits.
-  signerLine =
-    l:
-    let
-      m = builtins.match "([^ #]+) (ssh-ed25519 [A-Za-z0-9+/=]+( .*)?)" l;
-    in
-    ''${builtins.elemAt m 0} namespaces="git" ${builtins.elemAt m 1}'';
+  signerLines = import ../lib/allowed-signers.nix { inherit lib; };
   allowedSigners = pkgs.writeText "hinteros-allowed-signers" ''
     # Keys whose SSH signatures hinteros-system accepts on update commits (generated from
     # hinteros.update.allowedSigners; git, ssh-keygen allowed_signers format).
     # No entry below = no update verifies: every signature is rejected as unknown_signer.
-    ${lib.concatMapStringsSep "\n" signerLine config.hinteros.update.allowedSigners}
+    ${signerLines config.hinteros.update.allowedSigners}
   '';
 
   # polkit actions. Defaults are "no" for everything except ssh (the admin password); the rules

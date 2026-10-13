@@ -28,7 +28,7 @@ let
 
   # A clean checkout has `rev`; a dirty one (development) gets a placeholder, which Nix accepts as
   # long as the narHash is in the store. Never ship an ISO built from a dirty tree.
-  isoRev = self.rev or "0000000000000000000000000000000000000000";
+  inherit (cfg) isoRev;
 
   offlineLock = import ../lib/device-lock.nix { inherit lib; } {
     selfLock = builtins.fromJSON (builtins.readFile (self + "/flake.lock"));
@@ -296,6 +296,13 @@ let
     catalogIndex = "${config.hinteros.catalog.index}/share/hinteros/catalog.json";
     stateVersion = config.system.nixos.release;
     inherit repoUrl isoRev;
+    isoVersion = config.hinteros.release.version;
+    # The keys this revision trusts (release/allowed_signers via hinteros.update.allowedSigners):
+    # a newer channel tip is offered and installed only with a signature by one of them.
+    allowedSigners = pkgs.writeText "hinteros-installer-allowed-signers" ''
+      # Keys whose signature a newer channel tip must carry (hinteros.update.allowedSigners).
+      ${import ../lib/allowed-signers.nix { inherit lib; } config.hinteros.update.allowedSigners}
+    '';
     defaultChannel = cfg.channel;
     nix = config.nix.package;
   };
@@ -539,6 +546,17 @@ in
         follows (`ref`) and the default `channel` of a plan that names none. Build an ISO from a
         commit on this channel (CI builds the stable ISO from `stable` and the beta ISO from
         `beta`), so the locked revision is on it and the first update is a fast-forward.
+      '';
+    };
+
+    isoRev = lib.mkOption {
+      type = lib.types.strMatching "[0-9a-f]{40}";
+      default = self.rev or "0000000000000000000000000000000000000000";
+      defaultText = lib.literalExpression ''self.rev or "0000000000000000000000000000000000000000"'';
+      description = ''
+        The revision of this repo the installer is built from: the offline lock pins it, and a
+        newer channel tip (`hinteros-install --check-newer`) must descend from it. Never set it
+        outside tests (install-newer serves a test repo whose commits it names).
       '';
     };
 

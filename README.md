@@ -134,22 +134,25 @@ An example is in `/etc/hinteros-installer/plan.example.json` on the ISO:
 | `acceptedTerms` | Optional `{"<id>": "<terms version>"}`. An app whose catalog entry has vendor terms (Steam, Plex) is refused (`terms-not-accepted`) unless the accepted version equals the version in the catalog index on this installer. The accepted ones are recorded on the box in `/var/lib/hinteros/terms-accepted.json` (root, 0600): `{"<id>": [{"version", "accepted_at", "by": "installer"}]}` |
 | `wifi` | Optional `{ssid, psk}`: connects before the install and keeps the connection on the installed box |
 | `network` | Optional: `auto` (default; online if cache.nixos.org answers), `online` (fail if not) or `offline` |
+| `rev` | Optional: the HinterOS revision to install (40 hex digits). Absent or this installer's own revision: install the version on the installer (offline if need be). Another revision must be the newer release `--check-newer` reported (see below); it is verified again before anything is touched and needs the network |
 
 The plan may hold a plain-text password: keep it on tmpfs and delete it afterwards (`--plan -`
-reads it from stdin). `--validate-only` checks the plan and the machine and touches nothing. `--state-dir DIR` (tests) checks the plan only and writes the `state.json` files the install would produce (`DIR/system`, `DIR/apps`).
+reads it from stdin). `--validate-only` checks the plan and the machine and touches nothing. With a newer `rev` it also checks that the network is there and the revision verifies (below). `--state-dir DIR` (tests) checks the plan only and writes the `state.json` files the install would produce (`DIR/system`, `DIR/apps`).
 
 **Progress.** stdout is one JSON object per line, for example
 `{"phase":"system","stage":"install","percent":57,"level":"info","message":"..."}`. `phase` is
 `system` or `apps` (see below); during the apps stage a line may also carry `app` (a catalog id).
-Stages in order: `validate` (0-8), `partition` (10-20), `facter` (22-26), `config` (28-30),
+Stages in order: `validate` (0-8), `fetch` (9, only when installing a newer `rev`), `partition` (10-20), `facter` (22-26), `config` (28-30),
 `install` (32-70, from nix's own progress), `snapshot` (72-73) - all phase `system` - then, if the
 plan has apps, `apps` (74-96, phase `apps`), `finalize` (97), `done` (100). Percentages never go
 backwards. `level` is `info`, `warn` or `error`. An `error` line also has a `code`
 (`admin-password-missing`, `app-needs-network`, `disk-not-found`, `disk-in-use`, `disk-too-small`,
-`other-hinteros-disk`, `not-uefi`, `install-failed`, ...) and the exit status is 2 (the plan or the
+`other-hinteros-disk`, `not-uefi`, `install-failed`, `rev-needs-network`, `fetch-failed`, ...) and the exit status is 2 (the plan or the
 machine was refused, nothing was touched) or 1 (the base system could not be installed). Tool
 output goes to stderr and `/var/log/hinteros-install.log`; when a build fails the log also holds
 nix's error messages in full and the build log (`nix log`) of every derivation that failed.
+The `done` line also carries `rev` and `version`: the HinterOS revision and release that were
+installed (its message names them too).
 
 **Two stages.** Installing HinterOS and installing the apps are separate, so a broken app can
 never cost the user the system:
@@ -157,7 +160,7 @@ never cost the user the system:
 1. **System stage** (phase `system`): the base system with no catalog apps (`state.json`
    `apps: []`), offline from the ISO's store if need be. It ends with a bootable box. If it fails
    online (a download, or the hardware report does not build), it is retried once as the generic
-   offline system from the ISO; if it still fails the run exits 1.
+   offline system from the ISO (not for a newer `rev`, below); if it still fails the run exits 1.
 2. **Apps stage** (phase `apps`, only if the plan lists apps): the selected apps are built into the
    installed system (`nix build` of the full config against the new root; offline for the `onIso`
    apps, downloading for the others) and made the next boot's generation with
@@ -198,6 +201,59 @@ dependency failed" after a failed download of `bash-5.3.tar.gz`. Every nix call 
 passes `--option substitute true`. NixOS test VMs always have a user-mode `eth0`, which is why this
 went unnoticed: the install tests now run the installer with only its own store image and no NIC at
 all.
+
+### What the installer carries
+
+The UI asks the backend which HinterOS the stick carries and which channel it is for, so it can
+show that version and pick the channel before anything goes online:
+
+```
+hinteros-install --info
+{"iso":{"rev":"<40 hex>","version":"0.7.0"},"channel":"stable"}
+```
+
+`iso.rev` is the revision the installer is built from (`hinteros.installer.isoRev`; all zeros for
+an ISO built from a dirty tree), `iso.version` that revision's `release/version`, `channel` the
+installer's channel (`hinteros.installer.channel`, the default `channel` of a plan). It is built
+into the installer: no network, no root, nothing logged, one line on stdout, exit 0. A beta
+installer's `iso.version` is the stable version it builds on, as on a box. Tested by
+`install-validation`.
+
+### A newer HinterOS than the ISO's
+
+With a network, the installer can install the newest release of its channel instead of the one
+on the stick. The UI asks the backend, shows both versions and lets the person choose; the ISO's
+version stays the default and the only choice offline.
+
+```
+hinteros-install --check-newer [--channel stable|beta]   # default: the installer's channel
+{"channel":"stable","iso":{"rev":"<40 hex>","version":"0.7.0"},"newer":{"rev":"<40 hex>","version":"0.7.1","date":1767225600,"signer":"release"}}
+```
+
+It fetches the channel's tip from the repo (`hinteros.update.repo`; a partial clone: commits and
+trees, plus the tip's `release/version`) and verifies it as a box verifies an update
+(hinteros-system's `update.rs`): an SSH signature by a key in **this installer's**
+`release/allowed_signers` (`hinteros.update.allowedSigners`) and a fast-forward from the ISO's
+revision. `newer` is null when the tip is the ISO's revision or older. `version` is the tip's
+`release/version`, or its first 12 hex digits if it has none; `date` is the commit time (Unix
+seconds). One object on stdout, exit 0. On failure, one error line in the progress format
+(`{"phase":"check","stage":"check","level":"error","code":...,"message":...}`) and exit 1
+(`repo-unreachable`, `timeout`, `channel-missing`, `unsigned`, `unknown-signer`,
+`not-fast-forward`) or 2 (`channel-invalid`, `iso-rev-unknown`: an ISO built from a dirty tree).
+No root needed. Every git step has a time limit and the steps that talk to the repo stop after 2
+minutes together (`timeout`): the check takes a few seconds normally and never much over 2 minutes.
+
+A plan with that `rev` installs it: validation needs the network (`rev-needs-network`) and checks
+the channel again (`rev-not-tip` if the tip has moved on, the codes above if it does not
+verify; exit 2); then, before the disk is touched, the `fetch` stage downloads the revision, locks
+the device flake to it (`nix flake lock --override-input hinteros
+git+<repo>?ref=<channel>&rev=<rev>`, as hinteros-system and `hinteros-bootstrap-channel` do) and
+reads its catalog (`fetch-failed`, exit 1). The system and apps stages build from that lock, so
+the apps are that revision's: a picked app it no longer offers, or whose vendor terms changed, is
+an `app-failed` warning (the Store asks again later). There is no offline fallback: if the system
+stage fails (also after one retry without the hardware report) the run exits 1, and the UI offers
+to try again or to go back to the ISO's version. Tested by `install-newer` (a local channel repo
+with throwaway keys; `HINTEROS_INSTALL_ONLINE_PROBE` stands in for the network).
 
 ### Offline installs
 
