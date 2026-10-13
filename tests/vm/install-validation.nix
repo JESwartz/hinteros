@@ -1,6 +1,7 @@
 # hinteros-install refuses bad plans and unsuitable machines before touching the disk: missing
 # admin password, an app that needs a network while offline, a disk that does not exist, is in
-# use, is the system disk or is too small, a BIOS-booted machine, malformed fields. Every
+# use, is the system disk or is too small, a BIOS-booted machine, malformed fields, a `rev` that
+# is malformed or needs a network (the installer's own revision validates offline). Every
 # refusal exits 2 with an error line; a marker file system on the target disk survives them all.
 { self, pkgs }:
 let
@@ -25,6 +26,9 @@ let
         // extra
       )
     );
+
+  # As nixos/installer sets hinteros.installer.isoRev.
+  isoRev = self.rev or "0000000000000000000000000000000000000000";
 
   cases = {
     ok = plan { };
@@ -85,6 +89,10 @@ let
     };
     bad-channel = plan { channel = "nightly"; };
     unknown-field = plan { wallpaper = "blue"; };
+    bad-rev = plan { rev = "HEAD"; };
+    # The installer's own revision installs offline as without `rev`; another one needs a network.
+    iso-rev = plan { rev = isoRev; };
+    other-rev = plan { rev = "1111111111111111111111111111111111111111"; };
     in-use-disk = plan { };
   };
 in
@@ -193,6 +201,12 @@ in
         refused("unknown-app", "app-unknown")
         refused("bad-channel", "channel-invalid")
         refused("unknown-field", "unknown-field")
+        refused("bad-rev", "rev-invalid")
+
+    with subtest("plan.rev: the installer's own revision, or a newer one (online only)"):
+        status, lines = run("iso-rev", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+        assert status == 0 and lines[-1]["stage"] == "done", lines
+        refused("other-rev", "rev-needs-network")
 
     with subtest("without --validate-only a refused plan still touches nothing"):
         installer.copy_from_host(CASES["no-password"], "/tmp/np.json")
