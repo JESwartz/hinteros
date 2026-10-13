@@ -10,7 +10,8 @@
 # another profile's, only with the admin PIN; the admin profile is never removable and its PIN
 # needs polkit `profiles.recover`; own settings check the own PIN; apps act on the caller's own
 # env only; p1 and p3 (not on screen) are refused by the seat check; the greeter's socket is the
-# greeter's; no PIN reaches the journal.
+# greeter's; no PIN reaches the journal. Rollback, channel.set, base.set and hardware.redetect
+# need the admin PIN (system API 0.5; root needs none).
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
@@ -249,6 +250,42 @@ in
         # With the admin PIN it works (from p2's session).
         assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Alexis", "pin": "2468"}) == {}
         assert profiles_file()["profiles"]["p3"]["name"] == "Alexis"
+
+    with subtest("two profiles: the box-wide actions need the admin PIN (system API 0.5)"):
+        # rollback, channel.set, base.set and hardware.redetect: the PIN is checked before
+        # anything else (also before "already on that channel/base" and the generation lookup).
+        guarded = [
+            ("rollback", {}),
+            ("channel.set", {"channel": "stable"}),
+            ("base.set", {"base": "unstable"}),
+            ("hardware.redetect", {}),
+        ]
+        for method, params in guarded:
+            for extra in [{}, {"admin_pin": "1357"}, {"admin_pin": P3_PIN}]:
+                e = sys_err("hinteros-p2", method, {**params, **extra}, 3016)
+                assert e["data"] == {"pin": "admin"}, (method, extra, e)
+            e = sys_err("hinteros-p2", method, {**params, "admin_pin": "12"}, -32602)
+            assert e["data"]["field"] == "admin_pin", (method, e)
+            # The same through the session daemon's relay.
+            r = sess("hinteros-p2", "system." + method, params)
+            assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "admin"}, (method, r)
+        # With the admin PIN they pass: nothing to do for the current channel and base, no older
+        # generation to roll back to.
+        assert sys_ok("hinteros-p2", "channel.set", {"channel": "stable", "admin_pin": "2468"}) == {"job_id": None}
+        assert sys_ok("hinteros-p2", "base.set", {"base": "unstable", "admin_pin": "2468"}) == {"job_id": None}
+        sys_err("hinteros-p2", "rollback", {"admin_pin": "2468"}, 3010)
+        # hardware.redetect with the PIN starts its job (held at the build, then cancelled).
+        machine.succeed("touch /run/stub/hold")
+        j = sys_ok("hinteros-p2", "hardware.redetect", {"admin_pin": "2468"})["job_id"]
+        assert j, j
+        sys_call("hinteros-p2", "jobs.cancel", {"job_id": j})
+        wait_job("hinteros-p2", j)
+        machine.succeed("rm -f /run/stub/hold")
+        # Root (a terminal) needs no PIN.
+        out = json.loads(machine.succeed("python3 /etc/hinteros-test/rpc.py base.set '{\"base\": \"unstable\"}'"))
+        assert out["response"].get("result") == {"job_id": None}, out
+        # The audit says which PIN was checked, never the PIN.
+        machine.succeed("journalctl -o verbose --no-pager HINTEROS_PIN_CHECK=admin | grep -q HINTEROS_PIN_OUTCOME=failed")
 
     with subtest("two profiles: the others, not on screen, cannot act at all"):
         for user in ["hinteros", "hinteros-p3"]:
