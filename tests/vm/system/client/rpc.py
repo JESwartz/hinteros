@@ -1,6 +1,6 @@
 """Tiny client for hinteros-system's socket, run inside the test VMs as the user under test.
 
-CLI: rpc.py METHOD [PARAMS_JSON]   one connection: hello (API 0.4), the call, then prints
+CLI: rpc.py METHOD [PARAMS_JSON]   one connection: hello (API 0.5), the call, then prints
                                     {"response": {...}} (the raw JSON-RPC reply) on one line.
      A failed connect prints {"connect_error": "<errno name>"} and exits 0.
 Library: Conn(...) for the other scripts (hostile.py, events.py).
@@ -14,7 +14,7 @@ import sys
 import time
 
 SOCK = "/run/hinteros/system.sock"
-VERSION = os.environ.get("HINTEROS_SYSTEM_API", "0.4")
+VERSION = os.environ.get("HINTEROS_SYSTEM_API", "0.5")
 
 
 class Conn:

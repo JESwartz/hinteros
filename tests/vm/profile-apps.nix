@@ -1,6 +1,6 @@
 # Per-profile apps through the real chain (apps.md build plan step 6, VM `profile-apps`, single
-# user): a launcher-like client of the session socket (API 0.12) -> the session daemon's relay ->
-# hinteros-system (0.4) -> a job unit -> the profile's Nix profile -> the published link -> the
+# user): a launcher-like client of the session socket (API 0.13) -> the session daemon's relay ->
+# hinteros-system (0.5) -> a job unit -> the profile's Nix profile -> the published link -> the
 # session daemon's apps.list. Install Moonlight into p1 with no new system generation, roll back,
 # remove with delete_data. NEEDS the M7 daemon (DECISIONS D2-D10).
 #
@@ -79,7 +79,7 @@ in
     envs = json.loads(machine.succeed("cat /etc/hinteros-envs.json"))
     P = "/nix/var/nix/profiles/hinteros/apps/hinteros"
     home = "/home/hinteros"
-    ENV = "HINTEROS_SYSTEM_API=0.4 HINTEROS_SESSION_API=0.12"
+    ENV = "HINTEROS_SYSTEM_API=0.5 HINTEROS_SESSION_API=0.13"
 
     machine.succeed("mkdir -p /run/stub")
     machine.wait_for_unit("multi-user.target")

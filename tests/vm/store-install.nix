@@ -1,4 +1,4 @@
-# The Store backend per profile (session API 0.12 / system API 0.4, apps.md), through the real
+# The Store backend per profile (session API 0.13 / system API 0.5, apps.md), through the real
 # chain: a client of the session socket (as the launcher would be) -> the session daemon's relay
 # -> hinteros-system (seat0 owner, polkit `org.hinteros.system.apps` granted to the hinteros group,
 # audit) -> a job unit as root -> p1's Nix profile, terms-accepted.json, the removal of app data
@@ -86,7 +86,7 @@ in
     envs = json.loads(machine.succeed("cat /etc/hinteros-envs.json"))
     P = "/nix/var/nix/profiles/hinteros/apps/hinteros"
     home = "/home/hinteros"
-    ENV = "HINTEROS_SYSTEM_API=0.4 HINTEROS_SESSION_API=0.12"
+    ENV = "HINTEROS_SYSTEM_API=0.5 HINTEROS_SESSION_API=0.13"
 
     machine.succeed("mkdir -p /run/stub")
     machine.wait_for_unit("multi-user.target")
