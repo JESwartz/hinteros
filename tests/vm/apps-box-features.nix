@@ -75,7 +75,8 @@ profiles.mkTest {
     def features_on():
         # The 32-bit driver link as the running generation declares it (a stale /run link stays
         # until a reboot), and Valve's udev rules (vendor 28de).
-        on32 = machine.execute("grep -Rqs opengl-driver-32 /etc/tmpfiles.d/")[0] == 0
+        # (without the feature NixOS has an `r` rule for the same path)
+        on32 = machine.execute("grep -RqsF \"'L+' '/run/opengl-driver-32'\" /etc/tmpfiles.d/")[0] == 0
         udev = machine.execute("grep -Rqs 28de /etc/udev/rules.d/")[0] == 0
         return on32, udev
 
@@ -91,7 +92,7 @@ profiles.mkTest {
 
     def remove_steam(user):
         mine = sys_ok(user, "apps.list")
-        j = sys_ok(user, "apps.remove", {"ids": ["steam"], "revision": mine["revision"]})["job_id"]
+        j = sys_ok(user, "apps.remove", {"ids": ["steam"], "revision": mine["revision"], "delete_data": False})["job_id"]
         done = wait_job(user, j)
         assert done["state"] == "succeeded" and done["kind"] == "apps_remove", done
 
@@ -144,7 +145,8 @@ profiles.mkTest {
         assert state_json()["requirements"] == FEATURES, state_json()
         assert features_on() == (True, True), features_on()
         assert len(builds()) == 2, builds()
-        assert system_generations() == gens0 + 2
+        # The box stage's system is the newest generation's (nix-env reuses it, no new one).
+        assert system_generations() == gens0 + 1, machine.succeed("nix-env -p /nix/var/nix/profiles/system --list-generations")
 
     with subtest("removing Steam everywhere leaves the features on until a rebuild"):
         remove_steam("hinteros-p2")
@@ -154,7 +156,7 @@ profiles.mkTest {
         assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/apps/hinteros").strip() == env_path("empty")
         assert state_json()["requirements"] == FEATURES, state_json()
         assert len(builds()) == 2, builds()
-        assert system_generations() == gens0 + 2
+        assert system_generations() == gens0 + 1
         assert features_on() == (True, True)
 
     with subtest("the next system job that rebuilds anyway drops them"):
