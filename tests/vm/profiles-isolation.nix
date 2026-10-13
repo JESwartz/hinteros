@@ -190,7 +190,7 @@ profiles.mkTest {
           p1_rev = sys_ok("hinteros", "apps.list")["revision"]
           for method, params in [
               ("apps.install", {"ids": ["moonlight"], "revision": p1_rev}),
-              ("apps.remove", {"ids": ["youtube"], "revision": p1_rev}),
+              ("apps.remove", {"ids": ["youtube"], "revision": p1_rev, "delete_data": False}),
               ("profiles.rename", {"id": "p1", "name": "Mallory"}),
               ("profiles.set_locked", {"locked": True, "pin": "2468"}),
               ("profiles.switch", {"id": "p1"}),
@@ -218,13 +218,6 @@ profiles.mkTest {
           )
           assert out == "QEMU Monitor:1280x720@60\n", out
           assert machine.succeed(as_p2("cat /run/hinteros/audio-output")) == "hinteros_sink_b\n"
-          # p2's session daemon made the box's output its default sink when it started.
-          u2 = uid("hinteros-p2")
-          machine.wait_until_succeeds(
-              f"runuser -u hinteros-p2 -- env XDG_RUNTIME_DIR=/run/user/{u2} pactl get-default-sink | grep -qx hinteros_sink_b",
-              timeout=90,
-          )
-          assert default_sink("hinteros-p2") == "hinteros_sink_b"
           machine.fail(as_p2("echo x > /run/hinteros/audio-output"))
           machine.fail(as_p2("echo x > /run/hinteros/gamescope-modes"))
           # p2's choice is the box's from now on (not a per-profile copy).
@@ -240,5 +233,19 @@ profiles.mkTest {
               f"runuser -u hinteros -- env HOME=/home/hinteros {DISPLAY_ENV} sh -c 'cat \"$GAMESCOPE_MODE_SAVE_FILE\"'"
           )
           assert out == "QEMU Monitor:1920x1080@50\n", out
+
+      with subtest("the box's audio output became p2's default sink at its session start"):
+          # p1 had saved b before p2's session began. (p2's save_output above only changed the
+          # box's file, not p2's sink.)
+          print(machine.succeed("journalctl --no-pager -t hinteros-session | grep -i 'shared audio output' || true"))
+          got = default_sink("hinteros-p2")
+          if got != "hinteros_sink_b":
+              # Diagnosis: does the same pactl call work now (a start-up race), or never?
+              rc, out = machine.execute(
+                  f"runuser -u hinteros-p2 -- env XDG_RUNTIME_DIR=/run/user/{uid('hinteros-p2')} "
+                  "pactl set-default-sink hinteros_sink_b 2>&1"
+              )
+              print(f"pactl set-default-sink now: rc={rc} {out!r}, default {default_sink('hinteros-p2')}")
+          assert got == "hinteros_sink_b", got
     '';
 }
