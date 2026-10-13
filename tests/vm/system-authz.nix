@@ -10,8 +10,8 @@
 # another profile's, only with the admin PIN; the admin profile is never removable and its PIN
 # needs polkit `profiles.recover`; own settings check the own PIN; apps act on the caller's own
 # env only; p1 and p3 (not on screen) are refused by the seat check; the greeter's socket is the
-# greeter's; no PIN reaches the journal. Rollback, channel.set, base.set and hardware.redetect
-# need the admin PIN (system API 0.5; root needs none).
+# greeter's; no PIN reaches the journal. Rollback, channel.set, base.set, hardware.redetect and
+# update.apply need the admin PIN (system API 0.5; root needs none).
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
@@ -67,6 +67,8 @@ in
 
   testScript = profiles.python + ''
     P3_PIN = "${P3_PIN}"
+    # A well-formed revision for update.apply (never checked, so never the verified one).
+    UPDATE_REV = "9a8b7c6d5e4f30211a2b3c4d5e6f708192a3b4c5"
 
     ACTIONS = ["settings", "rebuild", "update.check", "update.apply", "rollback", "channel", "jobs.cancel"]
 
@@ -252,13 +254,15 @@ in
         assert profiles_file()["profiles"]["p3"]["name"] == "Alexis"
 
     with subtest("two profiles: the box-wide actions need the admin PIN (system API 0.5)"):
-        # rollback, channel.set, base.set and hardware.redetect: the PIN is checked before
-        # anything else (also before "already on that channel/base" and the generation lookup).
+        # rollback, channel.set, base.set, hardware.redetect and update.apply: the PIN is checked
+        # before anything else (also before "already on that channel/base", the generation lookup
+        # and update.apply's comparison of rev with the last verified check).
         guarded = [
             ("rollback", {}),
             ("channel.set", {"channel": "stable"}),
             ("base.set", {"base": "unstable"}),
             ("hardware.redetect", {}),
+            ("update.apply", {"rev": UPDATE_REV}),
         ]
         for method, params in guarded:
             for extra in [{}, {"admin_pin": "1357"}, {"admin_pin": P3_PIN}]:
@@ -274,6 +278,10 @@ in
         assert sys_ok("hinteros-p2", "channel.set", {"channel": "stable", "admin_pin": "2468"}) == {"job_id": None}
         assert sys_ok("hinteros-p2", "base.set", {"base": "unstable", "admin_pin": "2468"}) == {"job_id": None}
         sys_err("hinteros-p2", "rollback", {"admin_pin": "2468"}, 3010)
+        # update.apply with the PIN reaches the revision check: nothing was checked, so this rev
+        # is not the last verified update.
+        e = sys_err("hinteros-p2", "update.apply", {"rev": UPDATE_REV, "admin_pin": "2468"}, 3007)
+        assert e["data"] == {"reason": "update_rev"}, e
         # hardware.redetect with the PIN starts its job (held at the build, then cancelled).
         machine.succeed("touch /run/stub/hold")
         j = sys_ok("hinteros-p2", "hardware.redetect", {"admin_pin": "2468"})["job_id"]
