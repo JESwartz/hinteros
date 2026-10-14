@@ -17,10 +17,11 @@
 # revision instead of this installer's (online only; verified again before anything is touched).
 #
 # Two stages. The SYSTEM stage installs HinterOS (state.json schema 2: one spare account, p1 =
-# hinteros, no profile, the box features the picked apps need), offline from this medium's store
-# if need be. The APPS stage then builds the picked apps' env into the target and makes it the
-# starter set (/nix/var/nix/profiles/hinteros/starter, /var/lib/hinteros/starter.json); the
-# system is not rebuilt. Whatever happens to an app, the system stage's result stays.
+# hinteros, no profile, the box features the picked apps need; offline only those of the apps on
+# this medium), offline from this medium's store if need be. The APPS stage then builds the
+# picked apps' env into the target and makes it the starter set
+# (/nix/var/nix/profiles/hinteros/starter, /var/lib/hinteros/starter.json); the system is not
+# rebuilt. Whatever happens to an app, the system stage's result stays.
 #
 # stdout carries one JSON object per line, for a UI to follow:
 #   {"phase":"system","stage":"partition","percent":14,"level":"info","message":"..."}
@@ -960,8 +961,19 @@ install_system() {
   nix_logged install 36 70 "Installing the system" nixos-install "${flags[@]}"
 }
 
+# An offline system stage installs exactly what this medium carries: the box features of the
+# picked apps on it (none: free ISO apps need none), not those of an online-only app (Steam's
+# graphics32 needs 32-bit Mesa, which is not on the medium). Such an app's features come with the
+# box's first online rebuild or update (hinteros-system adds what the profiles' envs need).
+offline_state() {
+  requirements=$(app_requirements "$(json_array "${apps[@]}" | jq -c --slurpfile cat "$APPS_JSON" \
+    '[.[] | select(. as $a | $cat[0].onIso | index($a))]')")
+  write_state
+}
+
 progress install 36 "Building and installing the system"
 sys_online=$online
+[ "$sys_online" -eq 1 ] || offline_state
 attempt=1
 while :; do
   install_system "$sys_online"
@@ -989,6 +1001,7 @@ while :; do
     # fall back to exactly the generic system that is on this medium.
     : >"$cfg/facter.deferred"
     sys_online=0
+    offline_state
     progress install 36 "The install with network access failed; retrying with the generic system from this installer" warn system-retry
     continue
   fi

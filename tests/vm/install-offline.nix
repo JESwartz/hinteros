@@ -312,6 +312,8 @@ in
         assert state["schemaVersion"] == 2 and "apps" not in state, state
         assert state["profiles"] == [{"id": "p1", "user": "hinteros"}], state
         assert state["services"] == [] and state["settings"]["guest"] == {"enable": True}, state
+        # Offline: only the box features of apps on the medium (none; not Steam's graphics32).
+        assert state["requirements"] == [], state
         assert state["settings"]["ssh"]["enable"] is True, state
         assert state["settings"]["admin"] == {"user": "james"}, state
         assert state["settings"]["hostname"] == "livingroom", state
