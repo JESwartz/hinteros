@@ -11,7 +11,7 @@
 # needs polkit `profiles.recover`; own settings check the own PIN; apps act on the caller's own
 # env only; p1 and p3 (not on screen) are refused by the seat check; the greeter's socket is the
 # greeter's; no PIN reaches the journal. Rollback, channel.set, base.set, hardware.redetect and
-# update.apply need the admin PIN (system API 0.7; root needs none).
+# update.apply need the admin PIN (system API 0.8; root needs none).
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
@@ -253,7 +253,7 @@ in
         assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Alexis", "pin": "2468"}) == {}
         assert profiles_file()["profiles"]["p3"]["name"] == "Alexis"
 
-    with subtest("two profiles: the box-wide actions need the admin PIN (system API 0.7)"):
+    with subtest("two profiles: the box-wide actions need the admin PIN (system API 0.8)"):
         # rollback, channel.set, base.set, hardware.redetect and update.apply: the PIN is checked
         # before anything else (also before "already on that channel/base", the generation lookup
         # and update.apply's comparison of rev with the last verified check).
