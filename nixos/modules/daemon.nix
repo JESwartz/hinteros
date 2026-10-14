@@ -229,7 +229,7 @@ in
         description = ''
           Contents of the session daemon's `session.toml` (see the hinteros-daemon README), as a
           Nix attribute set. The file is generated into the store and passed with `--config`.
-          The module already sets `launcher.app_id`, `gamescope.*`, `osk.*`, `pointer.*`, `steam.path`, `steam.tag_windows`,
+          The module already sets `launcher.app_id`, `gamescope.*`, `osk.*`, `pointer.*`, `input.xbox_label_swap`, `input.keyboard_home`, `steam.path`, `steam.tag_windows`,
           `steam.library_poll_s`, `steam.library_debounce_ms` and `close.timeout_ms` (all with
           `mkDefault`; `steam.dir` is left to the daemon's default unless a test sets it).
         '';
@@ -270,6 +270,17 @@ in
           field shows the keyboard. It only has an effect when the Firefox extension is installed
           (`hinteros.firefoxKiosk.oskExtension`); the daemon always listens on its internal
           `osk.sock`.
+        '';
+      };
+
+      input.keyboardHome = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          `[input] keyboard_home`: Ctrl + Super (Windows key) + D on a keyboard is Home, like a short
+          Guide press. The session daemon only reads the keyboards (never grabs them), so the
+          focused app gets the keys too. With the greeter, keyboards on the active seat get a
+          uaccess ACL for this (profiles.nix); systemd gives one only to joysticks.
         '';
       };
 
@@ -336,6 +347,8 @@ in
           show_command = lib.mkDefault (cursor "1");
         };
       input.xbox_label_swap = lib.mkDefault cfg.input.xboxLabelSwap;
+      # Set explicitly (the daemon's default is also on), so the box config shows it.
+      input.keyboard_home = lib.mkDefault cfg.input.keyboardHome;
       steam = {
         # Steam's own windows get STEAM_GAME=769 so gamescope can show them (needs gamescope).
         tag_windows = lib.mkDefault true;

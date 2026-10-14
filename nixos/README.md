@@ -21,7 +21,7 @@
   - `input.nix`: `hinteros.input.enable` (default: the session is enabled). InputPlumber with polkit,
     the session user in group `inputplumber` and its udev rules. `ManageAllDevices` is set by the session daemon. The overlay patches InputPlumber 0.81.0: `CompositeDevice.SendEvent` (the daemon's RT click) used `blocking_send` inside its tokio runtime, panicked and never answered (`nixos/pkgs/inputplumber/`; `input-layer` checks the click).
   - `daemon.nix`: `hinteros.daemon.enable`, `.group` (default `hinteros`), `.session.package`,
-    `.system.package`, `.osk.{enable,package,summon}` (the on-screen keyboard, `hinteros-osk` from the launcher package; `[osk]` in session.toml; default chord Guide+Y), `.logLevel`. A systemd user service `hinteros-session` for the session user
+    `.system.package`, `.osk.{enable,package,summon}` (the on-screen keyboard, `hinteros-osk` from the launcher package; `[osk]` in session.toml; default chord Guide+Y), `.input.keyboardHome` (default on: Ctrl+Super+D on a keyboard is Home; `[input] keyboard_home`; with the greeter, keyboards get a uaccess ACL for the active profile, profiles.nix), `.logLevel`. A systemd user service `hinteros-session` for the session user
     (socket `$XDG_RUNTIME_DIR/hinteros/session.sock`, started with `--config` of a `session.toml` generated from
     `.session.settings`, a TOML-format attrset; defaults: `launcher.app_id`, `gamescope.*` (disabled on cage, where `wayland_display` is `wayland-0` and the user unit gets `DISPLAY=:0`), `osk.*`, `steam.path`) and a root system service `hinteros-system`
     (`/run/hinteros/system.sock`, 0660, group `hinteros`, which the session user joins). What the system service
@@ -64,7 +64,7 @@ format modifiers and dma-buf export), so the VM and the `boot` test use
 (`hinteros.session.gamescope.backend = "headless"`) does run on lavapipe, but only simple
 clients render: the `gamescope` test runs it (with `-e`) with the xterm placeholder home app and the session daemon, checks
 `GAMESCOPECTRL_BASELAYER_APPID` with xprop, uses the session socket (API 0.7) for `games.list`, a fake Steam game, `apps.close`, Big Picture and a fake Steam Guard pop-up (`steam_attention`, `steam.focus`), and checks
-by OCR of `gamescopectl screenshot` that the game, then (after SIGUSR1) the placeholder again, is shown. The Flutter launcher stays on cage in VM tests (spike 2).
+by OCR of `gamescopectl screenshot` that the game, then (after SIGUSR1) the placeholder again, is shown, and that Ctrl+Super+D on the VM keyboard is Home too (Ctrl+D is not). The Flutter launcher stays on cage in VM tests (spike 2).
 `nixosConfigurations.vm-gamescope` is the interactive VM with gamescope for a Vulkan-capable setup.
 On gamescope the launcher runs on Xwayland (`GDK_BACKEND=x11`); see "Display size" below.
 

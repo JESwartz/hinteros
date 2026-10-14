@@ -12,9 +12,10 @@
 #   - A wrong PIN for the locked p2 is refused in p1's session before anything closes.
 #   - Force close: the switch completes straight into p2 (its PIN given in p1's session), and
 #     end-others leaves no process of p1 at all.
-#   - Devices follow the active session (uaccess ACLs name p2, not p1); no account is in a
-#     static device group; InputPlumber's polkit actions are the active session's only (a
-#     system service running as a profile user is refused).
+#   - Devices (uinput, DRM, keyboards) follow the active session (uaccess ACLs name p2, not
+#     p1; p2's daemon reads the keyboards); no account is in a static device group;
+#     InputPlumber's polkit actions are the active session's only (a system service running as
+#     a profile user is refused).
 #   - The box never rebooted and hinteros-system kept running; switching back to the unlocked p1
 #     needs no PIN, and p2's leftovers (a system-level unit of its uid) are gone too.
 # Not covered in a VM: gamescope's DRM master handover and real controllers on a switch (cage
@@ -181,7 +182,14 @@ profiles.mkTest {
         machine.fail("test -e /run/hinteros/switch.json")
 
     with subtest("devices follow the active session; no static device groups"):
-        for dev in ["/dev/uinput"] + machine.succeed("ls /dev/dri/card* /dev/dri/renderD* 2>/dev/null || true").split():
+        # Keyboards too (profiles.nix), for the session daemon's Ctrl+Super+D Home: p2's daemon
+        # can read them.
+        keyboards = machine.succeed(
+            "for d in /dev/input/event*; do udevadm info -q property $d | grep -qx ID_INPUT_KEYBOARD=1 && echo $d; done; true"
+        ).split()
+        assert keyboards, machine.succeed("ls -l /dev/input")
+        machine.wait_until_succeeds("journalctl -b _UID=$(id -u hinteros-p2) | grep -q 'keyboard found'", timeout=30)
+        for dev in ["/dev/uinput"] + keyboards + machine.succeed("ls /dev/dri/card* /dev/dri/renderD* 2>/dev/null || true").split():
             acl = machine.succeed(f"getfacl -p {dev}")
             assert "user:hinteros-p2:" in acl, (dev, acl)
             assert "user:hinteros:" not in acl, (dev, acl)
