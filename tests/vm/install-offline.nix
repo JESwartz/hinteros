@@ -339,9 +339,9 @@ in
         target.succeed("findmnt -no FSTYPE / | grep -qx ext4")
         target.succeed("findmnt -no FSTYPE /boot | grep -qx vfat")
 
-    with subtest("the privileged service answers (system API 0.6) and knows its channel"):
+    with subtest("the privileged service answers (system API 0.7) and knows its channel"):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.6", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "0.7", "client": {"name": "install-test", "version": "0"}}}
         info = {"jsonrpc": "2.0", "id": 1, "method": "system.info", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, info))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:/run/hinteros/system.sock"

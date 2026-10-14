@@ -13,6 +13,8 @@ written for the person using the box.
 - Clean up the system and clean up profiles, each keeping as many versions as the admin
   chooses; they show what they free first and need the admin PIN.
 - Automatic clean-up is a setting: on or off, how often, and how many versions to keep.
+- Updates and app installs show what they install, how many parts are built, and the time
+  taken. Hide the job page and the top bar keeps showing the job.
 
 ## 0.7.0
 
