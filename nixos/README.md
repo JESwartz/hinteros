@@ -38,7 +38,7 @@
     `hinteros.update.allowedSigners` (a list of `"<principal> ssh-ed25519 <key>"`, written in ssh-keygen format with `namespaces="git"`).
     `allowedSigners` is empty by default; `nixosModules.default` fills it from the repo's `release/allowed_signers` (`release.nix`, below). With none,
     every update and channel check fails closed (git finds no matching principal, the daemon reports `update_verification_failed`/`unknown_signer`).
-  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `settings.hostname`, `settings.cleanup` (maintenance.nix), `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `apps` (a state enables exactly the listed default apps; ids in `lib/app-ids.nix`) and the first profile's user (TODO M7: one user per profile).
+  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `settings.hostname`, `settings.cleanup` (maintenance.nix), `settings.timeZone` (checked only: a zone of tzdata; time-zone.nix applies it at activation), `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `apps` (a state enables exactly the listed default apps; ids in `lib/app-ids.nix`) and the first profile's user (TODO M7: one user per profile).
   - `release.nix` (in `nixosModules.default` only, not in `modules/default.nix`): sets `hinteros.release.version`, `hinteros.update.allowedSigners` and `hinteros.cache.publicKeys` from `release/{version,allowed_signers,cache-keys}` with `mkDefault`; comment lines are skipped. `cache.nix`: `hinteros.cache.{enable,url,publicKeys}`, off (no cache yet); when on, an extra substituter at priority 50 after cache.nixos.org.
   - `disk.nix`: `hinteros.disk.enable` (state.json `disk`): the installer layout, ESP + ext4 root by partition label `hinteros-esp`/`hinteros-root`, systemd-boot, zram.
 - `installer/`: `default.nix` (installer environment: `hinteros-install`, disko, offline closure and lock following `hinteros.installer.channel` (default `stable`), `hinteros.installer.ui.command` hook) and `iso.nix` (installation-cd base); `pkgs/hinteros-install`, `templates/device-flake.nix.in`. See the repo README, "Installer".
@@ -115,8 +115,14 @@ repaints at the nested size).
   it, `state.json` generated from the state). `hinteros-config-sync` (oneshot before the
   daemon and greetd) restores `/etc/hinteros` from `/run/current-system/hinteros` by building a
   sibling temp dir and swapping with `mv --exchange`; `facter.json` and other files are kept.
-  Skips when `/etc/hinteros` or the snapshot is missing. `configDir` must be a plain path (a flake
+  Skips when `/etc/hinteros` or the snapshot is missing. It keeps the live `state.json`
+  `settings.timeZone` (set without a rebuild); state.json is compared as JSON. `configDir` must be a plain path (a flake
   source), not a derivation output, because the module reads it at eval time.
+- `time-zone.nix` (time-zone.md): `time.timeZone = null`; the activation snippet
+  `hinteros-time-zone` (after `etc`) points `/etc/localtime` at `/etc/zoneinfo/<zone>` from the
+  live `/etc/hinteros/state.json` `settings.timeZone` (UTC when absent or not a zone of tzdata;
+  the name rule is `nixos/lib/time-zone.nix`, shared with state.nix), replacing the link with a
+  rename and only when it differs. hinteros-system changes both at once (`time_zone.set`).
 - `runtime.nix`: `hinteros.runtime.{enable,network,bluetooth,audio,power}`, on with the session.
   NetworkManager (no VPN plugins), BlueZ (`Experimental`, `UserspaceHID`, `ClassicBondedOnly`
   stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules

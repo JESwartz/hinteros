@@ -2,7 +2,8 @@
 # Every system toplevel embeds the config dir it was built from at `$out/hinteros/`, and a
 # boot-time oneshot (hinteros-config-sync) restores that snapshot into /etc/hinteros when the
 # two differ, so /etc/hinteros always describes the generation that is running, also after a
-# rollback (from Settings or from boot counting).
+# rollback (from Settings or from boot counting). The one exception is state.json's
+# `settings.timeZone` (time-zone.md): it changes without a rebuild, so the sync keeps the live one.
 {
   config,
   lib,
@@ -61,6 +62,7 @@ let
     runtimeInputs = [
       pkgs.coreutils
       pkgs.diffutils
+      pkgs.jq
     ];
     text = ''
       dir=${lib.escapeShellArg cfg.dir}
@@ -75,12 +77,42 @@ let
         exit 0
       fi
 
+      work=$(mktemp -d)
+      tmp=""
+      trap 'rm -rf "$work" ''${tmp:+"$tmp"}' EXIT
+
+      # What each managed file must be: the snapshot's. Except `settings.timeZone` in state.json,
+      # which is live (time-zone.md): hinteros-system changes it without a rebuild, so a zone in
+      # the live state.json is kept (activation has already applied it).
+      want() {
+        if [ "$1" = state.json ] && [ -e "$work/state.json" ]; then
+          echo "$work/state.json"
+        else
+          echo "$snap/$1"
+        fi
+      }
+      if [ -e "$snap/state.json" ] && [ -e "$dir/state.json" ]; then
+        live_tz=$(jq -c '.settings.timeZone? | strings' "$dir/state.json" 2>/dev/null || true)
+        snap_tz=$(jq -c '.settings.timeZone? | strings' "$snap/state.json" 2>/dev/null || true)
+        if [ -n "$live_tz" ] && [ "$live_tz" != "$snap_tz" ]; then
+          jq --argjson tz "$live_tz" '.settings = ((.settings // {}) + {timeZone: $tz})' \
+            "$snap/state.json" > "$work/state.json"
+        fi
+      fi
+      # The same file, or for state.json the same JSON (hinteros-system writes it in its own
+      # format).
+      same() {
+        cmp -s "$1" "$2" && return 0
+        [ "$(basename "$2")" = state.json ] || return 1
+        a=$(jq -cS . "$1" 2>/dev/null) && b=$(jq -cS . "$2" 2>/dev/null) && [ "$a" = "$b" ]
+      }
+
       changed=()
       for f in ${lib.escapeShellArgs managed}; do
         if [ -e "$snap/$f" ]; then
           if [ ! -e "$dir/$f" ]; then
             changed+=("$f (missing)")
-          elif ! cmp -s "$snap/$f" "$dir/$f"; then
+          elif ! same "$(want "$f")" "$dir/$f"; then
             changed+=("$f (differs)")
           fi
         elif [ -e "$dir/$f" ]; then
@@ -98,12 +130,11 @@ let
       # Build the new dir next to the old one (same filesystem), then swap the two with one
       # renameat2(RENAME_EXCHANGE): readers see either the old or the new dir, never a mix.
       tmp=$(mktemp -d "$(dirname "$dir")/.$(basename "$dir").sync.XXXXXX")
-      trap 'rm -rf "$tmp"' EXIT
       cp -a "$dir"/. "$tmp"/
       for f in ${lib.escapeShellArgs managed}; do
         rm -f "''${tmp:?}/$f"
         if [ -e "$snap/$f" ]; then
-          install -m 0644 -o root -g root "$snap/$f" "$tmp/$f"
+          install -m 0644 -o root -g root "$(want "$f")" "$tmp/$f"
         fi
       done
       sync -f "$tmp"

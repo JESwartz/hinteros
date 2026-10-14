@@ -242,6 +242,7 @@
           name = "hinteros-install-offline-m900";
           facterFixture = ./tests/vm/fixtures/facter-lenovo-m900.json;
         };
+        time-zone = import ./tests/vm/time-zone.nix { inherit self pkgs; };
         install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };
         install-newer = import ./tests/vm/install-newer.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };

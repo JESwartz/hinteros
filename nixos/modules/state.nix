@@ -11,6 +11,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -67,6 +68,10 @@ let
     keepSystem = keepOk (cleanup.keepSystem or 5);
     keepProfiles = keepOk (cleanup.keepProfiles or 5);
   };
+  # The time zone (time-zone.md): a zone name of tzdata, e.g. "America/Chicago"; absent means
+  # UTC. time-zone.nix applies it from the live state.json at activation, not from here.
+  timeZone = settings.timeZone or null;
+  timeZoneOk = (import ../lib/time-zone.nix { inherit pkgs; }).ok timeZone;
   disk = state.disk or null;
   apps = state.apps or [ ];
   profiles = state.profiles or [ ];
@@ -158,6 +163,7 @@ let
         "hostname"
         "admin"
         "cleanup"
+        "timeZone"
       ]
       ++ lib.optional v2 "guest"
     ) settings
@@ -182,6 +188,9 @@ let
       else
         [ "settings.cleanup must be an object" ]
     )
+    ++
+      lib.optional (timeZone != null && !timeZoneOk)
+        "settings.timeZone must be a time zone name of tzdata (e.g. \"Europe/Berlin\" or \"UTC\"), not ${builtins.toJSON timeZone}"
     ++ lib.optionals (admin != null) (
       checkKeys "settings.admin" [ "user" ] admin
       ++ lib.optional (!(admin ? user)) "settings.admin needs a user"
