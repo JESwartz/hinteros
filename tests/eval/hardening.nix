@@ -288,7 +288,6 @@ let
         [ "deploy" ]
         [
           "hinteros"
-          "input"
           "inputplumber"
           "uinput"
           "video"

@@ -101,7 +101,6 @@ let
         true
         [
           "hinteros"
-          "input"
           "inputplumber"
           "uinput"
           "video"
@@ -251,6 +250,8 @@ let
         (lib.unique greeter.users.users.hinteros.extraGroups)
         greeter.users.users.hinteros-p2.extraGroups
         (lib.any (p: p.name or "" == "70-hinteros-uinput.rules") greeter.services.udev.packages)
+        # Never keyboards: no profile may read one (the hinteros-keyboard unit does).
+        (lib.any (p: p.name or "" == "70-hinteros-keyboard.rules") greeter.services.udev.packages)
         (lib.hasInfix ''action.id.indexOf("org.shadowblip.") === 0'' (polkit greeter))
         (lib.hasInfix ''subject.user == "hinteros-greeter"'' (polkit greeter))
         greeter.systemd.services.hinteros-system.serviceConfig.SupplementaryGroups
@@ -262,9 +263,13 @@ let
         [ "hinteros" ]
         [ "hinteros" ]
         true
+        false
         true
         true
-        [ "hinteros-greeter" ]
+        [
+          "hinteros-greeter"
+          "hinteros-keyboard"
+        ]
         true
         [ ]
         [ ]

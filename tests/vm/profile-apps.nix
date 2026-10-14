@@ -79,7 +79,7 @@ in
     envs = json.loads(machine.succeed("cat /etc/hinteros-envs.json"))
     P = "/nix/var/nix/profiles/hinteros/apps/hinteros"
     home = "/home/hinteros"
-    ENV = "HINTEROS_SYSTEM_API=0.8 HINTEROS_SESSION_API=0.16"
+    ENV = "HINTEROS_SYSTEM_API=0.9 HINTEROS_SESSION_API=0.16"
 
     machine.succeed("mkdir -p /run/stub")
     machine.wait_for_unit("multi-user.target")

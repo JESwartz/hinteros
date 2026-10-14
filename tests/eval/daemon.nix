@@ -71,9 +71,60 @@ let
         "read-only"
         true
         false
-        [ ]
+        # keyboard.sock's group (chgrp without CAP_CHOWN).
+        [ "hinteros-keyboard" ]
       ];
     };
+    # Ctrl+Super+D: the only reader of keyboards is its own sandboxed unit (no profile account
+    # may read them); hinteros-system freezes profiles that are not in front.
+    testKeyboardUnit =
+      let
+        s = c.systemd.services.hinteros-keyboard.serviceConfig;
+        off = mk [ { hinteros.daemon.input.keyboardHome = false; } ];
+      in
+      {
+        expr = [
+          (lib.hasSuffix "/bin/hinteros-system keyboard-home" s.ExecStart)
+          s.DynamicUser
+          s.SupplementaryGroups
+          s.DevicePolicy
+          s.DeviceAllow
+          s.CapabilityBoundingSet
+          s.PrivateNetwork
+          s.RestrictAddressFamilies
+          s.ProtectSystem
+          c.systemd.services.hinteros-keyboard.wantedBy
+          (c.users.groups ? hinteros-keyboard)
+          (lib.hasSuffix "/bin/hinteros-system --freeze-inactive" sys.ExecStart)
+          (lib.elem "input" c.users.users.tester.extraGroups)
+          (off.systemd.services ? hinteros-keyboard)
+          (off.users.groups ? hinteros-keyboard)
+          off.systemd.services.hinteros-system.serviceConfig.SupplementaryGroups
+          off.hinteros.daemon.session.settings.input.keyboard_home
+        ];
+        expected = [
+          true
+          true
+          [
+            "input"
+            "hinteros-keyboard"
+          ]
+          "closed"
+          [ "char-input r" ]
+          [ "" ]
+          true
+          [ "AF_UNIX" ]
+          "strict"
+          [ "multi-user.target" ]
+          true
+          true
+          false
+          false
+          false
+          [ ]
+          false
+        ];
+      };
     # The time zone helper (time-zone.md): the service itself never writes /etc; this oneshot,
     # started on demand, may write /etc and /run/hinteros only, with no network or capabilities.
     testTimeZoneApplyUnit =

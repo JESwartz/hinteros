@@ -221,8 +221,9 @@ rec {
               nix = config.nix.package;
             })
           ];
-          # The launcher shares the uid's token bucket; the VM's store is small (see node.nix).
-          hinteros-system.serviceConfig.ExecStart = lib.mkForce "${lib.getExe config.hinteros.daemon.system.package} --min-memory-bytes 268435456 --min-disk-bytes 1048576 --rate-burst 100 --rate-per-minute 6000";
+          # As daemon.nix (--freeze-inactive); the launcher shares the uid's token bucket; the VM's
+          # store is small (see node.nix).
+          hinteros-system.serviceConfig.ExecStart = lib.mkForce "${lib.getExe config.hinteros.daemon.system.package} --freeze-inactive --min-memory-bytes 268435456 --min-disk-bytes 1048576 --rate-burst 100 --rate-per-minute 6000";
         };
       };
       boot.loader.grub.enable = lib.mkForce false;
@@ -255,7 +256,7 @@ rec {
     import json
     import time
 
-    ENV = "HINTEROS_SESSION_API=0.16 HINTEROS_SYSTEM_API=0.8 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=0.16 HINTEROS_SYSTEM_API=0.9 PYTHONPATH=/etc/hinteros-test"
 
     def env_path(key):
         """The store path of a prebuilt app env (mkTest `envs`)."""

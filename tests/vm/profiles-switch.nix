@@ -12,8 +12,9 @@
 #   - A wrong PIN for the locked p2 is refused in p1's session before anything closes.
 #   - Force close: the switch completes straight into p2 (its PIN given in p1's session), and
 #     end-others leaves no process of p1 at all.
-#   - Devices (uinput, DRM, keyboards) follow the active session (uaccess ACLs name p2, not
-#     p1; p2's daemon reads the keyboards); no account is in a static device group;
+#   - Devices (uinput, DRM) follow the active session (uaccess ACLs name p2, not p1); no
+#     profile has any ACL on a keyboard or can read one (the hinteros-keyboard unit reads them
+#     for Ctrl+Super+D); no account is in a static device group;
 #     InputPlumber's polkit actions are the active session's only (a system service running as
 #     a profile user is refused).
 #   - The box never rebooted and hinteros-system kept running; switching back to the unlocked p1
@@ -182,14 +183,19 @@ profiles.mkTest {
         machine.fail("test -e /run/hinteros/switch.json")
 
     with subtest("devices follow the active session; no static device groups"):
-        # Keyboards too (profiles.nix), for the session daemon's Ctrl+Super+D Home: p2's daemon
-        # can read them.
+        # Keyboards never: no profile has an ACL on one or can read it (a game could log the admin
+        # password). Only the hinteros-keyboard unit reads them (Ctrl+Super+D).
         keyboards = machine.succeed(
             "for d in /dev/input/event*; do udevadm info -q property $d | grep -qx ID_INPUT_KEYBOARD=1 && echo $d; done; true"
         ).split()
         assert keyboards, machine.succeed("ls -l /dev/input")
-        machine.wait_until_succeeds("journalctl -b _UID=$(id -u hinteros-p2) | grep -q 'keyboard found'", timeout=30)
-        for dev in ["/dev/uinput"] + keyboards + machine.succeed("ls /dev/dri/card* /dev/dri/renderD* 2>/dev/null || true").split():
+        machine.wait_until_succeeds("journalctl -b -u hinteros-keyboard | grep -q 'keyboard found'", timeout=30)
+        for dev in keyboards:
+            acl = machine.succeed(f"getfacl -p {dev}")
+            assert "user:hinteros" not in acl, (dev, acl)
+            for u in ["hinteros", "hinteros-p2"]:
+                machine.fail(f"runuser -u {u} -- test -r {dev}")
+        for dev in ["/dev/uinput"] + machine.succeed("ls /dev/dri/card* /dev/dri/renderD* 2>/dev/null || true").split():
             acl = machine.succeed(f"getfacl -p {dev}")
             assert "user:hinteros-p2:" in acl, (dev, acl)
             assert "user:hinteros:" not in acl, (dev, acl)
