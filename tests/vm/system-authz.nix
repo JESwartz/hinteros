@@ -129,6 +129,7 @@ in
             ("rebuild", {}),
             ("rollback", {}),
             ("update.check", {}),
+            ("channel.check", {"channel": "beta"}),
             ("channel.set", {"channel": "beta"}),
             ("base.set", {"base": "stable", "acknowledge_downgrade": True}),
             ("jobs.cancel", {"job_id": "0123456789abcdef"}),
