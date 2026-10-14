@@ -1,7 +1,7 @@
 # Real compositor plus session daemon (spike 3 as an automated test): gamescope runs headless
 # on lavapipe (software Vulkan) in Steam mode (-e) with the xterm placeholder as home app under
 # the reaper (launcher app id). The daemon sets GAMESCOPECTRL_BASELAYER_APPID. Over the session
-# socket (API 0.14) the test checks games.list (tools filtered), launching a fake Steam game (it
+# socket (API 0.15) the test checks games.list (tools filtered), launching a fake Steam game (it
 # comes to the front, OCR of gamescope's own screenshot), Home (SIGUSR1), apps.close
 # (app_exited closed, placeholder back), Steam itself (Big Picture, app 769) and a Steam Guard
 # style pop-up (steam_attention, steam.focus). Covers session wiring and flags; the launcher flow
@@ -110,14 +110,14 @@
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPE_FOCUSED_APP | grep -q 4100000000"), timeout=60)
     wait_sees("the placeholder", "hinteros", "placeholder")
 
-    # Session API 0.14 over the socket.
+    # Session API 0.15 over the socket.
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.14", "client": {"name": "gamescope-test", "version": "0"}}}
+                 "params": {"api_version": "0.15", "client": {"name": "gamescope-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         out = machine.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"))
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
-        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.14", replies[0]
+        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.15", replies[0]
         return replies
 
     def call(method, params=None, wait=2):
@@ -148,7 +148,7 @@
     # A long-lived subscriber, so events can be checked after the fact.
     sub = [
         {"jsonrpc": "2.0", "id": 0, "method": "hello",
-         "params": {"api_version": "0.14", "client": {"name": "gamescope-test-events", "version": "0"}}},
+         "params": {"api_version": "0.15", "client": {"name": "gamescope-test-events", "version": "0"}}},
         {"jsonrpc": "2.0", "id": 1, "method": "subscribe",
          "params": {"events": ["app_started", "app_exited", "focus_changed", "steam_attention"]}},
     ]
