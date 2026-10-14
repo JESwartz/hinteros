@@ -109,6 +109,7 @@ let
   # create profiles (over greeter.sock). Local overrides (parental controls) go in a
   # lower-numbered rules file that returns NO.
   greeterOn = config.hinteros.profiles.greeter.enable or false;
+  keyboardHome = cfg.input.keyboardHome;
   polkitRules = ''
     polkit.addRule(function (action, subject) {
       if (action.id.indexOf("org.hinteros.system.") === 0 &&
@@ -277,10 +278,13 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          `[input] keyboard_home`: Ctrl + Super (Windows key) + D on a keyboard is Home, like a short
-          Guide press. The session daemon only reads the keyboards (never grabs them), so the
-          focused app gets the keys too. With the greeter, keyboards on the active seat get a
-          uaccess ACL for this (profiles.nix); systemd gives one only to joysticks.
+          Ctrl + Super (Windows key) + D on a keyboard is Home, like a short Guide press. No profile
+          account may read keyboards (a game could log the admin password), so the reader is its own
+          system unit, `hinteros-keyboard` (`hinteros-system keyboard-home`): a dynamic user in groups
+          `input` and `hinteros-keyboard`, devices read-only, never grabbed (the focused app gets the
+          keys too), no network, no capabilities. It tells hinteros-system on
+          `/run/hinteros/keyboard.sock`, which sends `keyboard_home` to the session daemon of the
+          active seat0 session. Off: no reader unit, and the daemon's `[input] keyboard_home` is off.
         '';
       };
 
@@ -362,9 +366,13 @@ in
       audio.pactl = lib.mkDefault (lib.getExe' pkgs.pulseaudio "pactl");
     };
 
-    users.groups.${cfg.group} = { };
-    # profiles.nix puts every account in the group; without it (module tests) the session user.
-    users.users.${sessionUser}.extraGroups = lib.mkIf (!(options.hinteros ? profiles)) [ cfg.group ];
+    users = {
+      groups.${cfg.group} = { };
+      # The keyboard reader's (hinteros-keyboard): only it may write to keyboard.sock.
+      groups.hinteros-keyboard = lib.mkIf keyboardHome { };
+      # profiles.nix puts every account in the group; without it (module tests) the session user.
+      users.${sessionUser}.extraGroups = lib.mkIf (!(options.hinteros ? profiles)) [ cfg.group ];
+    };
 
     assertions = [
       {
@@ -447,6 +455,62 @@ in
           UMask = "0022";
         };
       };
+
+      # Ctrl+Super+D (`input.keyboardHome`): the only reader of keyboards on the box. A profile
+      # account never gets keyboard access (no uaccess rule, no group `input`): a game could log
+      # the admin password typed into the launcher's prompt or on the admin console. Each press
+      # is a `home` line on keyboard.sock; hinteros-system sends keyboard_home to the session
+      # daemon of the active seat0 session.
+      hinteros-keyboard = lib.mkIf keyboardHome {
+        description = "HinterOS keyboard Home (Ctrl+Super+D)";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "hinteros-system.service" ];
+        environment.RUST_LOG = cfg.logLevel;
+        serviceConfig = {
+          ExecStart = "${lib.getExe cfg.system.package} keyboard-home";
+          DynamicUser = true;
+          # Not the unit's name: that is the socket's group, which a dynamic user cannot share.
+          User = "hinteros-kbd";
+          # input: read /dev/input/event*; hinteros-keyboard: connect to keyboard.sock.
+          SupplementaryGroups = [
+            "input"
+            "hinteros-keyboard"
+          ];
+          Restart = "always";
+          RestartSec = 2;
+          # Keyboards only, read-only: no writes (LEDs, injected events) even with group input.
+          DevicePolicy = "closed";
+          DeviceAllow = [ "char-input r" ];
+          CapabilityBoundingSet = [ "" ];
+          AmbientCapabilities = [ "" ];
+          NoNewPrivileges = true;
+          PrivateNetwork = true;
+          RestrictAddressFamilies = [ "AF_UNIX" ];
+          ProtectSystem = "strict";
+          ProtectHome = true;
+          PrivateTmp = true;
+          ProtectProc = "invisible";
+          ProcSubset = "pid";
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectKernelLogs = true;
+          ProtectControlGroups = true;
+          ProtectClock = true;
+          ProtectHostname = true;
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          RemoveIPC = true;
+          SystemCallArchitectures = "native";
+          SystemCallFilter = [
+            "@system-service"
+            "~@privileged @resources"
+          ];
+          UMask = "0077";
+        };
+      };
     };
 
     systemd = {
@@ -455,7 +519,11 @@ in
         wantedBy = [ "multi-user.target" ];
         environment.RUST_LOG = cfg.logLevel;
         serviceConfig = {
-          ExecStart = lib.getExe cfg.system.package;
+          # --freeze-inactive: a profile whose session is not the active one (a text console, the
+          # picker, another session) is frozen until it is again (hinteros-system's freeze.rs):
+          # device fds it opened before a switch (/dev/uinput) stay open, and must not reach the
+          # admin console.
+          ExecStart = "${lib.getExe cfg.system.package} --freeze-inactive";
           # Root, because it starts the jobs that rebuild the system. The socket is created in the
           # runtime directory, owned by root:hinteros, mode 0660.
           User = "root";
@@ -492,8 +560,11 @@ in
           # Only so the audit entries can read /proc/<pid>/exe of another user's process
           # (HINTEROS_EXE; with an empty set the field is "?").
           CapabilityBoundingSet = [ "CAP_SYS_PTRACE" ];
-          # greeter.sock is root:hinteros-greeter 0660: a member may chgrp it without CAP_CHOWN.
-          SupplementaryGroups = lib.optional greeterOn config.hinteros.profiles.greeter.user;
+          # greeter.sock is root:hinteros-greeter 0660 and keyboard.sock root:hinteros-keyboard 0660:
+          # a member may chgrp them without CAP_CHOWN.
+          SupplementaryGroups =
+            lib.optional greeterOn config.hinteros.profiles.greeter.user
+            ++ lib.optional keyboardHome "hinteros-keyboard";
           UMask = "0007";
         };
       };

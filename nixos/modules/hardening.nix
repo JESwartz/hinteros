@@ -175,6 +175,10 @@ in
             message = "hinteros hardening: no profile account may read the system journal (audit trail).";
           }
           {
+            assertion = lib.all (u: !(lib.elem "input" (groupsOf u))) profileUsers;
+            message = "hinteros hardening: no profile account may be in group input, even in dev: it reads every keyboard (the admin password). Ctrl+Super+D is the hinteros-keyboard unit's.";
+          }
+          {
             assertion = dev || !greeterOn || inDeviceGroups == [ ];
             message = "hinteros hardening: users in device groups (${lib.concatStringsSep ", " inDeviceGroups}) with the greeter; devices follow the active session (uaccess).";
           }

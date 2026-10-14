@@ -66,7 +66,7 @@ profiles.mkTest {
         assert st["schemaVersion"] == 1 and st["profiles"] == [] and st["apps"] == ["firefox", "youtube"], st
         u = uid("hinteros")
         groups = set(machine.succeed("id -nG hinteros").split())
-        assert {"video", "input", "uinput"} <= groups, groups
+        assert {"video", "uinput"} <= groups and "input" not in groups, groups
         machine.succeed(
             f"runuser -u hinteros -- sh -c 'mkdir -p {STEAM}/steamapps/common/Game {STEAM}/config && "
             f"echo acf > {STEAM}/steamapps/appmanifest_620.acf && echo bin > {STEAM}/steamapps/common/Game/game && "
