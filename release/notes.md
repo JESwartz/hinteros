@@ -17,6 +17,11 @@ written for the person using the box.
   taken. Hide the job page and the top bar keeps showing the job.
 - Time zone: pick it in the first-boot setup and in Settings; a map shows the zone. The
   change applies at once (Settings needs the admin PIN).
+- Steam games that Steam names with another app id (for example a game with its own
+  `steam_appid.txt`) now show at once, also with Steam open, and leave Continue when they end.
+- Apps that are not installed no longer show on a new box.
+- Fixed: a profile without apps after moving to profiles; "another job is running" just after a
+  job ended; an offline install with Steam picked.
 
 ## 0.7.0
 
