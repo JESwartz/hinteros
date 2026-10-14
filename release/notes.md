@@ -20,6 +20,7 @@ written for the person using the box.
 - Steam games that Steam names with another app id (for example a game with its own
   `steam_appid.txt`) now show at once, also with Steam open, and leave Continue when they end.
 - Apps that are not installed no longer show on a new box.
+- Keyboard: press Ctrl + Windows + D to go to Home.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.
 
