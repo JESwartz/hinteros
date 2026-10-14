@@ -9,6 +9,9 @@
 #     path tricks are refused.
 #   - With the admin PIN (through the relay, as the launcher does it): /etc/localtime and
 #     state.json change at once, with no job; a new process's `date` shows the new zone.
+#   - A job (guest.set; STUBBED build: the guest-on specialisation) replaces /etc/hinteros and
+#     switches: the zone stays, and the same service process can still set one afterwards (its
+#     sandbox lets it write the new /etc/hinteros).
 #   - A reboot keeps it: activation reads the zone the service wrote, and hinteros-config-sync
 #     keeps the live zone although the generation's snapshot still says America/Chicago.
 #   - Activation again (as a switch or a rollback does): a zone that is not tzdata's or no zone
@@ -16,21 +19,28 @@
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
-  base = profiles.mkState {
-    accounts = [
-      "p1"
-      "p2"
-    ];
-    guest = false;
-  };
+  stateWith =
+    guest:
+    let
+      s = profiles.mkState {
+        accounts = [
+          "p1"
+          "p2"
+        ];
+        inherit guest;
+      };
+    in
+    s
+    // {
+      settings = s.settings // {
+        timeZone = "America/Chicago";
+      };
+    };
 in
 profiles.mkTest {
   name = "time-zone";
-  state = base // {
-    settings = base.settings // {
-      timeZone = "America/Chicago";
-    };
-  };
+  state = stateWith false;
+  specialisations.guest-on = stateWith true;
   profiles = {
     p1 = {
       name = "James";
@@ -63,7 +73,7 @@ profiles.mkTest {
     };
 
   testScript = ''
-    boot_box()
+    systems = boot_box()
 
     def link():
         return machine.succeed("readlink /etc/localtime").strip()
@@ -131,6 +141,35 @@ profiles.mkTest {
 
     with subtest("time_zone.set with the admin PIN: at once, no job"):
         gens = system_generations()
+        info = sess_ok("hinteros-p2", "system.time_zone.set", {"zone": "Europe/London", "admin_pin": "2468"})
+        assert info["zone"] == "Europe/London", info
+        assert info["standard_offset_seconds"] == 0 and isinstance(info["offset_valid_until"], int), info
+        assert zone_of_link() == "Europe/London", link()
+        assert tz_state() == "Europe/London", state_json()
+        assert date("%Z") in ("GMT", "BST"), date("%Z")
+        assert sys_ok("hinteros-p2", "time_zone.get")["zone"] == "Europe/London"
+        assert not [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"]
+        assert system_generations() == gens
+        # The rest of state.json is as it was.
+        st = state_json()
+        assert st["profiles"] == [{"id": "p1", "user": "hinteros"}, {"id": "p2", "user": "hinteros-p2"}], st
+        assert st["settings"]["guest"] == {"enable": False}, st
+        # Nothing left behind next to either file.
+        machine.fail("ls -a /etc | grep -v '^localtime$' | grep -i localtime")
+        machine.fail("ls -a /etc/hinteros | grep -i tmp")
+
+    with subtest("a job replaces /etc/hinteros: it keeps the zone, and the service can still set one"):
+        # guest.set rebuilds (the stub "builds" the guest-on specialisation) and swaps
+        # /etc/hinteros for its staged copy; the switch runs activation.
+        stub_build(systems["guest-on"])
+        j = sys_ok("hinteros-p2", "guest.set", {"enabled": True, "admin_pin": "2468"})["job_id"]
+        done = wait_job("hinteros-p2", j)
+        assert done["state"] == "succeeded", done
+        assert current_system() == systems["guest-on"]
+        assert state_json()["settings"]["guest"] == {"enable": True}, state_json()
+        assert tz_state() == "Europe/London", state_json()
+        assert link() == "/etc/zoneinfo/Europe/London", link()
+        # Same service process, after the swap: it writes the new /etc/hinteros.
         info = sess_ok("hinteros-p2", "system.time_zone.set", {"zone": "Asia/Tokyo", "admin_pin": "2468"})
         assert info["zone"] == "Asia/Tokyo", info
         assert info["offset_seconds"] == info["standard_offset_seconds"] == 9 * 3600, info
@@ -138,15 +177,6 @@ profiles.mkTest {
         assert zone_of_link() == "Asia/Tokyo", link()
         assert tz_state() == "Asia/Tokyo", state_json()
         assert date("%Z") == "JST" and date("%z") == "+0900", (date("%Z"), date("%z"))
-        assert sys_ok("hinteros-p2", "time_zone.get")["zone"] == "Asia/Tokyo"
-        assert not [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"]
-        assert system_generations() == gens
-        # The rest of state.json is as it was.
-        st = state_json()
-        assert st["profiles"] == [{"id": "p1", "user": "hinteros"}, {"id": "p2", "user": "hinteros-p2"}], st
-        assert st["settings"]["guest"] == {"enable": False}, st
-        # Nothing left behind next to it.
-        machine.fail("ls -a /etc | grep -v '^localtime$' | grep -i localtime")
 
     with subtest("a reboot keeps it"):
         machine.shutdown()

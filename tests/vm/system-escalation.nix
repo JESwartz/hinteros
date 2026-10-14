@@ -40,10 +40,15 @@
                      "ReadWritePaths=/run/hinteros"):
             assert want in show, (want, show)
         assert "cap_sys_ptrace" in show.lower() and "cap_dac_override" not in show.lower(), show
-        # Really read-only: even as root in its mount namespace it cannot write /etc.
+        # Really read-only: even as root in its mount namespace it cannot write the store, /nix/var,
+        # /usr or /boot. /etc is writable (time_zone.set changes state.json and /etc/localtime in
+        # place; see daemon.nix).
         mp = pid()
-        machine.fail(f"nsenter -m -t {mp} -- touch /etc/hinteros-write-test")
         machine.fail(f"nsenter -m -t {mp} -- touch /nix/var/write-test")
+        machine.fail(f"nsenter -m -t {mp} -- touch /nix/store/write-test")
+        machine.fail(f"nsenter -m -t {mp} -- touch /usr/write-test")
+        machine.succeed(f"nsenter -m -t {mp} -- touch /etc/hinteros/.write-test")
+        machine.succeed("rm /etc/hinteros/.write-test")
         machine.succeed(f"nsenter -m -t {mp} -- test -d /run/hinteros")
         assert machine.succeed("stat -c '%a %U' /var/lib/hinteros").strip() == "700 root"
         assert machine.succeed("stat -c '%a %U:%G' /etc/hinteros").strip() == "755 root:root"

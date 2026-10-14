@@ -92,6 +92,7 @@ let
         [
           "/run/hinteros"
           "/var/lib/hinteros"
+          "/etc"
         ]
         [ "CAP_SYS_PTRACE" ]
         [ "AF_UNIX" ]

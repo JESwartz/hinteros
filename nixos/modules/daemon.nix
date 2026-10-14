@@ -420,11 +420,22 @@ in
           Restart = "on-failure";
           RestartSec = 2;
           # It reads /etc/hinteros, /proc, the profile links and /run/current-system, and writes
-          # only /run/hinteros. Everything that changes the system happens in hinteros-job@.
+          # /run/hinteros and /var/lib/hinteros. Everything that rebuilds the system happens in
+          # hinteros-job@.
+          #
+          # /etc: `time_zone.set` (time-zone.md) changes state.json and /etc/localtime in place,
+          # each as a new file next to the old one renamed over it, so it needs the directories
+          # /etc/hinteros and /etc writable. Nothing narrower works: a rename onto a bind-mounted
+          # /etc/localtime fails (EBUSY), and a bind of /etc/hinteros is left behind when a job
+          # or hinteros-config-sync swaps /etc/hinteros for a new directory (the service would then
+          # see the new one read-only until it restarts). The cost: the service can write all of
+          # /etc that root may write (it has no CAP_DAC_OVERRIDE). Narrower would be a separate
+          # oneshot unit that does these two writes, started by the service like hinteros-usage.
           ProtectSystem = "strict";
           ReadWritePaths = [
             "/run/hinteros"
             "/var/lib/hinteros"
+            "/etc"
           ];
           NoNewPrivileges = true;
           PrivateTmp = true;
