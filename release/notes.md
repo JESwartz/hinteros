@@ -15,6 +15,8 @@ written for the person using the box.
 - Automatic clean-up is a setting: on or off, how often, and how many versions to keep.
 - Updates and app installs show what they install, how many parts are built, and the time
   taken. Hide the job page and the top bar keeps showing the job.
+- Installer: the system install shows its steps (copy or download the packages, build HinterOS,
+  install the boot loader), each with its count.
 - Time zone: pick it in the first-boot setup and in Settings; a map shows the zone. The
   change applies at once (Settings needs the admin PIN).
 - Steam games that Steam names with another app id (for example a game with its own

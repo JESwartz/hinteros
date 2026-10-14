@@ -86,6 +86,7 @@ in
   testScript = ''
     import json
 
+    ${builtins.readFile ./install/system-steps.py}
     REVS = json.loads('${builtins.toJSON revs}')
     CASES = {${lib.concatStringsSep ", " (lib.mapAttrsToList (n: v: ''"${n}": "${v}"'') cases)}}
     ONLINE = "HINTEROS_INSTALL_ONLINE_PROBE=file:///tmp/online "
@@ -133,7 +134,7 @@ in
         status, lines = validate(name, env, validate_only)
         assert status == 2, (name, status, lines)
         assert lines[-1]["level"] == "error" and lines[-1]["code"] == code, (name, code, lines[-1])
-        assert not any(l["stage"] in ("fetch", "partition", "install", "done") for l in lines), lines
+        assert not any(l["stage"] in ("fetch", "partition", "packages", "build", "bootloader", "done") for l in lines), lines
 
     with subtest("--check-newer reports the signed newer tip"):
         tip("stable", "newer")
@@ -232,7 +233,9 @@ in
         for l in lines:
             if l["stage"] not in stages:
                 stages.append(l["stage"])
-        assert stages == ["validate", "fetch", "partition", "facter", "config", "install", "snapshot", "apps", "finalize", "done"], stages
+        assert stages == ["validate", "fetch", "partition", "facter", "config", "packages", "build", "bootloader", "snapshot", "apps", "finalize", "done"], stages
+        # The system stage in its three steps (online: the packages are downloaded).
+        check_system_steps(lines, "download")
 
     with subtest("the device flake pins the newer revision, and the system is that release"):
         installer.succeed("mount /dev/disk/by-partlabel/hinteros-root /mnt")

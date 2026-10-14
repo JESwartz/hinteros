@@ -141,12 +141,22 @@ The plan may hold a plain-text password: keep it on tmpfs and delete it afterwar
 reads it from stdin). `--validate-only` checks the plan and the machine and touches nothing. With a newer `rev` it also checks that the network is there and the revision verifies (below). `--state-dir DIR` (tests) checks the plan only and writes the `state.json` files the install would produce (`DIR/system`, `DIR/apps`).
 
 **Progress.** stdout is one JSON object per line, for example
-`{"phase":"system","stage":"install","percent":57,"level":"info","message":"..."}`. `phase` is
+`{"phase":"system","stage":"build","percent":57,"level":"info","message":"..."}`. `phase` is
 `system` or `apps` (see below); during the apps stage a line may also carry `app` (a catalog id).
 Stages in order: `validate` (0-8), `fetch` (9, only when installing a newer `rev`), `partition` (10-20), `facter` (22-26), `config` (28-30),
-`install` (32-70, from nix's own progress), `snapshot` (72-73) - all phase `system` - then, if the
-plan has apps, `apps` (74-96, phase `apps`), `finalize` (97), `done` (100). Percentages never go
-backwards. `level` is `info`, `warn` or `error`. An `error` line also has a `code`
+`packages` (32-50), `build` (50-66), `bootloader` (66-70), `snapshot` (72-73) - all phase `system` -
+then, if the plan has apps, `apps` (74-96, phase `apps`), `finalize` (97), `done` (100). Percentages
+never go backwards. A line may carry `step_percent` (0-100, how far the current step is; absent: not
+measurable). The system install is three steps, each with its own count:
+`packages` first gets the package list (`nix build --dry-run`, no `step_percent`), then copies the
+packages from the ISO (offline) or downloads them (online) into the target, `"<done> of <total>
+packages"` (or `"Nothing to copy"` / `"Nothing to download"`); `build` builds what is not prebuilt,
+`"Building <name> (<i> of <n>)"` or `"<done> of <n> built"` (`"Nothing to build"`), and these
+lines also carry `build` (the name of the newest running build, without hash and version; absent
+when none runs), `build_index` (1-based) and `build_total`; `bootloader` runs
+`nixos-install --system` with the built system (the system profile and the boot loader) and ends
+with `"System installed, boot loader written"`. A retry (`warn`, code `system-retry` or
+`bootloader-retry`) starts again from `packages`. `level` is `info`, `warn` or `error`. An `error` line also has a `code`
 (`admin-password-missing`, `app-needs-network`, `disk-not-found`, `disk-in-use`, `disk-too-small`,
 `other-hinteros-disk`, `not-uefi`, `install-failed`, `rev-needs-network`, `fetch-failed`, ...) and the exit status is 2 (the plan or the
 machine was refused, nothing was touched) or 1 (the base system could not be installed). Tool
@@ -188,7 +198,9 @@ ignores the report while that marker exists, `hinteros-facter-release` removes i
 online, and the next rebuild or update applies the report. Online installs apply it at once; write
 `/etc/hinteros` (`flake.nix` from `nixos/templates/device-flake.nix.in`, `flake.lock`,
 `state.json`); write the admin password hash to `/var/lib/hinteros/admin-password-hash` (0600,
-referenced by the config, never in `state.json` or the store); `nixos-install --no-root-passwd`;
+referenced by the config, never in `state.json` or the store); build the system into the new root
+as `nixos-install` would (`nix build --store /mnt`, in the three steps above) and install it with
+`nixos-install --system --no-root-passwd`;
 check that `/etc/hinteros` equals the generation's snapshot; the apps stage; unmount. Where EFI
 variables cannot be written (efivarfs missing or read-only, or the boot loader step failed once)
 the config gets `boot.loader.efi.canTouchEfiVariables = false` and the box boots through the

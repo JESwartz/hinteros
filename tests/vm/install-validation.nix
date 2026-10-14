@@ -140,7 +140,7 @@ in
           assert status == 2, (name, status, lines)
           assert code in [e["code"] for e in errors], (name, code, errors)
           assert lines[-1]["level"] == "error", lines[-1]
-          assert not any(l["stage"] in ("partition", "install", "done") for l in lines), lines
+          assert not any(l["stage"] in ("partition", "packages", "build", "bootloader", "done") for l in lines), lines
           # Untouched: the marker file system, no partitions, no mounts, no device config.
           assert 'LABEL="marker"' in installer.succeed("blkid /dev/vdb"), name
           installer.succeed("test -z \"$(lsblk -nro NAME /dev/vdb | tail -n +2)\"")

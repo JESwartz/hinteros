@@ -125,6 +125,7 @@ in
     import shlex
     from datetime import timedelta
 
+    ${builtins.readFile ./install/system-steps.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
@@ -188,12 +189,15 @@ in
         for l in lines:
             if l["stage"] not in stages:
                 stages.append(l["stage"])
-        assert stages == ["validate", "partition", "facter", "config", "install", "snapshot", ${
+        assert stages == ["validate", "partition", "facter", "config", "packages", "build", "bootloader", "snapshot", ${
           if apps != [ ] then ''"apps", '' else ""
         }"finalize", "done"], stages
         # Two phases: up to the snapshot is the system stage, then the apps stage.
         assert all(l["phase"] in ("system", "apps") for l in lines), lines
-        assert all(l["phase"] == "system" for l in lines if l["stage"] in ("validate", "partition", "facter", "config", "install", "snapshot")), lines
+        assert all(l["phase"] == "system" for l in lines if l["stage"] in ("validate", "partition", "facter", "config", "packages", "build", "bootloader", "snapshot")), lines
+        # The system stage in its three steps, with their own counts (offline: copied from the installer).
+        check_system_steps(lines, "copy")
+        assert not any("download" in l["message"].lower() for l in lines if l["stage"] == "packages"), lines
         ${
           if apps != [ ] then
             ''assert any(l["phase"] == "apps" and l["stage"] == "apps" for l in lines), lines''

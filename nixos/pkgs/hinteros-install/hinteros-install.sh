@@ -18,13 +18,27 @@
 #
 # Two stages. The SYSTEM stage installs HinterOS (state.json schema 2: one spare account, p1 =
 # hinteros, no profile, the box features the picked apps need; offline only those of the apps on
-# this medium), offline from this medium's store if need be. The APPS stage then builds the
-# picked apps' env into the target and makes it the starter set
+# this medium), offline from this medium's store if need be, in three steps, each with its own
+# stage name and step_percent:
+#   packages   (36-50) "Getting the package list" (nix build --dry-run; no step_percent), then the
+#              packages the system needs are copied from this medium (offline) or downloaded
+#              (online) into the target: "<done> of <total> packages" ("Nothing to copy" /
+#              "Nothing to download" when there is none);
+#   build      (50-66) what is not prebuilt is built: "Building <name> (<i> of <n>)", or
+#              "<done> of <n> built" while nothing runs ("Nothing to build"). These lines also carry
+#              `build` (the newest running build's name, without hash and version; absent when
+#              none runs), `build_index` (1-based) and `build_total`;
+#   bootloader (66-70) nixos-install --system sets the system profile and writes the boot loader.
+# A retry (warn system-retry or bootloader-retry) starts again from `packages`; step_percent
+# never goes back within one run of a stage. The APPS stage then builds the picked apps' env into
+# the target and makes it the starter set
 # (/nix/var/nix/profiles/hinteros/starter, /var/lib/hinteros/starter.json); the system is not
 # rebuilt. Whatever happens to an app, the system stage's result stays.
 #
 # stdout carries one JSON object per line, for a UI to follow:
 #   {"phase":"system","stage":"partition","percent":14,"level":"info","message":"..."}
+#   {"phase":"system","stage":"build","percent":57,"level":"info","message":"Building hinteros-launcher (12 of 30)",
+#    "step_percent":36,"build":"hinteros-launcher","build_index":12,"build_total":30}
 # `phase` is "system" or "apps"; during the apps stage a line may carry `app` (an app id). An app
 # that could not be installed gets {level:"warn", code:"app-failed", app, message}; the run still
 # ends with exit status 0 and a final {stage:"done", failed_apps:[...]}.
@@ -867,38 +881,84 @@ NIXLOG=
 NIXOUT=
 NIX_RC=0
 NIX_ERRS=
+# The filter turns nix's internal-json log (stderr) into progress, one tab-separated line per
+# step: percent, step_percent, message, extra fields (a JSON object). $mode:
+#   combined  copies (103) and builds (104) together, "<done> of <expected> steps" (the apps stage);
+#   packages  copies only, "<done> of <total> packages";
+#   build     builds only, "Building <name> (<i> of <n>)" / "<done> of <n> built", with the running
+#             builds (105) for `build`, `build_index` and `build_total`.
+# $total (packages, build): the count `nix build --dry-run` gave. nix's own `expected` grows while
+# it works through the closure (it said "1 of 1" long before the end), so it only counts where it
+# is larger. A line is printed when step_percent goes up (and in build mode when the running build
+# changes); step_percent never goes down.
 # shellcheck disable=SC2016
 progress_filter='
+  def pct(d; t): if t > 0 then ((d * 100 / t) | floor) else 0 end;
+  def name: sub(".*/"; "") | sub("^[0-9a-z]{32}-"; "") | sub("\\.drv$"; "") | sub("-[0-9][^-]*$"; "");
   foreach (inputs | select(startswith("@nix ")) | .[5:] | fromjson? | select(. != null)) as $e (
-    {kinds: {}, prog: {}, last: -1, emit: null};
-    .emit = null
-    | if $e.action == "start" and ($e.type == 103 or $e.type == 104) then
-        .kinds[($e.id | tostring)] = $e.type
-      elif $e.action == "result" and $e.type == 105 and (.kinds[($e.id | tostring)] != null) then
-        .prog[($e.id | tostring)] = $e.fields
-        | ([.prog[] | .[0]] | add) as $done | ([.prog[] | .[1]] | add) as $exp
-        | (if $exp > 0 then ($lo + (($done / $exp) * ($hi - $lo) | floor)) else $lo end) as $pct
-        | (if $exp > 0 then (($done * 100 / $exp) | floor) else 0 end) as $step
-        | if $step > .last then .last = $step | .emit = {percent: $pct, step: $step, message: "\($done) of \($exp) steps"} else . end
-      else . end;
-    select(.emit != null) | .emit)'
+    {kinds: {}, prog: {}, run: [], last: (if $mode != "combined" and $total > 0 then 0 else -1 end),
+     lastb: null, emit: null, touch: false};
+    .emit = null | .touch = false
+    | ($e.id | tostring) as $id
+    | if $e.action == "start" and (($e.type == 103 and $mode != "build") or ($e.type == 104 and $mode != "packages")) then
+        .kinds[$id] = $e.type
+      elif $mode == "build" and $e.action == "start" and $e.type == 105 then
+        .run += [{id: $id, name: ($e.fields[0] | tostring | name)}] | .touch = true
+      elif $mode == "build" and $e.action == "stop" and any(.run[]; .id == $id) then
+        .run |= map(select(.id != $id)) | .touch = true
+      elif $e.action == "result" and $e.type == 105 and (.kinds[$id] != null) then
+        .prog[$id] = $e.fields | .touch = (.run == [])
+      else . end
+    | ([.prog[] | .[0]] | add // 0) as $done | ([.prog[] | .[1]] | add // 0) as $exp
+    | if $mode == "combined" then
+        (if $exp > 0 then ($lo + (($done / $exp) * ($hi - $lo) | floor)) else $lo end) as $pct
+        | pct($done; $exp) as $step
+        | if $step > .last then .last = $step | .emit = [$pct, $step, "\($done) of \($exp) steps", {}] else . end
+      else
+        ([$done, (if $total > 0 then $total else $exp end)] | max) as $t
+        | ([pct($done; $t), .last] | max) as $step
+        | ($lo + (if $t > 0 then ($done / $t) * ($hi - $lo) | floor else 0 end)) as $pct
+        | if $mode == "packages" then
+            if $step > .last then .last = $step | .emit = [$pct, $step, "\($done) of \($t) packages", {}] else . end
+          else
+            (.run | last | .name // null) as $b
+            | if .touch and ($step > .last or $b != .lastb) then
+                .last = $step | .lastb = $b
+                | ([$done + 1, $t] | min) as $i
+                | .emit = [$pct, $step,
+                    (if $b == null then "\($done) of \($t) built" else "Building \($b) (\($i) of \($t))" end),
+                    ({build_index: $i, build_total: $t} + (if $b == null then {} else {build: $b} end))]
+              else . end
+          end
+      end;
+    select(.emit != null) | .emit | "\(.[0])\t\(.[1])\t\(.[2])\t\(.[3] | tojson)")'
 
-# nix_logged STAGE LO HI LABEL CMD...: runs CMD in the background with its output in files and
-# turns nix's internal-json log into progress lines between LO and HI percent. Sets NIX_RC; the
-# output is in $NIXLOG (stderr) and $NIXOUT (stdout) until the next call, and in the log file.
+# nix_logged MODE STAGE LO HI LABEL TOTAL CMD...: runs CMD in the background with its output in
+# files and turns nix's internal-json log into progress lines between LO and HI percent (MODE and
+# TOTAL: see progress_filter; MODE quiet: no progress lines). LABEL (may be empty) goes before each
+# message. Sets NIX_RC, and NIX_STEP and NIX_EXTRA to the last line's step_percent and extra
+# fields (empty: no line); the output is in $NIXLOG (stderr) and $NIXOUT (stdout) until the next
+# call, and in the log file.
 nix_logged() {
-  local st=$1 lo=$2 hi=$3 label=$4 pid p
-  shift 4
+  local mode=$1 st=$2 lo=$3 hi=$4 label=$5 total=$6 pid pc sp msg extra
+  shift 6
   rm -f "$NIXLOG" "$NIXOUT"
   NIXLOG=$(mktemp)
   NIXOUT=$(mktemp)
+  NIX_STEP=
+  NIX_EXTRA=
   echo "+ $*" >>"$LOG"
   "$@" >"$NIXOUT" 2>"$NIXLOG" </dev/null &
   pid=$!
-  while IFS= read -r p; do
-    step_pct=$(printf '%s' "$p" | jq -r .step)
-    progress "$st" "$(printf '%s' "$p" | jq -r .percent)" "$label: $(printf '%s' "$p" | jq -r .message)"
-  done < <(tail -n +1 -F --pid="$pid" "$NIXLOG" 2>/dev/null | jq -cnR --unbuffered --argjson lo "$lo" --argjson hi "$hi" "$progress_filter" 2>/dev/null || true)
+  if [ "$mode" != quiet ]; then
+    while IFS=$'\t' read -r pc sp msg extra; do
+      step_pct=$sp
+      NIX_STEP=$sp
+      NIX_EXTRA=$extra
+      progress "$st" "$pc" "${label:+$label: }$msg" info "" "$extra"
+    done < <(tail -n +1 -F --pid="$pid" "$NIXLOG" 2>/dev/null | jq -rnR --unbuffered --arg mode "$mode" \
+      --argjson lo "$lo" --argjson hi "$hi" --argjson total "$total" "$progress_filter" 2>/dev/null || true)
+  fi
   NIX_RC=0
   wait "$pid" || NIX_RC=$?
   step_pct=
@@ -936,7 +996,7 @@ nix_cleanup() { rm -f "$NIXLOG" "$NIXOUT"; }
 # ---------------------------------------------------------------------------------------------
 # 4. SYSTEM STAGE: install the base system, no apps.
 # ---------------------------------------------------------------------------------------------
-progress install 32 "Copying flake inputs to the new system"
+progress packages 32 "Copying flake inputs to the new system"
 # The inputs the lock pins are in this installer's store; the new system keeps them too, so a
 # rebuild with an unchanged lock needs no network either.
 xargs -a "$SOURCES_FILE" nix --extra-experimental-features nix-command copy --no-check-sigs --to "$MNT" \
@@ -949,16 +1009,127 @@ xargs -a "$SOURCES_FILE" nix --extra-experimental-features nix-command copy --no
 subst_flags=(--option substitute true)
 offline_flags=(--option substituters "auto?trusted=1")
 
-# install_system ONLINE(0|1): nixos-install of the device flake.
-install_system() {
-  local flags=(--root "$MNT" --no-root-passwd --no-channel-copy
-    --flake "path:$cfg#hinteros" --no-update-lock-file --log-format internal-json -v "${subst_flags[@]}")
-  if [ "$1" -eq 0 ]; then
-    # Offline: this installer's store is the only substituter. (nixos-install passes its own
-    # --extra-substituters before these flags, so the list has to be set, not cleared.)
-    flags+=("${offline_flags[@]}")
+# The system stage, in three steps (see the top of this file): `packages` (nix build --dry-run
+# finds what is needed, then the packages to fetch are copied or downloaded into the target),
+# `build` (the system's derivation, built in the target), `bootloader` (nixos-install --system:
+# the system profile and the boot loader; it builds nothing). The nix calls are the build
+# nixos-install does itself (nix build --store /mnt --extra-substituters auto?trusted=1, the
+# installer's own store), split so that each step can show its own count.
+sys_stage=packages # the step that runs (warnings and errors are reported with it)
+sys_offline=0      # 1: the nix calls use only this installer's store
+SYS_FLAGS=()       # the store and substituter flags of every nix call
+SYS_DRV=           # the system's derivation (from the dry run)
+SYS_TOPLEVEL=      # its output: what the boot loader step installs
+SYS_BUILDS=()      # derivations the dry run lists as to be built
+# Builds use the target disk for their temporary files (as nixos-install does), not the
+# installer's memory.
+sys_tmp=$(mktemp -d -p "$MNT")
+tmp_dirs+=("$sys_tmp")
+
+# sys_nix CMD-ARGS...: nix with flakes, temporary files on the target.
+# shellcheck disable=SC2329 # run via nix_logged
+sys_nix() { env TMPDIR="$sys_tmp" nix --extra-experimental-features 'nix-command flakes' "$@"; }
+
+# dry_list built|fetched FILE: the store paths `nix build --dry-run` lists under that heading
+# ("these N derivations will be built:" / "this path will be fetched (...):", one indented path
+# per line).
+dry_list() {
+  awk -v w="$1" '
+    /^(these [0-9]+ derivations|this derivation) will be built:/ { s = (w == "built"); next }
+    /^(these [0-9]+ paths|this path) will be fetched/ { s = (w == "fetched"); next }
+    /^[[:space:]]+\/nix\/store\// { if (s) print $1; next }
+    { s = 0 }' "$2"
+}
+
+# sys_packages ONLINE(0|1): the package list, then the packages to fetch, into the target.
+sys_packages() {
+  local fetch=() n word=copy
+  [ "$1" -eq 0 ] || word=download
+  sys_stage=packages
+  sys_offline=$((1 - $1))
+  SYS_FLAGS=(--store "$MNT" --extra-substituters "auto?trusted=1" "${subst_flags[@]}")
+  if [ "$sys_offline" -eq 1 ]; then
+    # Offline: this installer's store is the only substituter (set the list, after the extra one).
+    SYS_FLAGS+=("${offline_flags[@]}")
   fi
-  nix_logged install 36 70 "Installing the system" nixos-install "${flags[@]}"
+  step_pct=
+  progress packages 36 "Getting the package list"
+  nix_logged quiet packages 36 36 "" 0 sys_nix build "${SYS_FLAGS[@]}" --no-update-lock-file \
+    --dry-run --json --no-link "path:$cfg#nixosConfigurations.hinteros.config.system.build.toplevel"
+  [ "$NIX_RC" -eq 0 ] || return 1
+  SYS_DRV=$(jq -r '.[0].drvPath // empty' "$NIXOUT" 2>>"$LOG" || true)
+  SYS_TOPLEVEL=$(jq -r '.[0].outputs.out // empty' "$NIXOUT" 2>>"$LOG" || true)
+  if [ -z "$SYS_DRV" ] || [ -z "$SYS_TOPLEVEL" ]; then
+    echo "nix build --dry-run named no system derivation and output" | tee -a "$NIXLOG" >>"$LOG"
+    NIX_RC=1
+    return 1
+  fi
+  mapfile -t SYS_BUILDS < <(dry_list built "$NIXLOG")
+  mapfile -t fetch < <(dry_list fetched "$NIXLOG")
+  n=${#fetch[@]}
+  echo "system: ${#SYS_BUILDS[@]} to build, $n to $word: $SYS_DRV -> $SYS_TOPLEVEL" >>"$LOG"
+  if [ "$n" -eq 0 ]; then
+    step_pct=100
+    progress packages 50 "Nothing to $word"
+    step_pct=
+    return 0
+  fi
+  step_pct=0
+  progress packages 36 "0 of $n packages"
+  nix_logged packages packages 36 50 "" "$n" sys_nix build "${SYS_FLAGS[@]}" --no-link \
+    --log-format internal-json -v "${fetch[@]}"
+  [ "$NIX_RC" -eq 0 ] || return 1
+  if [ "$NIX_STEP" != 100 ]; then
+    step_pct=100
+    progress packages 50 "$n of $n packages"
+    step_pct=
+  fi
+}
+
+# sys_build: the system's derivation, built in the target (the dry run wrote it there).
+sys_build() {
+  local n=${#SYS_BUILDS[@]} out
+  sys_stage=build
+  if [ "$n" -gt 0 ]; then
+    step_pct=0
+    progress build 50 "0 of $n built" info "" "{\"build_index\":1,\"build_total\":$n}"
+  fi
+  nix_logged build build 50 66 "" "$n" sys_nix build "${SYS_FLAGS[@]}" --no-link --print-out-paths \
+    --log-format internal-json -v "$SYS_DRV^*"
+  [ "$NIX_RC" -eq 0 ] || return 1
+  out=$(tail -n 1 "$NIXOUT")
+  if [ "$out" != "$SYS_TOPLEVEL" ]; then
+    echo "the system built is ${out:-nothing}, not $SYS_TOPLEVEL" | tee -a "$NIXLOG" >>"$LOG"
+    NIX_RC=1
+    return 1
+  fi
+  step_pct=100
+  if [ -z "$NIX_STEP" ] && [ "$n" -eq 0 ]; then
+    progress build 66 "Nothing to build" info "" '{"build_index":0,"build_total":0}'
+  elif [ "$NIX_STEP" != 100 ]; then
+    # nix built more than the dry run said: its own count, as in the last line.
+    [[ $NIX_EXTRA =~ \"build_total\":([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -gt "$n" ] && n=${BASH_REMATCH[1]}
+    progress build 66 "$n of $n built" info "" "{\"build_index\":$n,\"build_total\":$n}"
+  fi
+  step_pct=
+}
+
+# sys_bootloader: nixos-install --system sets the target's system profile to the system built and
+# writes the boot loader (it builds nothing).
+sys_bootloader() {
+  local flags=(--root "$MNT" --no-root-passwd --no-channel-copy --system "$SYS_TOPLEVEL" "${subst_flags[@]}")
+  # nixos-install passes its own --extra-substituters; offline the list is set, as above.
+  [ "$sys_offline" -eq 0 ] || flags+=("${offline_flags[@]}")
+  sys_stage=bootloader
+  step_pct=
+  progress bootloader 66 "Installing the boot loader"
+  nix_logged quiet bootloader 66 66 "" 0 nixos-install "${flags[@]}"
+  [ "$NIX_RC" -eq 0 ]
+}
+
+# install_system ONLINE(0|1): the three steps; NIX_RC and sys_stage tell how far it got.
+install_system() {
+  sys_packages "$1" && sys_build && sys_bootloader
 }
 
 # An offline system stage installs exactly what this medium carries: the box features of the
@@ -971,19 +1142,20 @@ offline_state() {
   write_state
 }
 
-progress install 36 "Building and installing the system"
 sys_online=$online
 [ "$sys_online" -eq 1 ] || offline_state
 attempt=1
 while :; do
-  install_system "$sys_online"
-  [ "$NIX_RC" -eq 0 ] && break
+  if install_system "$sys_online"; then break; fi
+  [ "$NIX_RC" -ne 0 ] || NIX_RC=1
   nix_failure
   if [ "$attempt" -ge 3 ]; then break; fi
   attempt=$((attempt + 1))
-  if grep -aq 'installing the boot loader' "$NIXOUT" && efi_override; then
-    # The system was built; writing the boot loader failed (EFI variables on this firmware?).
-    progress install 36 "Installing the boot loader failed; retrying without EFI variables" warn bootloader-retry
+  if [ "$sys_stage" = bootloader ] && efi_override; then
+    # The system was built; writing the boot loader failed (EFI variables on this firmware?). The
+    # override changes the system (its boot loader script), so it is built again from the
+    # package list; nearly all of it is in the target already.
+    progress bootloader "$percent" "Installing the boot loader failed; retrying without EFI variables" warn bootloader-retry
     continue
   fi
   if [ "$newer" -eq 1 ]; then
@@ -991,7 +1163,7 @@ while :; do
     # hardware report can be left out (the box applies it with its next rebuild).
     if [ "$facter_ok" -eq 1 ] && [ ! -e "$cfg/facter.deferred" ]; then
       : >"$cfg/facter.deferred"
-      progress install 36 "The install with the hardware report failed; retrying with generic hardware support" warn system-retry
+      progress "$sys_stage" "$percent" "The install with the hardware report failed; retrying with generic hardware support" warn system-retry
       continue
     fi
     break
@@ -1002,7 +1174,7 @@ while :; do
     : >"$cfg/facter.deferred"
     sys_online=0
     offline_state
-    progress install 36 "The install with network access failed; retrying with the generic system from this installer" warn system-retry
+    progress "$sys_stage" "$percent" "The install with network access failed; retrying with the generic system from this installer" warn system-retry
     continue
   fi
   break
@@ -1012,7 +1184,10 @@ if [ "$NIX_RC" != 0 ]; then
   fail 1 install-failed "nixos-install failed (exit $NIX_RC): $(printf '%s' "$NIX_ERRS" | tail -n 4 | tr '\n' ' ' | cut -c1-600); see $LOG"
 fi
 nix_cleanup
-progress install 70 "System installed, boot loader written"
+step_pct=100
+progress bootloader 70 "System installed, boot loader written"
+step_pct=
+rm -rf "$sys_tmp"
 
 progress snapshot 72 "Checking the config snapshot"
 base_system=$(readlink -f "$MNT/nix/var/nix/profiles/system")
@@ -1114,7 +1289,7 @@ ENV_OUT=
 # build_env JSON_ARRAY LO HI: the starter env of these apps -> $ENV_OUT, NIX_RC.
 build_env() {
   ENV_OUT=
-  nix_logged apps "$2" "$3" "Building" nix --extra-experimental-features 'nix-command flakes' build \
+  nix_logged combined apps "$2" "$3" "Building" 0 nix --extra-experimental-features 'nix-command flakes' build \
     --store "$MNT" --extra-substituters "auto?trusted=1" "${env_flags[@]}" --expr \
     "(builtins.getFlake \"path:$cfg\").nixosConfigurations.hinteros.config.hinteros.appEnv.build (builtins.fromJSON ''$1'')"
   if [ "$NIX_RC" -eq 0 ]; then
