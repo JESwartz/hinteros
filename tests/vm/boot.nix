@@ -78,7 +78,7 @@
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
     assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
     machine.succeed("id -nG hinteros | tr ' ' '\\n' | grep -qx hinteros")
-    assert rpc("/run/hinteros/system.sock", "0.3", as_user="hinteros") == "hinteros-system"
+    assert rpc("/run/hinteros/system.sock", "0.6", as_user="hinteros") == "hinteros-system"
 
     # Session daemon: user service of the session user, socket in its runtime dir, mode 0600.
     uid = machine.succeed("id -u hinteros").strip()
