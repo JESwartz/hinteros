@@ -55,13 +55,14 @@ in
   testScript = ''
     import json
 
+    ${builtins.readFile ./install/copy-plan.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
     installer.fail("curl -sS --max-time 3 https://cache.nixos.org/nix-cache-info")
     # Nothing but lo: this is what turns nix's substitution off on a box without a network.
     installer.succeed("test \"$(ls /sys/class/net)\" = lo")
-    installer.copy_from_host("${plan}", "/tmp/plan.json")
+    copy_plan("${plan}", "/tmp/plan.json")
 
     with subtest("the install with an Intel mini PC's hardware report succeeds"):
         rc, _ = installer.execute(

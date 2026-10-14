@@ -14,7 +14,7 @@ second machine to build the ISO. An Ethernet cable for the online part; a Wi-Fi 
 - [ ] `sudo dd if=result/iso/hinteros-installer.iso of=/dev/sdX bs=4M conv=fsync status=progress` (check the device with `lsblk`).
 - [ ] The mini PC boots the stick in UEFI mode (boot menu key, pick the UEFI entry). Record: time to the console, any boot menu or Secure Boot complaint, whether the display and the keyboard work.
 - [ ] The console shows the HinterOS installer notice (not an installer UI: none is wired yet) and `hinteros-install` is on the PATH.
-- [ ] `lsblk` shows the internal disk; note its by-id path (`ls -l /dev/disk/by-id/`) for the plan.
+- [ ] `lsblk -o PATH,DISK-SEQ,MODEL,SIZE` shows the internal disk; note its by-id path (`ls -l /dev/disk/by-id/`) and its `DISK-SEQ` (`diskSeq` in the plan).
 
 ## Refusals (nothing may be touched)
 
@@ -26,7 +26,7 @@ second machine to build the ISO. An Ethernet cable for the online part; a Wi-Fi 
 
 ## Offline install (cable out, no Wi-Fi)
 
-- [ ] `plan.json`: the internal disk, `hostname`, an admin user and password, `ssh.enable` true, `apps` `["youtube","firefox"]`.
+- [ ] `plan.json`: the internal disk and its `diskSeq`, `hostname`, an admin user and password, `ssh.enable` true, `apps` `["youtube","firefox"]`.
 - [ ] `sudo hinteros-install --plan plan.json` runs to `done` (100%). Record: total time, the progress lines look sensible (stage and percent only go forward), warnings (`facter-failed`?).
 - [ ] `/var/log/hinteros-install.log` has no network errors (no attempts to fetch from cache.nixos.org or the Forgejo).
 - [ ] Remove the stick, reboot: the box boots from the internal disk (systemd-boot, no menu needed), reaches the launcher with a controller attached. Record: boot time.

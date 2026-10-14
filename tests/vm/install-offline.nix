@@ -126,6 +126,7 @@ in
     from datetime import timedelta
 
     ${builtins.readFile ./install/system-steps.py}
+    ${builtins.readFile ./install/copy-plan.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
@@ -135,7 +136,7 @@ in
     # Nothing but lo: this is what turns nix's substitution off on a box without a network.
     installer.succeed("test \"$(ls /sys/class/net)\" = lo")
 
-    installer.copy_from_host("${plan}", "/tmp/plan.json")
+    copy_plan("${plan}", "/tmp/plan.json")
     installer.copy_from_host("${extraModule}", "/tmp/extra-module.nix")
 
     ${
