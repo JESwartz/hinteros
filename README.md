@@ -56,7 +56,15 @@ a key listed in `release/allowed_signers` of the generation they are running (de
 | `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable`, as the next patch version (the branch leaves `release/version` alone and adds an `## Unreleased` notes section; `Security:` severity required); then merge `stable` into `main` |
 | `sudo hinteros-bootstrap-channel <stable\|beta> <rev>` | On a box, over SSH: move it onto a channel at a rev once, outside the update UI (boxes installed before they trusted the release key). A box whose system predates the script runs it from that very rev: `sudo nix run "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros.git?ref=beta&rev=<rev>#hinteros-bootstrap-channel" -- beta <rev>` |
 
-`promote` works on a temporary clone of `origin`, prints every check, signs with
+Run `promote` in your checkout of this repo. It does not trust the remote for what it signs (the
+Forgejo server can add commits and set CI green): the target must be on your local `main` (or the
+local hotfix branch), and that branch must be the same commit as on `origin`; otherwise it stops
+("Pull and review first" or "Push first"). A beta release must verify against the release
+signers before it goes to stable. Before signing it shows what changed since the channel's last
+release: the commits, a diffstat and, for each flake input whose lock changed, the old and new rev
+with the input's commits in between when a clone of it is next to this checkout
+(`../hinteros-daemon`, `../hinteros-launcher`, `../hinteros-catalog`; a new rev that is not in
+that clone is a warning). `promote` works on a temporary clone of `origin`, prints every check, signs with
 `~/.ssh/hinteros/release_ed25519` (or `--key`, `$HINTEROS_RELEASE_KEY`) without ssh-agent, so
 the passphrase is asked each time, and never force-pushes. `--dry-run` does everything except
 signing and pushing. Until the Forgejo runner exists there are no green CI statuses to check:

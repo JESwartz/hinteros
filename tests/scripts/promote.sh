@@ -53,6 +53,24 @@ git clone -q "$work/origin.git" "$work/dev" 2>/dev/null
 dev() { git -C "$work/dev" "$@"; }
 o() { git -C "$work/origin.git" "$@"; }
 cd "$work"
+# promote runs in the owner's checkout: $here.
+here=$work/dev
+
+# Clones of two flake inputs next to the checkout, as ../hinteros-daemon is on the dev machine.
+for r in hinteros-daemon hinteros-launcher; do
+  git init -q "$work/$r"
+  git -C "$work/$r" commit -q --allow-empty -m "$r start"
+done
+daemon1=$(git -C "$work/hinteros-daemon" rev-parse HEAD)
+launcher1=$(git -C "$work/hinteros-launcher" rev-parse HEAD)
+git -C "$work/hinteros-daemon" commit -q --allow-empty -m "Daemon change A"
+git -C "$work/hinteros-daemon" commit -q --allow-empty -m "Daemon change B"
+daemon2=$(git -C "$work/hinteros-daemon" rev-parse HEAD)
+# lock <nixpkgs rev> <daemon rev> <launcher rev>: a flake.lock with these inputs.
+lock() {
+  printf '{"nodes":{"nixpkgs":{"locked":{"rev":"%s"}},"hinteros-daemon":{"locked":{"rev":"%s"}},"hinteros-launcher":{"locked":{"rev":"%s"}},"root":{}},"root":"root","version":7}\n' \
+    "$@" >"$work/dev/flake.lock"
+}
 
 # A change on the current branch, noted in the `## Unreleased` section of the release notes
 # (started if the top section is a released version). Optional trailer.
@@ -106,7 +124,7 @@ box_verifies() {
 # PROMOTE_TEST_LOG=<file>: keep every promote run's output there.
 run() {
   local rc=0
-  "$PROMOTE" "$@" </dev/null >"$work/out" 2>&1 || rc=$?
+  (cd "$here" && "$PROMOTE" "$@") </dev/null >"$work/out" 2>&1 || rc=$?
   if [ -n "${PROMOTE_TEST_LOG:-}" ]; then
     printf '\n######## promote %s (exit %s)\n' "$*" "$rc" >>"$PROMOTE_TEST_LOG"
     cat "$work/out" >>"$PROMOTE_TEST_LOG"
@@ -133,7 +151,7 @@ expect_refused() {
 }
 
 # --- main, before the first release --------------------------------------------------------
-echo '{"nodes":{"nixpkgs":{"locked":{"rev":"1111111111111111111111111111111111111111"}},"root":{}},"root":"root","version":7}' >"$work/dev/flake.lock"
+lock 1111111111111111111111111111111111111111 "$daemon1" "$launcher1"
 signers k1
 mkdir -p "$work/dev/release"
 echo 0.6.0 >"$work/dev/release/version"
@@ -201,16 +219,43 @@ pass "--bootstrap when beta exists: refused"
 # --- second beta: no version bump needed ---------------------------------------------------------
 change "Fix a browser hole" "Security: medium"
 signers k1 k2
-echo '{"nodes":{"nixpkgs":{"locked":{"rev":"2222222222222222222222222222222222222222"}},"root":{}},"root":"root","version":7}' >"$work/dev/flake.lock"
+# The launcher rev is not in the clone next to the checkout: promote must say so.
+lock 2222222222222222222222222222222222222222 "$daemon2" 3333333333333333333333333333333333333333
 dev commit -q -am "Add k2, bump nixpkgs"
 push
 main2=$(dev rev-parse HEAD)
 expect_refused "no terminal: give --security" beta --key "$work/k1"
 pass "non-interactive without --security: refused"
+
+# The remote is not trusted: a commit there that the owner does not have stops the release,
+# also with --rev of a commit the owner has.
+git clone -q "$work/origin.git" "$work/forge" 2>/dev/null
+git -C "$work/forge" commit -q --allow-empty -m "Added on the server"
+git -C "$work/forge" push -q origin main 2>/dev/null
+expect_refused "origin/main is not your local main. Pull and review first." beta --key "$work/k1" --security medium --yes
+expect_refused "origin/main is not your local main" beta --rev "$main2" --key "$work/k1" --security medium --yes
+o update-ref refs/heads/main "$main2"
+[ "$(remote beta)" = "$beta1" ] || die "beta moved with a commit the owner does not have"
+pass "origin/main with a commit that is not in the local main: refused, also with --rev"
+dev commit -q --allow-empty -m "Not pushed"
+expect_refused "Push first" beta --key "$work/k1" --security medium --yes
+dev reset -q --hard "$main2"
+pass "a local main with commits that are not pushed: refused"
+here=$work
+expect_refused "run promote in your checkout" beta --key "$work/k1" --security medium --yes
+here=$work/dev
+pass "not started in a checkout: refused"
+
 expect_ok beta --key "$work/k1" --security medium --yes
 beta2=$(remote beta)
 grep -q "Security: medium in" "$work/out" || die "trailer not listed"
 grep -q "nixpkgs: 111111111111 -> 222222222222" "$work/out" || die "nixpkgs change not shown"
+grep -q "hinteros-daemon: ${daemon1:0:12} -> ${daemon2:0:12}" "$work/out" || die "daemon change not shown"
+grep -q "Daemon change A" "$work/out" && grep -q "Daemon change B" "$work/out" \
+  || die "the daemon commits from ../hinteros-daemon are not listed"
+grep -q "hinteros-launcher 333333333333 is not in $work/hinteros-launcher. Fetch it and review it." "$work/out" \
+  || die "a launcher rev that is not in ../hinteros-launcher is not shown"
+grep -q "flake.lock *|" "$work/out" && grep -q "files changed" "$work/out" || die "no diffstat"
 grep -q "Fix a browser hole" "$work/out" || die "the commits are not listed"
 [ "$(o rev-list --parents -n1 "$beta2")" = "$beta2 $beta1 $main2" ] || die "parents are not beta, main"
 [ "$(o rev-parse "$beta2^{tree}")" = "$(dev rev-parse "$main2^{tree}")" ] || die "tree differs from main"
@@ -249,6 +294,15 @@ grep -q "using 0.6.0" "$work/out" || die "the dry run does not default to keep"
 grep -q "Everything so far" "$work/out" || die "the release notes are not shown"
 [ -z "$(remote stable)" ] || die "dry run created stable"
 pass "dry run: the version menu (keep, patch, minor, major, other) and the notes, creates nothing"
+
+# A "beta release" that the server put on beta, signed with a key that is not a release key.
+fake=$(o -c gpg.format=ssh -c user.signingkey="$work/bad" \
+  commit-tree -S "$beta2^{tree}" -p "$beta2" -m "HinterOS 0.6.1 beta")
+o update-ref refs/heads/beta "$fake"
+expect_refused "does not verify against these signers" stable --bump keep --yes --key "$work/k1"
+o update-ref refs/heads/beta "$beta2"
+[ -z "$(remote stable)" ] || die "stable was made from a beta release with a bad signature"
+pass "stable from a beta release that a release key did not sign: refused"
 
 expect_ok stable --rev "$beta1" --bump keep --yes --key "$work/k1"
 stable1=$(remote stable)
@@ -321,6 +375,12 @@ dev checkout -q -b hotfix/fw "$stable2"
 change "Firewall fix" "Security: high"
 push hotfix/fw
 hot=$(dev rev-parse HEAD)
+extra=$(o commit-tree "$hot^{tree}" -p "$hot" -m "Added on the server")
+o update-ref refs/heads/hotfix/fw "$extra"
+expect_refused "origin/hotfix/fw is not your local hotfix/fw" hotfix hotfix/fw --key "$work/k2" --security high --yes
+expect_refused "origin/hotfix/fw is not your local hotfix/fw" hotfix hotfix/fw --rev "$hot" --key "$work/k2" --security high --yes
+o update-ref refs/heads/hotfix/fw "$hot"
+pass "a hotfix branch with a commit that is not in the local branch: refused"
 expect_refused "must have a Security severity" hotfix hotfix/fw --key "$work/k1" --security none --yes
 pass "hotfix without a severity: refused"
 expect_refused "needs --yes" hotfix hotfix/fw --key "$work/k2" --security high
@@ -367,6 +427,7 @@ pass "no mode and no terminal: refused with the usage"
 export PROMOTE_REPO_URL=$work/menus.git
 git init -q --bare "$work/menus.git"
 git clone -q "$work/menus.git" "$work/m" 2>/dev/null
+here=$work/m
 m() { git -C "$work/m" "$@"; }
 mo() { git -C "$work/menus.git" "$@"; }
 mkdir -p "$work/m/release"
@@ -385,7 +446,7 @@ chmod +x "$work/editor"
 run_menus() {
   local answers=$1 rc=0
   shift
-  printf '%b' "$answers" | EDITOR=$work/editor script -qec "$(printf '%q ' "$PROMOTE" "$@")" /dev/null \
+  printf '%b' "$answers" | (cd "$here" && EDITOR=$work/editor script -qec "$(printf '%q ' "$PROMOTE" "$@")" /dev/null) \
     | tr -d '\r' >"$work/out" 2>&1 || rc=$?
   if [ -n "${PROMOTE_TEST_LOG:-}" ]; then
     printf '\n######## promote (menus) %s (exit %s)\n' "$*" "$rc" >>"$PROMOTE_TEST_LOG"
@@ -451,6 +512,7 @@ pass "menus: nothing new anywhere is said and refused"
 export PROMOTE_REPO_URL=$work/legacy.git
 git init -q --bare "$work/legacy.git"
 git clone -q "$work/legacy.git" "$work/l" 2>/dev/null
+here=$work/l
 # A long history (more `git rev-list` output than a pipe holds), as the real repo has: checks
 # that read it through a pipe must read all of it.
 for i in $(seq 1 3000); do
