@@ -9,10 +9,93 @@
 }:
 let
   cfg = config.hinteros.maintenance;
+  # (app-env.nix; this module also works without it)
+  appProfilesDir = config.hinteros.appEnv.profilesDir or "/nix/var/nix/profiles/hinteros";
   sessionCfg = config.hinteros.session;
   launcherName = baseNameOf (lib.getExe sessionCfg.homeApp);
   # With the greeter the launcher runs as the greeter or as whichever profile is on screen.
   greeterOn = config.hinteros.profiles.greeter.enable or false;
+
+  # The automatic clean-up (storage.md): trim the system's generations and every app profile's,
+  # then collect garbage, under one flock. The daemon's manual clean-up jobs (their own trim and
+  # `nix-store --gc`) are serialised with it by Nix's profile and GC locks; they may take the flock
+  # too. No boot entry is rewritten: entries are the newest `configurationLimit` (= keepSystem)
+  # generations of the last rebuild, which a trim to the newest keepSystem always keeps.
+  #
+  #   hinteros-cleanup [--system N] [--profiles N]
+  #
+  # A trim keeps the N newest generations and never removes the current generation of a profile;
+  # the system's also keeps the generations of the running and the booted system (after a switch
+  # without reboot, or a boot of an older entry, these are not the newest).
+  cleanup = pkgs.writeShellApplication {
+    name = "hinteros-cleanup";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.util-linux
+      config.nix.package
+    ];
+    text = ''
+      system="" profiles=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --system) system=$2; shift 2 ;;
+          --profiles) profiles=$2; shift 2 ;;
+          *) echo "usage: hinteros-cleanup [--system N] [--profiles N]" >&2; exit 2 ;;
+        esac
+      done
+      for n in "$system" "$profiles"; do
+        case "$n" in "") ;; 0* | *[!0-9]*) echo "not a generation count: $n" >&2; exit 2 ;; esac
+      done
+
+      # trim PROFILE KEEP [STORE PATH TO KEEP...]
+      trim() {
+        local profile=$1 keep=$2 dir base cur g n t i
+        shift 2
+        dir=$(dirname "$profile") base=$(basename "$profile")
+        cur=$(readlink "$profile")
+        local gens=() del=()
+        for l in "$dir/$base"-*-link; do
+          [ -L "$l" ] || continue
+          n=''${l#"$dir/$base"-} n=''${n%-link}
+          # (`hinteros-*-link` also matches `hinteros-p2-*-link`: not a number, skipped)
+          case "$n" in "" | *[!0-9]*) continue ;; esac
+          gens+=("$n")
+        done
+        mapfile -t gens < <(printf '%s\n' "''${gens[@]}" | sort -n)
+        for i in "''${!gens[@]}"; do
+          g=''${gens[$i]}
+          [ -n "$g" ] || continue
+          [ "$i" -lt $(( ''${#gens[@]} - keep )) ] || continue
+          [ "$cur" != "$base-$g-link" ] || continue
+          t=$(readlink -f "$dir/$base-$g-link")
+          for k in "$@"; do [ "$t" != "$k" ] || continue 2; done
+          del+=("$g")
+        done
+        if [ ''${#del[@]} -gt 0 ]; then
+          echo "$profile: removing generation(s) ''${del[*]}, keeping the newest $keep"
+          nix-env --profile "$profile" --delete-generations "''${del[@]}"
+        fi
+      }
+
+      exec 9>${cfg.cleanupLock}
+      flock 9
+      if [ -n "$system" ]; then
+        keepPaths=()
+        for r in /run/current-system /run/booted-system; do
+          [ -e "$r" ] && keepPaths+=("$(readlink -f "$r")")
+        done
+        trim /nix/var/nix/profiles/system "$system" "''${keepPaths[@]}"
+      fi
+      if [ -n "$profiles" ]; then
+        for p in ${appProfilesDir}/apps/* ${appProfilesDir}/starter; do
+          case "$p" in *-link) continue ;; esac
+          [ -L "$p" ] || continue
+          trim "$p" "$profiles" || echo "cannot trim $p" >&2
+        done
+      fi
+      nix-collect-garbage
+    '';
+  };
 
   diskCheck = pkgs.writeShellApplication {
     name = "hinteros-disk-check";
@@ -107,21 +190,50 @@ in
       type = lib.types.ints.positive;
       default = 5;
       description = ''
-        System generations kept by garbage collection (and boot entries kept by systemd-boot),
-        so rollback always has targets. The generation that is running is never collected.
+        System generations kept by the automatic clean-up (and boot entries kept by
+        systemd-boot), so rollback always has targets. The running and the booted generation are
+        never removed. state.json: `settings.cleanup.keepSystem`.
       '';
+    };
+
+    keepProfileGenerations = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 5;
+      description = ''
+        Generations the automatic clean-up keeps of each app profile
+        (`/nix/var/nix/profiles/hinteros/{apps/<user>,starter}`), besides the current one.
+        state.json: `settings.cleanup.keepProfiles`.
+      '';
+    };
+
+    cleanupLock = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      default = "/run/lock/hinteros-cleanup.lock";
+      description = ''
+        flock(1) lock `hinteros-cleanup` holds while it trims generations and collects garbage.
+        The daemon's manual clean-up jobs may take it too (Nix's profile and GC locks already
+        serialise them with the automatic clean-up).
+      '';
+    };
+
+    cleanupPackage = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = cleanup;
+      description = "`hinteros-cleanup [--system N] [--profiles N]`: trim, then collect garbage, under `cleanupLock`.";
     };
 
     gc = {
       enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Trim old generations and collect garbage automatically.";
+        description = "Trim old generations and collect garbage automatically. state.json: `settings.cleanup.enable`.";
       };
       dates = lib.mkOption {
         type = lib.types.str;
         default = "weekly";
-        description = "systemd calendar expression for the garbage collection.";
+        description = "systemd calendar expression for the automatic clean-up. state.json: `settings.cleanup.frequency` (daily, weekly, monthly).";
       };
     };
 
@@ -187,12 +299,12 @@ in
         automatic = true;
         inherit (cfg.gc) dates;
         persistent = true;
-        # Plain `nix-collect-garbage`; the generation trim happens in preStart below.
         options = "";
       };
-      # `--delete-older-than` can't promise rollback targets; count instead.
-      systemd.services.nix-gc.preStart = ''
-        ${config.nix.package}/bin/nix-env --profile /nix/var/nix/profiles/system --delete-generations +${toString cfg.keepGenerations}
+      # `--delete-older-than` can't promise rollback targets; count instead. The trims and the
+      # collection are one script under the clean-up lock (not nix.gc's plain collection).
+      systemd.services.nix-gc.script = lib.mkForce ''
+        exec ${lib.getExe cleanup} --system ${toString cfg.keepGenerations} --profiles ${toString cfg.keepProfileGenerations}
       '';
     })
 

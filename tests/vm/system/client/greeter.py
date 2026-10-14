@@ -1,4 +1,4 @@
-"""Drives the greeter-mode session daemon the way the picker does (session API 0.13).
+"""Drives the greeter-mode session daemon the way the picker does (session API 0.14).
 
 greeter.py ID [PIN...]   as the greeter user, against HINTEROS_SESSION_SOCK: `greeter.login ID`,
 then each PIN in turn when greetd asks for one (`greeter_prompt`), logging in again after a

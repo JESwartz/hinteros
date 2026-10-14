@@ -83,8 +83,8 @@
     # Maintenance: low-disk warning at priority 4, GC trims to N generations first.
     machine.succeed("systemctl start hinteros-disk-check.service")
     machine.succeed("journalctl -t hinteros-disk-check -p warning --no-pager | grep 'low disk space'")
-    pre = machine.succeed("systemctl show -p ExecStartPre --value nix-gc.service").split("path=")[1].split(" ")[0].rstrip(";")
-    machine.succeed(f"grep -- '--delete-generations +5' {pre}")
+    start = machine.succeed("systemctl show -p ExecStart --value nix-gc.service").split("path=")[1].split(" ")[0].rstrip(";")
+    machine.succeed(f"grep -- '--system 5 --profiles 5' {start}")
     machine.succeed("systemctl cat nix-optimise.timer")
   '';
 }

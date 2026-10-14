@@ -7,7 +7,9 @@
 #   - an env built by `config.hinteros.appEnv.build` works as a profile: its manifest, its kiosk
 #     wrapper, and the session command puts it on PATH and XDG_DATA_DIRS (cage's environment);
 #   - the box-wide Firefox policies with no Firefox package in the system;
-#   - the GC timer's trim keeps the 3 newest app generations;
+#   - the automatic clean-up from state.json `settings.cleanup` (daily, keepSystem 2,
+#     keepProfiles 3): the timer's service trims an app profile to its 3 newest generations and
+#     the system profile to its 2 newest, keeping the booted system's older generation;
 #   - the guest's home is emptied at boot, the app profiles survive a reboot.
 { self, pkgs }:
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
@@ -46,7 +48,14 @@
         ];
         requirements = [ ];
         services = [ ];
-        settings.guest.enable = true;
+        settings = {
+          guest.enable = true;
+          cleanup = {
+            frequency = "daily";
+            keepSystem = 2;
+            keepProfiles = 3;
+          };
+        };
       };
       system.extraDependencies = lib.attrValues envs;
       environment.etc."hinteros-test/envs.json".text = builtins.toJSON (
@@ -109,15 +118,28 @@
         machine.fail("test -e /run/current-system/sw/bin/firefox")
         machine.fail("test -e /run/current-system/sw/bin/firefox-esr")
 
-    with subtest("GC trims app profiles to the 3 newest generations"):
+    with subtest("settings.cleanup: daily; the timer's service trims to keepProfiles and keepSystem"):
+        machine.succeed("systemctl cat nix-gc.timer | grep -x 'OnCalendar=daily'")
         for e in ["both", "empty", "firefox", "both"]:
             machine.succeed(f"nix-env -p {P} --set {envs[e]}")
         gens = machine.succeed(f"nix-env -p {P} --list-generations")
         assert len(gens.strip().splitlines()) == 5, gens
+        # A system profile of 5 generations: 2 and 5 are the booted (and running) system, 5 the
+        # current one. Keeping 2 removes 1 and 3; 2 stays because it is the booted system.
+        S = "/nix/var/nix/profiles/system"
+        booted = machine.succeed("readlink -f /run/booted-system").strip()
+        machine.succeed(f"rm -f {S} {S}-*-link")
+        for p in [envs["empty"], booted, envs["firefox"], envs["both"], booted]:
+            machine.succeed(f"nix-env -p {S} --set {p}")
+        # (nix-collect-garbage may fail on the VM's host store; the trims come first)
         machine.execute("systemctl start nix-gc.service")
         gens = machine.succeed(f"nix-env -p {P} --list-generations")
         assert [l.split()[0] for l in gens.strip().splitlines()] == ["3", "4", "5"], gens
         assert machine.succeed(f"readlink -f {P}").strip() == envs["both"]
+        gens = machine.succeed(f"nix-env -p {S} --list-generations")
+        assert [l.split()[0] for l in gens.strip().splitlines()] == ["2", "4", "5"], gens
+        assert machine.succeed(f"readlink -f {S}").strip() == booted
+        machine.succeed("journalctl -u nix-gc.service --no-pager | grep 'removing generation(s) 1 3, keeping the newest 2'")
 
     with subtest("guest home emptied at boot; app profiles survive"):
         machine.succeed("runuser -u hinteros-guest -- touch /home/hinteros-guest/left-behind")

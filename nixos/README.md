@@ -38,7 +38,7 @@
     `hinteros.update.allowedSigners` (a list of `"<principal> ssh-ed25519 <key>"`, written in ssh-keygen format with `namespaces="git"`).
     `allowedSigners` is empty by default; `nixosModules.default` fills it from the repo's `release/allowed_signers` (`release.nix`, below). With none,
     every update and channel check fails closed (git finds no matching principal, the daemon reports `update_verification_failed`/`unknown_signer`).
-  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `settings.hostname`, `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `apps` (a state enables exactly the listed default apps; ids in `lib/app-ids.nix`) and the first profile's user (TODO M7: one user per profile).
+  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `settings.hostname`, `settings.cleanup` (maintenance.nix), `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `apps` (a state enables exactly the listed default apps; ids in `lib/app-ids.nix`) and the first profile's user (TODO M7: one user per profile).
   - `release.nix` (in `nixosModules.default` only, not in `modules/default.nix`): sets `hinteros.release.version`, `hinteros.update.allowedSigners` and `hinteros.cache.publicKeys` from `release/{version,allowed_signers,cache-keys}` with `mkDefault`; comment lines are skipped. `cache.nix`: `hinteros.cache.{enable,url,publicKeys}`, off (no cache yet); when on, an extra substituter at priority 50 after cache.nixos.org.
   - `disk.nix`: `hinteros.disk.enable` (state.json `disk`): the installer layout, ESP + ext4 root by partition label `hinteros-esp`/`hinteros-root`, systemd-boot, zram.
 - `installer/`: `default.nix` (installer environment: `hinteros-install`, disko, offline closure and lock following `hinteros.installer.channel` (default `stable`), `hinteros.installer.ui.command` hook) and `iso.nix` (installation-cd base); `pkgs/hinteros-install`, `templates/device-flake.nix.in`. See the repo README, "Installer".
@@ -127,9 +127,23 @@ repaints at the nested size).
 - `maintenance.nix`: `hinteros.maintenance.*`. Boot counting uses NixOS' native
   `boot.loader.systemd-boot.bootCounting`; `hinteros-boot-health` gates `boot-complete.target`
   on the daemon and launcher, so a broken generation falls back by itself. On for every installed box
-  (mkDevice enables it wherever systemd-boot is on); not in VMs or on the ISO. GC keeps the last `keepGenerations` (5) system
-  generations (and boot entries), `nix.optimise`, and `hinteros-disk-check` logs a warning
-  (identifier `hinteros-disk-check`, priority 4) below `diskCheck.minFreeGiB`.
+  (mkDevice enables it wherever systemd-boot is on); not in VMs or on the ISO. The automatic
+  clean-up (state.json `settings.cleanup`, storage.md) is NixOS' `nix-gc` timer at `gc.dates`
+  (`frequency`: `daily`, `weekly`, `monthly`; default weekly, persistent) running
+  `hinteros-cleanup --system <keepGenerations> --profiles <keepProfileGenerations>`: it trims the
+  system profile to the newest `keepGenerations` (`keepSystem`, default 5; the current, running
+  and booted generations always stay), every app profile
+  (`/nix/var/nix/profiles/hinteros/{apps/<user>,starter}`) to the newest
+  `keepProfileGenerations` (`keepProfiles`, default 5; the current one always stays), then runs
+  `nix-collect-garbage`, all under the flock `cleanupLock` (`/run/lock/hinteros-cleanup.lock`),
+  so two never overlap. The daemon's manual clean-up jobs (their own trim, boot menu rewrite and
+  `nix-store --gc`) are serialised with it by Nix's profile and GC locks; they may also take
+  `cleanupLock` or run `cleanupPackage`. The timer rewrites no boot entry: entries are the newest
+  `configurationLimit` (= `keepGenerations`) generations of the last rebuild, which its trim
+  keeps. `gc.enable` (`enable`) off: no timer. systemd-boot's
+  `configurationLimit` follows `keepGenerations` either way. Also `nix.optimise`, and
+  `hinteros-disk-check` logs a warning (identifier `hinteros-disk-check`, priority 4) below
+  `diskCheck.minFreeGiB`.
 
 ## Runtime settings wiring (session API 0.7)
 

@@ -8,6 +8,14 @@ written for the person using the box.
 
 ## Unreleased
 
+- Settings → Storage: a ring shows what uses the disk (the system, apps, each profile and its
+  Steam games, Guest, free space). Your own profile opens; another profile needs the admin PIN.
+- Clean up the system and clean up profiles, each keeping as many versions as the admin
+  chooses; they show what they free first and need the admin PIN.
+- Automatic clean-up is a setting: on or off, how often, and how many versions to keep.
+
+## 0.7.0
+
 The first signed release: the first build of HinterOS meant to be installed on a box and kept
 up to date. (0.6.0 was prepared but never released; everything in it is here.)
 
@@ -44,3 +52,4 @@ up to date. (0.6.0 was prepared but never released; everything in it is here.)
 Known limits: only the `unstable` nixpkgs base exists, there is no HinterOS binary cache yet (an
 update downloads from cache.nixos.org and builds the rest on the box), and a box installed before
 this release must be moved onto its channel once with `hinteros-bootstrap-channel`.
+

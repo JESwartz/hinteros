@@ -53,6 +53,20 @@ let
   ssh = settings.ssh or { };
   admin = settings.admin or null;
   guest = settings.guest or { };
+  # The automatic clean-up (storage.md). Absent fields: today's policy (maintenance.nix defaults).
+  cleanup = settings.cleanup or { };
+  cleanupFrequencies = [
+    "daily"
+    "weekly"
+    "monthly"
+  ];
+  keepOk = n: builtins.isInt n && n >= 1 && n <= 10;
+  cleanupOk = {
+    enable = builtins.isBool (cleanup.enable or true);
+    frequency = lib.elem (cleanup.frequency or "weekly") cleanupFrequencies;
+    keepSystem = keepOk (cleanup.keepSystem or 5);
+    keepProfiles = keepOk (cleanup.keepProfiles or 5);
+  };
   disk = state.disk or null;
   apps = state.apps or [ ];
   profiles = state.profiles or [ ];
@@ -143,6 +157,7 @@ let
         "ssh"
         "hostname"
         "admin"
+        "cleanup"
       ]
       ++ lib.optional v2 "guest"
     ) settings
@@ -151,6 +166,22 @@ let
     ++ lib.optional (
       v2 && guest ? enable && !builtins.isBool guest.enable
     ) "settings.guest.enable must be a bool"
+    ++ (
+      if builtins.isAttrs cleanup then
+        checkKeys "settings.cleanup" [ "enable" "frequency" "keepSystem" "keepProfiles" ] cleanup
+        ++ lib.optional (!cleanupOk.enable) "settings.cleanup.enable must be a bool"
+        ++
+          lib.optional (!cleanupOk.frequency)
+            "settings.cleanup.frequency must be one of ${lib.concatStringsSep ", " cleanupFrequencies}, not ${builtins.toJSON cleanup.frequency}"
+        ++
+          lib.optional (!cleanupOk.keepSystem)
+            "settings.cleanup.keepSystem must be a whole number from 1 to 10, not ${builtins.toJSON cleanup.keepSystem}"
+        ++
+          lib.optional (!cleanupOk.keepProfiles)
+            "settings.cleanup.keepProfiles must be a whole number from 1 to 10, not ${builtins.toJSON cleanup.keepProfiles}"
+      else
+        [ "settings.cleanup must be an object" ]
+    )
     ++ lib.optionals (admin != null) (
       checkKeys "settings.admin" [ "user" ] admin
       ++ lib.optional (!(admin ? user)) "settings.admin needs a user"
@@ -217,6 +248,21 @@ in
           catalog.services = lib.filter (s: lib.elem s serviceIds) services;
           profiles.guest.enable = guest.enable or true;
         };
+      })
+
+      # The automatic clean-up (maintenance.nix). A field only when it is valid (the problem
+      # above names a bad one); absent fields keep the module defaults, the same policy.
+      (lib.mkIf (builtins.isAttrs cleanup) {
+        hinteros.maintenance = lib.mkMerge [
+          (lib.mkIf (cleanup ? enable && cleanupOk.enable) { gc.enable = cleanup.enable; })
+          (lib.mkIf (cleanup ? frequency && cleanupOk.frequency) { gc.dates = cleanup.frequency; })
+          (lib.mkIf (cleanup ? keepSystem && cleanupOk.keepSystem) {
+            keepGenerations = cleanup.keepSystem;
+          })
+          (lib.mkIf (cleanup ? keepProfiles && cleanupOk.keepProfiles) {
+            keepProfileGenerations = cleanup.keepProfiles;
+          })
+        ];
       })
 
       (lib.mkIf (state ? stateVersion) { system.stateVersion = state.stateVersion; })

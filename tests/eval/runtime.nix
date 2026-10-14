@@ -24,6 +24,49 @@ let
       extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
     }).config;
 
+  # The automatic clean-up from state.json `settings.cleanup` (storage.md).
+  state2 = cleanup: {
+    schemaVersion = 2;
+    settings = lib.optionalAttrs (cleanup != null) { inherit cleanup; };
+    profiles = [
+      {
+        id = "p1";
+        user = "hinteros";
+      }
+    ];
+    requirements = [ ];
+    services = [ ];
+  };
+  mkClean =
+    cleanup:
+    (self.lib.mkDevice {
+      state = state2 cleanup;
+      extraModules = [ { system.stateVersion = "25.11"; } ];
+    }).config;
+  # What the clean-up does, as configured: [ timer on, calendar, trim command, boot entries ].
+  cleanupOf =
+    cfg:
+    let
+      script = cfg.systemd.services.nix-gc.script;
+    in
+    [
+      cfg.nix.gc.automatic
+      (cfg.systemd.timers.nix-gc.timerConfig.OnCalendar or null)
+      (lib.last (lib.splitString "/bin/hinteros-cleanup " (lib.trim script)))
+      cfg.boot.loader.systemd-boot.configurationLimit
+    ];
+  # The failing state assertions of a cleanup setting (one string), or "EVAL ERROR".
+  cleanupFailures =
+    cleanup:
+    let
+      msgs = map (a: a.message) (
+        builtins.filter (a: !a.assertion && lib.hasPrefix "hinteros state:" a.message)
+          (mkClean cleanup).assertions
+      );
+      r = builtins.tryEval (builtins.deepSeq msgs msgs);
+    in
+    if r.success then lib.concatStringsSep "\n" r.value else "EVAL ERROR";
+
   c = mk [ ];
   off = mk [ { hinteros.runtime.enable = false; } ];
   devbox = self.nixosConfigurations.devbox.config;
@@ -168,7 +211,7 @@ let
       expr = [
         c.nix.gc.automatic
         c.nix.optimise.automatic
-        (has "--delete-generations +5" c.systemd.services.nix-gc.preStart)
+        (has "--system 5 --profiles 5" c.systemd.services.nix-gc.script)
         c.systemd.timers.hinteros-disk-check.timerConfig.OnUnitActiveSec
       ];
       expected = [
@@ -177,6 +220,136 @@ let
         true
         "1h"
       ];
+    };
+    # Absent (or empty): today's policy, weekly, 5 system generations; app profiles keep 5.
+    testCleanupDefaults = {
+      expr = [
+        (cleanupOf (mkClean null))
+        (cleanupOf (mkClean { }))
+        (cleanupFailures null)
+      ];
+      expected = [
+        (cleanupOf (mkClean {
+          enable = true;
+          frequency = "weekly";
+          keepSystem = 5;
+          keepProfiles = 5;
+        }))
+        [
+          true
+          [ "weekly" ]
+          "--system 5 --profiles 5"
+          5
+        ]
+        ""
+      ];
+    };
+    testCleanupFrequencies = {
+      expr =
+        map
+          (
+            frequency:
+            cleanupOf (mkClean {
+              inherit frequency;
+            })
+          )
+          [
+            "daily"
+            "weekly"
+            "monthly"
+          ];
+      expected =
+        map
+          (f: [
+            true
+            [ f ]
+            "--system 5 --profiles 5"
+            5
+          ])
+          [
+            "daily"
+            "weekly"
+            "monthly"
+          ];
+    };
+    testCleanupKeepCounts = {
+      expr = [
+        (cleanupOf (mkClean {
+          keepSystem = 2;
+          keepProfiles = 9;
+        }))
+        (cleanupOf (mkClean {
+          keepSystem = 10;
+          keepProfiles = 1;
+        }))
+      ];
+      expected = [
+        [
+          true
+          [ "weekly" ]
+          "--system 2 --profiles 9"
+          2
+        ]
+        [
+          true
+          [ "weekly" ]
+          "--system 10 --profiles 1"
+          10
+        ]
+      ];
+    };
+    # Off: no timer; the boot menu still follows keepSystem.
+    testCleanupOff =
+      let
+        cfg = mkClean {
+          enable = false;
+          keepSystem = 3;
+        };
+      in
+      {
+        expr = [
+          cfg.nix.gc.automatic
+          (cfg.systemd.timers ? nix-gc)
+          cfg.boot.loader.systemd-boot.configurationLimit
+        ];
+        expected = [
+          false
+          false
+          3
+        ];
+      };
+    testCleanupInvalid = {
+      expr = map (s: lib.hasInfix s.msg (cleanupFailures s.cleanup)) [
+        {
+          msg = "settings.cleanup.frequency must be one of daily, weekly, monthly, not \"hourly\"";
+          cleanup.frequency = "hourly";
+        }
+        {
+          msg = "settings.cleanup.keepSystem must be a whole number from 1 to 10, not 0";
+          cleanup.keepSystem = 0;
+        }
+        {
+          msg = "settings.cleanup.keepSystem must be a whole number from 1 to 10, not 11";
+          cleanup.keepSystem = 11;
+        }
+        {
+          msg = "settings.cleanup.keepProfiles must be a whole number from 1 to 10, not \"5\"";
+          cleanup.keepProfiles = "5";
+        }
+        {
+          msg = "settings.cleanup.enable must be a bool";
+          cleanup.enable = "yes";
+        }
+        {
+          msg = "unknown field(s) in settings.cleanup: keep";
+          cleanup.keep = 5;
+        }
+        {
+          msg = "settings.cleanup must be an object";
+          cleanup = true;
+        }
+      ];
+      expected = lib.genList (_: true) 7;
     };
   };
 in

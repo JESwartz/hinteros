@@ -20,7 +20,7 @@
 #   - /run/hinteros/apps/<user>: the link sessions read, published by hinteros-system;
 #   - with `perProfile` (schema 2): session.toml `[apps] profile`, and the session command puts
 #     the profile's env on PATH and XDG_DATA_DIRS;
-#   - the GC timer trims every app profile to its newest generations.
+#   - the automatic clean-up (maintenance.nix) trims every app profile to its newest generations.
 {
   config,
   lib,
@@ -173,12 +173,6 @@ in
       description = "Settings merged into the `hinteros.apps`-shaped entries of every env that has the app (test VMs point kiosk apps at local pages).";
     };
 
-    keepGenerations = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 3;
-      description = "Generations the GC keeps per app profile (`nix-env --delete-generations +N`: the N newest, plus the current one after a rollback).";
-    };
-
     profilesDir = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
@@ -202,17 +196,6 @@ in
         "d ${cfg.profilesDir}/apps 0755 root root -"
       ];
     }
-
-    (lib.mkIf config.hinteros.maintenance.gc.enable {
-      # Retention (spike 8): `+N` keeps the N newest generations and the current one.
-      systemd.services.nix-gc.preStart = lib.mkAfter ''
-        for p in ${cfg.profilesDir}/apps/* ${cfg.profilesDir}/starter; do
-          case "$p" in *-link) continue ;; esac
-          [ -L "$p" ] || continue
-          ${config.nix.package}/bin/nix-env --profile "$p" --delete-generations +${toString cfg.keepGenerations} || true
-        done
-      '';
-    })
 
     (lib.mkIf cfg.perProfile {
       assertions = [
