@@ -11,8 +11,9 @@
 #   - installs the generated index and vendor terms at `share/hinteros/catalog.json` and
 #     `share/hinteros/terms/` (the Store reads /run/current-system/sw/share/hinteros/).
 #
-# Which box-wide apps are on is decided elsewhere: the `onIso` apps are on with the session (no
-# state), state.nix sets exactly the ids of a schema-1 state's `apps` and none on schema 2.
+# Which box-wide apps are on is decided elsewhere: the installer's `onIso` apps (app-ids.nix: on
+# the ISO and offered by the installer, so jellyfin, youtube and firefox) are on with the session
+# (no state), state.nix sets exactly the ids of a schema-1 state's `apps` and none on schema 2.
 # A function of the catalog data, not a plain module: which entries exist decides the shape of
 # this module's config (one `service` module per entry), so it must not be read from `config`.
 # flake.nix passes it in; `hinteros.catalog.*` re-exports it for other modules to read.
@@ -31,6 +32,9 @@
 let
   cfg = config.hinteros.catalog;
   entriesLib = import ../lib/app-entries.nix { inherit lib; };
+  # An entry's own `onIso` only says its closure is on the ISO (format 3: the Store-only streaming
+  # apps have it too). The default apps are the installer's `onIso` list: also offered (`starter`).
+  appIds = import ../lib/app-ids.nix entries;
   sessionEnabled = config.hinteros.session.enable;
 
   # Tombstones (`status = "removed"`) are known ids that do nothing.
@@ -109,10 +113,10 @@ in
   config = lib.mkMerge [
     {
       hinteros.apps = lib.mapAttrs (
-        _: e:
+        id: e:
         entriesLib.defaultLeaves (
           {
-            enable = sessionEnabled && e.onIso;
+            enable = sessionEnabled && lib.elem id appIds.onIso;
           }
           // entriesLib.catalogSettings {
             inherit pkgs lib box;

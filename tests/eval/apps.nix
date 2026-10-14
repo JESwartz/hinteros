@@ -257,6 +257,33 @@ let
         "firefox"
       ];
     };
+    # Without a state (test VMs): the installer's onIso apps, not every entry with `onIso` (the
+    # Store-only streaming apps are on the ISO too).
+    testStatelessDefaultApps = {
+      expr = appsOf (
+        self.inputs.nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+          modules = [
+            self.nixosModules.session
+            self.nixosModules.daemon
+            self.nixosModules.apps
+            self.nixosModules.overlay
+            {
+              hinteros.daemon.enable = true;
+              hinteros.session.enable = true;
+              system.stateVersion = "25.11";
+              boot.loader.grub.enable = false;
+              fileSystems."/".device = "none";
+            }
+          ];
+        }
+      );
+      expected = [
+        "jellyfin"
+        "youtube"
+        "firefox"
+      ];
+    };
     testNoUnfreeByDefault = {
       expr = base.config.hinteros.unfreeAllowlist;
       expected = [ ];
