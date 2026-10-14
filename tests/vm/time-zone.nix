@@ -148,9 +148,9 @@ profiles.mkTest {
         assert zone_of_link() == "Europe/London", link()
         assert tz_state() == "Europe/London", state_json()
         assert date("%Z") in ("GMT", "BST"), date("%Z")
-        # Written by the helper unit, not by the service.
-        assert machine.succeed("systemctl show hinteros-time-zone-apply.service -p InvocationID --value").strip(), "helper never ran"
-        machine.succeed("systemctl show hinteros-time-zone-apply.service -p Result --value | grep -qx success")
+        # Written by the helper unit, not by the service (a finished oneshot is unloaded, so its
+        # journal is the record).
+        machine.succeed("journalctl -b -u hinteros-time-zone-apply.service --no-pager | grep -q 'Deactivated successfully'")
         assert sys_ok("hinteros-p2", "time_zone.get")["zone"] == "Europe/London"
         assert not [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"]
         assert system_generations() == gens
