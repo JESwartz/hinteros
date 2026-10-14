@@ -76,6 +76,7 @@ let
       builtins.toJSON (
         {
           disk = "/dev/vdb";
+          diskSeq = 1;
           hostname = "hinteros";
           admin = {
             user = "james";

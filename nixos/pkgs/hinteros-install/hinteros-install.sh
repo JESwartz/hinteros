@@ -71,6 +71,9 @@ TARGET_LINK=/dev/hinteros-target
 MIN_DISK_GIB=16
 # Test hook: the command that writes the hardware report (VM tests feed a fixture).
 FACTER=${HINTEROS_INSTALL_FACTER:-nixos-facter}
+# Test hook: a command run just before the disk is checked for the last time and erased (VM tests
+# replace the disk there).
+BEFORE_WIPE_HOOK=${HINTEROS_INSTALL_BEFORE_WIPE:-}
 # Test hook: the URL whose answer means "online" (VM tests have no network; curl reads file://).
 ONLINE_PROBE=${HINTEROS_INSTALL_ONLINE_PROBE:-https://cache.nixos.org/nix-cache-info}
 
@@ -403,7 +406,7 @@ printf '%s' "$PLAN" | jq -e 'type == "object"' >/dev/null 2>&1 \
 
 # The plan with defaults filled in; every later read goes through this.
 PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
-  disk, hostname, admin, wifi,
+  disk, diskSeq, hostname, admin, wifi,
   ssh: (.ssh // {enable: false}),
   channel: (.channel // $default_channel),
   base: (.base // "unstable"),
@@ -411,7 +414,7 @@ PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   apps: (.apps // []),
   acceptedTerms: (.acceptedTerms // {}),
   rev: (.rev // null),
-  unknown: (keys - ["disk", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev"])
+  unknown: (keys - ["disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev"])
 }')
 
 # Plan-level problems, all at once: [{field, code, message}].
@@ -422,6 +425,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
       (.unknown[] | bad("."; "unknown-field"; "unknown plan field \(.)")),
       (if (.disk | type) != "string" or (.disk | startswith("/dev/") | not)
         then bad("disk"; "disk-missing"; "disk must be a device path such as /dev/nvme0n1") else empty end),
+      (if (.diskSeq | type) != "number" or .diskSeq != (.diskSeq | floor) or .diskSeq < 1
+        then bad("diskSeq"; "disk-seq-invalid"; "diskSeq must be the disk sequence number of the disk (lsblk -o PATH,DISK-SEQ)") else empty end),
       (if (.hostname | type) != "string"
           or (.hostname | test("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$") | not)
         then bad("hostname"; "hostname-invalid"; "hostname must be 1-63 lowercase letters, digits or hyphens, not starting or ending with a hyphen") else empty end),
@@ -500,6 +505,7 @@ report_problems "$problems"
 plan() { local o=-r; if [ "$1" = -c ]; then o=-c; shift; fi; printf '%s' "$PLAN" | jq "$o" "$1"; }
 
 disk=$(plan .disk)
+plan_seq=$(plan .diskSeq)
 hostname=$(plan .hostname)
 admin_user=$(plan .admin.user)
 ssh_enable=$(plan '.ssh.enable // false')
@@ -624,11 +630,30 @@ disk_real=$(readlink -f "$disk" 2>/dev/null || true)
   || fail 2 disk-not-found "$disk is not a block device on this machine"
 [ "$(lsblk -dno TYPE "$disk_real" 2>/dev/null)" = disk ] \
   || fail 2 disk-not-a-disk "$disk is not a whole disk (it is a $(lsblk -dno TYPE "$disk_real" 2>/dev/null || echo unknown))"
+# The disk must be the one the plan was made for. A kernel name such as /dev/sdb goes to the next
+# disk that is plugged in once the first one is gone, so the path alone can point at another disk
+# by the time it is erased (the wizard and a download can take long). The kernel's disk sequence
+# number (diskseq) is new on every attach and is never used again until the next boot: the plan
+# carries it (lsblk DISK-SEQ) and it is checked here and again just before the disk is erased.
+disk_seq_of() { cat "/sys/class/block/$(basename "$1")/diskseq" 2>/dev/null || true; }
+# Size, model and serial: to name the disk in a message.
+disk_desc() {
+  local m s
+  m=$(lsblk -dno MODEL "$1" 2>/dev/null | sed 's/ *$//' || true)
+  s=$(lsblk -dno SERIAL "$1" 2>/dev/null | sed 's/ *$//' || true)
+  printf '%s GiB%s%s' "$(($(blockdev --getsize64 "$1" 2>/dev/null || echo 0) / 1024 / 1024 / 1024))" \
+    "${m:+, $m}" "${s:+, serial $s}"
+}
+disk_seq=$(disk_seq_of "$disk_real")
+if [ "$disk_seq" != "$plan_seq" ]; then
+  fail 2 disk-changed "the disk changed: $disk is now disk ${disk_seq:-unknown} ($(disk_desc "$disk_real")), not disk $plan_seq of the plan. Nothing was touched. Select the disk again"
+fi
 # Mounted anywhere (the installer medium, an old install)? Leftovers of an earlier run of this
 # script under /mnt are fine; they are unmounted before partitioning.
 in_use=$(lsblk -rno MOUNTPOINTS "$disk_real" | tr ' ' '\n' | sed '/^$/d' | { grep -Ev "^$MNT(/|$)" || true; })
 [ -z "$in_use" ] || fail 2 disk-in-use "$disk is in use (mounted at: $(printf '%s' "$in_use" | tr '\n' ' ')); it may be the installer medium"
 disk_bytes=$(blockdev --getsize64 "$disk_real")
+disk_was="disk $disk_seq, $disk_real, $(disk_desc "$disk_real")"
 if [ "$disk_bytes" -lt $((MIN_DISK_GIB * 1024 * 1024 * 1024)) ]; then
   fail 2 disk-too-small "$disk is $((disk_bytes / 1024 / 1024 / 1024)) GiB; at least $MIN_DISK_GIB GiB are needed"
 fi
@@ -664,12 +689,25 @@ if [ "$newer" -eq 1 ]; then
   progress validate 7 "HinterOS $install_version ($install_rev) on the $channel channel is signed by $NEWER_SIGNER and follows this installer's version"
 fi
 
-progress validate 8 "Plan accepted: install HinterOS $install_version on $disk ($((disk_bytes / 1024 / 1024 / 1024)) GiB), host name $hostname, apps: ${apps[*]:-none}"
+progress validate 8 "Plan accepted: install HinterOS $install_version on $disk (disk $disk_seq, $((disk_bytes / 1024 / 1024 / 1024)) GiB), host name $hostname, apps: ${apps[*]:-none}"
 
 if [ "$validate_only" -eq 1 ]; then
   progress "done" 100 "Plan and machine are fine (validate only; nothing was touched)" info "" '{"failed_apps": []}'
   exit 0
 fi
+
+# same_disk EXITCODE NOTE: stop unless the plan's disk is still the one checked above (the same
+# device, disk sequence number and size).
+same_disk() {
+  local now seq
+  now=$(readlink -f "$disk" 2>/dev/null || true)
+  seq=
+  [ -n "$now" ] && [ -b "$now" ] && seq=$(disk_seq_of "$now")
+  if [ "$now" != "$disk_real" ] || [ "$seq" != "$disk_seq" ] \
+    || [ "$(blockdev --getsize64 "$now" 2>/dev/null || true)" != "$disk_bytes" ]; then
+    fail "$1" disk-changed "the disk changed: $disk was $disk_was; now it is ${seq:+disk $seq, }${now:-not there}. $2. Select the disk again"
+  fi
+}
 
 # ---------------------------------------------------------------------------------------------
 # 1b. A newer revision: download it and lock the device flake to it before the disk is touched,
@@ -732,6 +770,11 @@ fi
 # ---------------------------------------------------------------------------------------------
 # 2. Partition and format (disko), mounted at /mnt.
 # ---------------------------------------------------------------------------------------------
+# The last check before anything is erased: the wizard and the download may have taken long.
+if [ -n "$BEFORE_WIPE_HOOK" ]; then
+  "$BASH" -c "$BEFORE_WIPE_HOOK" >>"$LOG" 2>&1 </dev/null || true
+fi
+same_disk 2 "Nothing was touched"
 progress partition 10 "Erasing and partitioning $disk"
 if mountpoint -q "$MNT"; then
   run "Unmounting $MNT" umount -R "$MNT"
@@ -760,6 +803,7 @@ if ! { mountpoint -q "$MNT" && mountpoint -q "$MNT/boot"; }; then
 fi
 # The partitions are found by label, so make sure they are the ones on the target disk and that
 # the root file system is new.
+same_disk 1 "It was partitioned"
 for m in "$MNT" "$MNT/boot"; do
   src=$(readlink -f "$(findmnt -no SOURCE "$m")")
   [ "$(lsblk -no PKNAME -p "$src" | head -n1)" = "$disk_real" ] \
