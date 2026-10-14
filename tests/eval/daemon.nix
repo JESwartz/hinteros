@@ -74,6 +74,46 @@ let
         [ ]
       ];
     };
+    # The time zone helper (time-zone.md): the service itself never writes /etc; this oneshot,
+    # started on demand, may write /etc and /run/hinteros only, with no network or capabilities.
+    testTimeZoneApplyUnit =
+      let
+        u = c.systemd.services.hinteros-time-zone-apply;
+        s = u.serviceConfig;
+      in
+      {
+        expr = [
+          s.Type
+          s.User
+          (lib.hasSuffix "/bin/hinteros-system time-zone-apply" s.ExecStart)
+          s.ProtectSystem
+          s.ReadWritePaths
+          s.PrivateNetwork
+          s.NoNewPrivileges
+          s.ProtectHome
+          s.CapabilityBoundingSet
+          s.RestrictAddressFamilies
+          u.wantedBy
+          (lib.elem "/etc" sys.ReadWritePaths)
+        ];
+        expected = [
+          "oneshot"
+          "root"
+          true
+          "strict"
+          [
+            "/etc"
+            "/run/hinteros"
+          ]
+          true
+          true
+          true
+          [ "" ]
+          [ "AF_UNIX" ]
+          [ ]
+          false
+        ];
+      };
     testSystemService = {
       expr = [
         sys.RuntimeDirectoryPreserve
@@ -92,7 +132,6 @@ let
         [
           "/run/hinteros"
           "/var/lib/hinteros"
-          "/etc"
         ]
         [ "CAP_SYS_PTRACE" ]
         [ "AF_UNIX" ]

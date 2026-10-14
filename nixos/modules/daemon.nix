@@ -379,22 +379,60 @@ in
       etc."polkit-1/rules.d/50-hinteros.rules".text = polkitRules;
     };
 
-    # Per-profile disk use (profiles.md, "Per-profile storage"; DECISIONS D5): started by
-    # hinteros-system over D-Bus when profiles.list finds the data older than an hour. Reads the
-    # homes, writes /var/lib/hinteros/usage.json.
-    systemd.services.hinteros-usage = {
-      description = "HinterOS per-profile disk use";
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${lib.getExe cfg.system.package} usage";
-        User = "root";
-        ProtectSystem = "strict";
-        ProtectHome = "read-only";
-        ReadWritePaths = [ "/var/lib/hinteros" ];
-        PrivateNetwork = true;
-        NoNewPrivileges = true;
-        Nice = 19;
-        IOSchedulingClass = "idle";
+    systemd.services = {
+      # Per-profile disk use (profiles.md, "Per-profile storage"; DECISIONS D5): started by
+      # hinteros-system over D-Bus when profiles.list finds the data older than an hour. Reads the
+      # homes, writes /var/lib/hinteros/usage.json.
+      hinteros-usage = {
+        description = "HinterOS per-profile disk use";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${lib.getExe cfg.system.package} usage";
+          User = "root";
+          ProtectSystem = "strict";
+          ProtectHome = "read-only";
+          ReadWritePaths = [ "/var/lib/hinteros" ];
+          PrivateNetwork = true;
+          NoNewPrivileges = true;
+          Nice = 19;
+          IOSchedulingClass = "idle";
+        };
+      };
+
+      # The time zone (time-zone.md): `time_zone.set` writes the zone to
+      # /run/hinteros/time-zone.request and starts this over D-Bus (no [Install]). It writes
+      # state.json `settings.timeZone` and points /etc/localtime at the zone, each by renaming a new
+      # file over the old one, so it needs /etc writable. That stays out of hinteros-system's own
+      # sandbox: this unit does nothing else.
+      hinteros-time-zone-apply = {
+        description = "HinterOS: apply the time zone";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${lib.getExe cfg.system.package} time-zone-apply";
+          User = "root";
+          ProtectSystem = "strict";
+          ReadWritePaths = [
+            "/etc"
+            "/run/hinteros"
+          ];
+          ProtectHome = true;
+          PrivateTmp = true;
+          PrivateNetwork = true;
+          NoNewPrivileges = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectKernelLogs = true;
+          ProtectControlGroups = true;
+          ProtectClock = true;
+          RestrictAddressFamilies = [ "AF_UNIX" ];
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          SystemCallFilter = [ "@system-service" ];
+          CapabilityBoundingSet = [ "" ];
+          UMask = "0022";
+        };
       };
     };
 
@@ -420,22 +458,11 @@ in
           Restart = "on-failure";
           RestartSec = 2;
           # It reads /etc/hinteros, /proc, the profile links and /run/current-system, and writes
-          # /run/hinteros and /var/lib/hinteros. Everything that rebuilds the system happens in
-          # hinteros-job@.
-          #
-          # /etc: `time_zone.set` (time-zone.md) changes state.json and /etc/localtime in place,
-          # each as a new file next to the old one renamed over it, so it needs the directories
-          # /etc/hinteros and /etc writable. Nothing narrower works: a rename onto a bind-mounted
-          # /etc/localtime fails (EBUSY), and a bind of /etc/hinteros is left behind when a job
-          # or hinteros-config-sync swaps /etc/hinteros for a new directory (the service would then
-          # see the new one read-only until it restarts). The cost: the service can write all of
-          # /etc that root may write (it has no CAP_DAC_OVERRIDE). Narrower would be a separate
-          # oneshot unit that does these two writes, started by the service like hinteros-usage.
+          # only /run/hinteros. Everything that changes the system happens in hinteros-job@.
           ProtectSystem = "strict";
           ReadWritePaths = [
             "/run/hinteros"
             "/var/lib/hinteros"
-            "/etc"
           ];
           NoNewPrivileges = true;
           PrivateTmp = true;

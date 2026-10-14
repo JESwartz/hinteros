@@ -122,7 +122,9 @@ repaints at the nested size).
   `hinteros-time-zone` (after `etc`) points `/etc/localtime` at `/etc/zoneinfo/<zone>` from the
   live `/etc/hinteros/state.json` `settings.timeZone` (UTC when absent or not a zone of tzdata;
   the name rule is `nixos/lib/time-zone.nix`, shared with state.nix), replacing the link with a
-  rename and only when it differs. hinteros-system changes both at once (`time_zone.set`).
+  rename and only when it differs. `time_zone.set` changes both at once through the oneshot
+  `hinteros-time-zone-apply` (daemon.nix; root, `ReadWritePaths` /etc and /run/hinteros, no
+  network), so hinteros-system itself never writes /etc.
 - `runtime.nix`: `hinteros.runtime.{enable,network,bluetooth,audio,power}`, on with the session.
   NetworkManager (no VPN plugins), BlueZ (`Experimental`, `UserspaceHID`, `ClassicBondedOnly`
   stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules

@@ -1,6 +1,7 @@
-# The time zone (hinteros-docs/design/time-zone.md), with the real hinteros-system, its sandbox,
-# activation and hinteros-config-sync. Greeter mode; p1 = James, the admin profile (PIN 2468);
-# p2 = Sam (PIN 1357), on screen. state.json starts with `settings.timeZone` "America/Chicago".
+# The time zone (hinteros-docs/design/time-zone.md), with the real hinteros-system, its helper
+# unit hinteros-time-zone-apply, activation and hinteros-config-sync. Greeter mode; p1 = James,
+# the admin profile (PIN 2468); p2 = Sam (PIN 1357), on screen. state.json starts with
+# `settings.timeZone` "America/Chicago".
 #   - Boot: activation points /etc/localtime at /etc/zoneinfo/America/Chicago (from the live
 #     state.json); `date` shows it; hinteros-config-sync leaves state.json alone.
 #   - `time_zone.get` and `time_zone.list` (system API 0.8).
@@ -8,10 +9,10 @@
 #     the session daemon's relay, session API 0.16), and nothing changes; an unknown zone and
 #     path tricks are refused.
 #   - With the admin PIN (through the relay, as the launcher does it): /etc/localtime and
-#     state.json change at once, with no job; a new process's `date` shows the new zone.
+#     state.json change at once, with no job, through the helper unit (the service itself cannot
+#     write /etc); a new process's `date` shows the new zone.
 #   - A job (guest.set; STUBBED build: the guest-on specialisation) replaces /etc/hinteros and
-#     switches: the zone stays, and the same service process can still set one afterwards (its
-#     sandbox lets it write the new /etc/hinteros).
+#     switches: the zone stays, and the same service process can still set one afterwards.
 #   - A reboot keeps it: activation reads the zone the service wrote, and hinteros-config-sync
 #     keeps the live zone although the generation's snapshot still says America/Chicago.
 #   - Activation again (as a switch or a rollback does): a zone that is not tzdata's or no zone
@@ -147,6 +148,9 @@ profiles.mkTest {
         assert zone_of_link() == "Europe/London", link()
         assert tz_state() == "Europe/London", state_json()
         assert date("%Z") in ("GMT", "BST"), date("%Z")
+        # Written by the helper unit, not by the service.
+        assert machine.succeed("systemctl show hinteros-time-zone-apply.service -p InvocationID --value").strip(), "helper never ran"
+        machine.succeed("systemctl show hinteros-time-zone-apply.service -p Result --value | grep -qx success")
         assert sys_ok("hinteros-p2", "time_zone.get")["zone"] == "Europe/London"
         assert not [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"]
         assert system_generations() == gens
@@ -169,7 +173,7 @@ profiles.mkTest {
         assert state_json()["settings"]["guest"] == {"enable": True}, state_json()
         assert tz_state() == "Europe/London", state_json()
         assert link() == "/etc/zoneinfo/Europe/London", link()
-        # Same service process, after the swap: it writes the new /etc/hinteros.
+        # Same service process, after the swap: the helper writes the new /etc/hinteros.
         info = sess_ok("hinteros-p2", "system.time_zone.set", {"zone": "Asia/Tokyo", "admin_pin": "2468"})
         assert info["zone"] == "Asia/Tokyo", info
         assert info["offset_seconds"] == info["standard_offset_seconds"] == 9 * 3600, info
