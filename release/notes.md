@@ -6,7 +6,7 @@ notes, and `promote stable` renames it to the version the promoter picks. Start 
 `## Unreleased` section after merging a stable release into `main`. Keep each section short and
 written for the person using the box.
 
-## Unreleased
+## 0.7.0
 
 The first signed release: the first build of HinterOS meant to be installed on a box and kept
 up to date. (0.6.0 was prepared but never released; everything in it is here.)
@@ -44,3 +44,4 @@ up to date. (0.6.0 was prepared but never released; everything in it is here.)
 Known limits: only the `unstable` nixpkgs base exists, there is no HinterOS binary cache yet (an
 update downloads from cache.nixos.org and builds the rest on the box), and a box installed before
 this release must be moved onto its channel once with `hinteros-bootstrap-channel`.
+
