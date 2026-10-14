@@ -15,6 +15,21 @@ written for the person using the box.
 - Automatic clean-up is a setting: on or off, how often, and how many versions to keep.
 - Updates and app installs show what they install, how many parts are built, and the time
   taken. Hide the job page and the top bar keeps showing the job.
+- Installer: the system install shows its steps (copy or download the packages, build HinterOS,
+  install the boot loader), each with its count. A wheel turns while the install runs.
+- Installer: you can pick VacuumTube and Plex. Fixed: the app list showed Crunchyroll and not
+  Steam.
+- Settings has seven groups: Profiles, Updates, Storage, Network, Display and sound,
+  Accessibility and System.
+- The Store describes each app in short words.
+- Time zone: pick it in the first-boot setup and in Settings; a map shows the zone. The
+  change applies at once (Settings needs the admin PIN).
+- Steam games that Steam names with another app id (for example a game with its own
+  `steam_appid.txt`) now show at once, also with Steam open, and leave Continue when they end.
+- Apps that are not installed no longer show on a new box.
+- Keyboard: press Ctrl + Windows + D to go to Home.
+- Fixed: a profile without apps after moving to profiles; "another job is running" just after a
+  job ended; an offline install with Steam picked.
 
 ## 0.7.0
 

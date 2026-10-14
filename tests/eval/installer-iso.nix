@@ -35,7 +35,9 @@ let
         lib.sort (a: b: a < b) ids.all == [
           "firefox"
           "jellyfin"
+          "plex-htpc"
           "steam"
+          "vacuum-tube"
           "youtube"
         ]
         &&

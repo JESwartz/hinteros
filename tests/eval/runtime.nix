@@ -67,6 +67,26 @@ let
     in
     if r.success then lib.concatStringsSep "\n" r.value else "EVAL ERROR";
 
+  # A schema-2 device with `settings.timeZone` (null: absent), and its failing state assertions.
+  mkTz =
+    timeZone:
+    (self.lib.mkDevice {
+      state = state2 null // {
+        settings = lib.optionalAttrs (timeZone != null) { inherit timeZone; };
+      };
+      extraModules = [ { system.stateVersion = "25.11"; } ];
+    }).config;
+  tzFailures =
+    timeZone:
+    let
+      msgs = map (a: a.message) (
+        builtins.filter (a: !a.assertion && lib.hasPrefix "hinteros state:" a.message)
+          (mkTz timeZone).assertions
+      );
+      r = builtins.tryEval (builtins.deepSeq msgs msgs);
+    in
+    if r.success then lib.concatStringsSep "\n" r.value else "EVAL ERROR";
+
   c = mk [ ];
   off = mk [ { hinteros.runtime.enable = false; } ];
   devbox = self.nixosConfigurations.devbox.config;
@@ -350,6 +370,69 @@ let
         }
       ];
       expected = lib.genList (_: true) 7;
+    };
+
+    # The time zone (time-zone.md): NixOS does not own /etc/localtime; the activation script
+    # reads the live state.json after `etc`, whatever the state says at evaluation.
+    testTimeZoneWiring =
+      let
+        cfg = mkTz null;
+        snippet = cfg.system.activationScripts.hinteros-time-zone;
+      in
+      {
+        expr = [
+          cfg.time.timeZone
+          (cfg.environment.etc ? localtime)
+          snippet.deps
+          (has "/etc/hinteros/state.json" snippet.text)
+          (has "mv -fT /etc/.localtime.hinteros-tmp /etc/localtime" snippet.text)
+          (has "zone=UTC" snippet.text)
+        ];
+        expected = [
+          null
+          false
+          [ "etc" ]
+          true
+          true
+          true
+        ];
+      };
+    # Absent, UTC and real zones (also a link name and one three parts deep) evaluate cleanly.
+    testTimeZoneValid = {
+      expr = map tzFailures [
+        null
+        "UTC"
+        "America/Chicago"
+        "America/Argentina/Buenos_Aires"
+        "Etc/GMT+5"
+        "US/Central"
+      ];
+      expected = lib.genList (_: "") 6;
+    };
+    testTimeZoneInvalid = {
+      expr =
+        map
+          (
+            z:
+            has "settings.timeZone must be a time zone name of tzdata (e.g. \"Europe/Berlin\" or \"UTC\"), not ${builtins.toJSON z}" (
+              tzFailures z
+            )
+          )
+          [
+            "Mars/Olympus_Mons"
+            "utc"
+            "America"
+            "../../etc/shadow"
+            "/etc/zoneinfo/UTC"
+            "America/../UTC"
+            "posix/America/Chicago"
+            "zone1970.tab"
+            "tzdata.zi"
+            ""
+            5
+            { }
+          ];
+      expected = lib.genList (_: true) 12;
     };
   };
 in

@@ -21,7 +21,7 @@
   - `input.nix`: `hinteros.input.enable` (default: the session is enabled). InputPlumber with polkit,
     the session user in group `inputplumber` and its udev rules. `ManageAllDevices` is set by the session daemon. The overlay patches InputPlumber 0.81.0: `CompositeDevice.SendEvent` (the daemon's RT click) used `blocking_send` inside its tokio runtime, panicked and never answered (`nixos/pkgs/inputplumber/`; `input-layer` checks the click).
   - `daemon.nix`: `hinteros.daemon.enable`, `.group` (default `hinteros`), `.session.package`,
-    `.system.package`, `.osk.{enable,package,summon}` (the on-screen keyboard, `hinteros-osk` from the launcher package; `[osk]` in session.toml; default chord Guide+Y), `.logLevel`. A systemd user service `hinteros-session` for the session user
+    `.system.package`, `.osk.{enable,package,summon}` (the on-screen keyboard, `hinteros-osk` from the launcher package; `[osk]` in session.toml; default chord Guide+Y), `.input.keyboardHome` (default on: Ctrl+Super+D on a keyboard is Home; `[input] keyboard_home`; with the greeter, keyboards get a uaccess ACL for the active profile, profiles.nix), `.logLevel`. A systemd user service `hinteros-session` for the session user
     (socket `$XDG_RUNTIME_DIR/hinteros/session.sock`, started with `--config` of a `session.toml` generated from
     `.session.settings`, a TOML-format attrset; defaults: `launcher.app_id`, `gamescope.*` (disabled on cage, where `wayland_display` is `wayland-0` and the user unit gets `DISPLAY=:0`), `osk.*`, `steam.path`) and a root system service `hinteros-system`
     (`/run/hinteros/system.sock`, 0660, group `hinteros`, which the session user joins). What the system service
@@ -38,7 +38,7 @@
     `hinteros.update.allowedSigners` (a list of `"<principal> ssh-ed25519 <key>"`, written in ssh-keygen format with `namespaces="git"`).
     `allowedSigners` is empty by default; `nixosModules.default` fills it from the repo's `release/allowed_signers` (`release.nix`, below). With none,
     every update and channel check fails closed (git finds no matching principal, the daemon reports `update_verification_failed`/`unknown_signer`).
-  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `settings.hostname`, `settings.cleanup` (maintenance.nix), `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `apps` (a state enables exactly the listed default apps; ids in `lib/app-ids.nix`) and the first profile's user (TODO M7: one user per profile).
+  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `settings.hostname`, `settings.cleanup` (maintenance.nix), `settings.timeZone` (checked only: a zone of tzdata; time-zone.nix applies it at activation), `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `apps` (a state enables exactly the listed default apps; ids in `lib/app-ids.nix`) and the first profile's user (TODO M7: one user per profile).
   - `release.nix` (in `nixosModules.default` only, not in `modules/default.nix`): sets `hinteros.release.version`, `hinteros.update.allowedSigners` and `hinteros.cache.publicKeys` from `release/{version,allowed_signers,cache-keys}` with `mkDefault`; comment lines are skipped. `cache.nix`: `hinteros.cache.{enable,url,publicKeys}`, off (no cache yet); when on, an extra substituter at priority 50 after cache.nixos.org.
   - `disk.nix`: `hinteros.disk.enable` (state.json `disk`): the installer layout, ESP + ext4 root by partition label `hinteros-esp`/`hinteros-root`, systemd-boot, zram.
 - `installer/`: `default.nix` (installer environment: `hinteros-install`, disko, offline closure and lock following `hinteros.installer.channel` (default `stable`), `hinteros.installer.ui.command` hook) and `iso.nix` (installation-cd base); `pkgs/hinteros-install`, `templates/device-flake.nix.in`. See the repo README, "Installer".
@@ -64,7 +64,7 @@ format modifiers and dma-buf export), so the VM and the `boot` test use
 (`hinteros.session.gamescope.backend = "headless"`) does run on lavapipe, but only simple
 clients render: the `gamescope` test runs it (with `-e`) with the xterm placeholder home app and the session daemon, checks
 `GAMESCOPECTRL_BASELAYER_APPID` with xprop, uses the session socket (API 0.7) for `games.list`, a fake Steam game, `apps.close`, Big Picture and a fake Steam Guard pop-up (`steam_attention`, `steam.focus`), and checks
-by OCR of `gamescopectl screenshot` that the game, then (after SIGUSR1) the placeholder again, is shown. The Flutter launcher stays on cage in VM tests (spike 2).
+by OCR of `gamescopectl screenshot` that the game, then (after SIGUSR1) the placeholder again, is shown, and that Ctrl+Super+D on the VM keyboard is Home too (Ctrl+D is not). The Flutter launcher stays on cage in VM tests (spike 2).
 `nixosConfigurations.vm-gamescope` is the interactive VM with gamescope for a Vulkan-capable setup.
 On gamescope the launcher runs on Xwayland (`GDK_BACKEND=x11`); see "Display size" below.
 
@@ -115,8 +115,16 @@ repaints at the nested size).
   it, `state.json` generated from the state). `hinteros-config-sync` (oneshot before the
   daemon and greetd) restores `/etc/hinteros` from `/run/current-system/hinteros` by building a
   sibling temp dir and swapping with `mv --exchange`; `facter.json` and other files are kept.
-  Skips when `/etc/hinteros` or the snapshot is missing. `configDir` must be a plain path (a flake
+  Skips when `/etc/hinteros` or the snapshot is missing. It keeps the live `state.json`
+  `settings.timeZone` (set without a rebuild); state.json is compared as JSON. `configDir` must be a plain path (a flake
   source), not a derivation output, because the module reads it at eval time.
+- `time-zone.nix` (time-zone.md): `time.timeZone = null`; the activation snippet
+  `hinteros-time-zone` (after `etc`) points `/etc/localtime` at `/etc/zoneinfo/<zone>` from the
+  live `/etc/hinteros/state.json` `settings.timeZone` (UTC when absent or not a zone of tzdata;
+  the name rule is `nixos/lib/time-zone.nix`, shared with state.nix), replacing the link with a
+  rename and only when it differs. `time_zone.set` changes both at once through the oneshot
+  `hinteros-time-zone-apply` (daemon.nix; root, `ReadWritePaths` /etc and /run/hinteros, no
+  network), so hinteros-system itself never writes /etc.
 - `runtime.nix`: `hinteros.runtime.{enable,network,bluetooth,audio,power}`, on with the session.
   NetworkManager (no VPN plugins), BlueZ (`Experimental`, `UserspaceHID`, `ClassicBondedOnly`
   stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules

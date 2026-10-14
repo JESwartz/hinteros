@@ -6,6 +6,7 @@
     ./input.nix
     ./session.nix
     ./state.nix
+    ./time-zone.nix
     ./fake-steam.nix
     ./unfree.nix
     ./firefox-kiosk.nix

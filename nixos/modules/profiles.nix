@@ -26,6 +26,8 @@ let
   inherit (config.hinteros.daemon) group;
   sessionCfg = config.hinteros.session;
   greeterOn = cfg.greeter.enable;
+  # The session daemon reads keyboards for Ctrl+Super+D (Home).
+  keyboardHome = config.hinteros.daemon.enable && config.hinteros.daemon.input.keyboardHome;
   systemdPkg = config.systemd.package;
 
   # p1 keeps its auto-allocated uid (existing boxes); every later account and the guest get a
@@ -261,7 +263,15 @@ in
           (pkgs.writeTextDir "lib/udev/rules.d/70-hinteros-uinput.rules" ''
             KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
           '')
-        ];
+        ]
+        # Keyboards too, for the session daemon's Ctrl+Super+D Home (daemon.nix `input.keyboardHome`;
+        # it only reads them). Only the active profile, the person at the keyboard, gets the ACL;
+        # it already holds /dev/uinput, so writing to a keyboard adds nothing.
+        ++ lib.optional keyboardHome (
+          pkgs.writeTextDir "lib/udev/rules.d/70-hinteros-keyboard.rules" ''
+            SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+          ''
+        );
 
         # The greeter reads the public view the service writes at start; the console font is set
         # before the first splash (no vconsole setup on tty1 while it paints).

@@ -91,7 +91,15 @@ profiles.mkTest {
 
     def create(user, name, pin, system, **extra):
         stub_build(systems[system])
-        r = sys_ok(user, "profiles.create", {"name": name, "pin": pin, "locked": False, "revision": rev(user), **extra})
+        # The launcher's update check at session start is a job of its own and may start at
+        # any moment after enter() (jobs_idle cannot see it coming): job_busy while it runs.
+        for _ in range(5):
+            resp = sysrpc(user, "profiles.create", {"name": name, "pin": pin, "locked": False, "revision": rev(user), **extra})
+            if resp.get("error", {}).get("code") != 3005:
+                break
+            jobs_idle(user)
+        assert "result" in resp, (user, name, resp)
+        r = resp["result"]
         done = wait_job(user, r["job_id"])
         assert done["state"] == "succeeded" and done["kind"] == "profiles_create", done
         return r["id"]

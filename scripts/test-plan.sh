@@ -20,11 +20,11 @@ PROFILES=(profiles-greeter profiles-switch profiles-pin profiles-lifecycle profi
   profiles-isolation profiles-migration guest system-authz)
 APPS=(profile-apps profile-apps-system apps-box-features apps-migration store-install)
 SESSION=(gamescope session-restart input-layer)
-SYSTEM=(system-authz system-jobs system-escalation polkit-agent)
+SYSTEM=(system-authz system-jobs system-escalation polkit-agent time-zone)
 # The daemon and the launcher touch nearly everything; this is the set that exercises each part
 # once (session, profiles, apps, jobs, authorization, input, installer UI).
 DAEMON=(system-authz system-jobs profiles-greeter profiles-switch profiles-pin guest profile-apps
-  session-restart gamescope input-layer runtime)
+  session-restart gamescope input-layer runtime time-zone)
 LAUNCHER=(installer-ui profiles-greeter gamescope typing input-layer)
 
 mode=${1:-}
@@ -72,7 +72,10 @@ case "$mode" in
           if is_check "$t"; then add "$t"; fi
           ;;
         nixos/pkgs/hinteros-install/* | nixos/installer/* | nixos/modules/disk.nix) add "${INSTALLER[@]}" ;;
-        nixos/modules/profiles.nix | nixos/modules/state.nix) add "${PROFILES[@]}" ;;
+        nixos/modules/profiles.nix) add "${PROFILES[@]}" ;;
+        nixos/modules/state.nix) add "${PROFILES[@]}" time-zone ;;
+        nixos/modules/time-zone.nix | nixos/lib/time-zone.nix) add time-zone ;;
+        nixos/modules/device-config.nix) add config-sync time-zone ;;
         nixos/modules/app-env.nix | nixos/modules/apps.nix | nixos/modules/box-features.nix | nixos/modules/catalog.nix) add "${APPS[@]}" ;;
         nixos/modules/session.nix | nixos/pkgs/gamescope/*) add "${SESSION[@]}" ;;
         nixos/modules/input.nix | nixos/pkgs/inputplumber/*) add input-layer typing profiles-switch ;;

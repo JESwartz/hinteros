@@ -125,6 +125,7 @@ in
     import shlex
     from datetime import timedelta
 
+    ${builtins.readFile ./install/system-steps.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
@@ -188,12 +189,15 @@ in
         for l in lines:
             if l["stage"] not in stages:
                 stages.append(l["stage"])
-        assert stages == ["validate", "partition", "facter", "config", "install", "snapshot", ${
+        assert stages == ["validate", "partition", "facter", "config", "packages", "build", "bootloader", "snapshot", ${
           if apps != [ ] then ''"apps", '' else ""
         }"finalize", "done"], stages
         # Two phases: up to the snapshot is the system stage, then the apps stage.
         assert all(l["phase"] in ("system", "apps") for l in lines), lines
-        assert all(l["phase"] == "system" for l in lines if l["stage"] in ("validate", "partition", "facter", "config", "install", "snapshot")), lines
+        assert all(l["phase"] == "system" for l in lines if l["stage"] in ("validate", "partition", "facter", "config", "packages", "build", "bootloader", "snapshot")), lines
+        # The system stage in its three steps, with their own counts (offline: copied from the installer).
+        check_system_steps(lines, "copy")
+        assert not any("download" in l["message"].lower() for l in lines if l["stage"] == "packages"), lines
         ${
           if apps != [ ] then
             ''assert any(l["phase"] == "apps" and l["stage"] == "apps" for l in lines), lines''
@@ -312,6 +316,8 @@ in
         assert state["schemaVersion"] == 2 and "apps" not in state, state
         assert state["profiles"] == [{"id": "p1", "user": "hinteros"}], state
         assert state["services"] == [] and state["settings"]["guest"] == {"enable": True}, state
+        # Offline: only the box features of apps on the medium (none; not Steam's graphics32).
+        assert state["requirements"] == [], state
         assert state["settings"]["ssh"]["enable"] is True, state
         assert state["settings"]["admin"] == {"user": "james"}, state
         assert state["settings"]["hostname"] == "livingroom", state
@@ -339,9 +345,9 @@ in
         target.succeed("findmnt -no FSTYPE / | grep -qx ext4")
         target.succeed("findmnt -no FSTYPE /boot | grep -qx vfat")
 
-    with subtest("the privileged service answers (system API 0.7) and knows its channel"):
+    with subtest("the privileged service answers (system API 0.8) and knows its channel"):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.7", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "0.8", "client": {"name": "install-test", "version": "0"}}}
         info = {"jsonrpc": "2.0", "id": 1, "method": "system.info", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, info))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:/run/hinteros/system.sock"

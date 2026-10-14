@@ -126,5 +126,12 @@ pkgs.runCommand "hinteros-state-check"
     # The guard guards: a state with a field the daemon does not know is rejected (exit 1).
     echo '{"schemaVersion":1,"nonsense":true}' > bad.json
     if hinteros-system check-state bad.json; then echo "check-state accepted a bad state" >&2; exit 1; fi
+
+    # settings.timeZone (time-zone.md): absent in every state above; a zone name is accepted, a
+    # value that is not a string is not.
+    jq '.settings.timeZone = "America/Chicago"' states/minimal/system/state.json > tz.json
+    hinteros-system check-state tz.json
+    jq '.settings.timeZone = 5' states/minimal/system/state.json > tz-bad.json
+    if hinteros-system check-state tz-bad.json; then echo "check-state accepted timeZone 5" >&2; exit 1; fi
     touch $out
   ''
