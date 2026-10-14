@@ -98,7 +98,7 @@ in
   testScript = ''
     import json
 
-    ENV = "HINTEROS_SESSION_API=0.16 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=0.17 PYTHONPATH=/etc/hinteros-test"
 
     def sock(user):
         uid = machine.succeed(f"id -u {user}").strip()
