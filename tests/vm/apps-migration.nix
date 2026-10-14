@@ -85,7 +85,7 @@ in
 
     envs = json.loads(machine.succeed("cat /etc/hinteros-envs.json"))
     env = envs["firefox,jellyfin,youtube"]["out"]
-    ENV = "HINTEROS_SESSION_API=0.16"
+    ENV = "HINTEROS_SESSION_API=0.17"
 
     def apps():
         out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/session.py apps.list")
