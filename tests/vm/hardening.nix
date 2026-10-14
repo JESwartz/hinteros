@@ -1,8 +1,9 @@
 # Hardening baseline on built systems (threat-model.md). Non-dev boxes: the session user is not
 # in wheel, cannot sudo, cannot talk to the nix daemon; the admin account's sudo always asks for
-# its password; with SSH on (state.json) the admin logs in with username + password while the
-# session user and root cannot; with SSH off nothing listens. Dev box: the separate key-based
-# deploy user has passwordless sudo and nix, the session user still nothing.
+# its password; with SSH on (state.json) the admin logs in with username + password, from the
+# local networks only (a global IPv6 source is refused), while the session user and root cannot;
+# with SSH off nothing listens. Dev box: the separate key-based deploy user has passwordless sudo
+# and nix, the session user still nothing.
 #
 # Profiles (profiles.md "One Unix user per profile", "Device access per seat"; DECISIONS D4, S2):
 # on a schema-2 box in greeter mode (started after the others), every account (p1, p2, the guest)
@@ -109,6 +110,7 @@ in
     profiles.python
     + ''
       MACHINE = "${nodes.machine.networking.primaryIPAddress}"
+      MACHINE6 = "${nodes.machine.networking.primaryIPv6Address}"
       DEV = "${nodes.dev.networking.primaryIPAddress}"
       QUIET = "${nodes.quiet.networking.primaryIPAddress}"
       for m in (machine, quiet, dev, lan):
@@ -185,6 +187,20 @@ in
 
       assert admin_ssh("sudo -n true") != 0
       assert admin_ssh("'echo hunter2 | sudo -S -k true'") == 0
+
+      # ---- SSH only from the local networks --------------------------------------------------------
+      # Port 22 is open only to RFC 1918, link-local and ULA sources: the test network's IPv4
+      # (192.168.1.0/24) logs in above, its IPv6 (2001:db8::/32, global) is refused.
+      fw = "${nodes.machine.networking.firewall.package}/bin"
+      rules = machine.succeed(f"{fw}/iptables -S nixos-fw; {fw}/ip6tables -S nixos-fw")
+      ssh_rules = [l for l in rules.splitlines() if " --dport 22 " in l + " "]
+      assert ssh_rules and all(" -s " in l for l in ssh_rules), rules
+      local_nets = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10")
+      for net in local_nets:
+          assert any(f"-s {net} " in l for l in ssh_rules), (net, rules)
+      lan.succeed(f"ping -6 -c1 -W3 {MACHINE6}")
+      lan.succeed(f"nc -z -w3 {MACHINE} 22")
+      lan.fail(f"nc -z -w3 {MACHINE6} 22")
 
       # ---- SSH off: nothing listens ----------------------------------------------------------------
       quiet.fail("systemctl is-active sshd.service")

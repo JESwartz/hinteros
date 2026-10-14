@@ -20,6 +20,7 @@ second machine to build the ISO. An Ethernet cable for the online part; a Wi-Fi 
 
 - [ ] `sudo hinteros-install --plan plan.json --validate-only` with a good plan ends with a `done` line and changes nothing.
 - [ ] A plan without `admin.password` is refused (`admin-password-missing`, exit status 2).
+- [ ] A plan with an `admin.password` of 7 characters is refused (`admin-password-short`, exit status 2).
 - [ ] A plan naming the USB stick as `disk` is refused (`disk-in-use`).
 - [ ] With the network cable out, a plan with `steam` is refused (`app-needs-network`); the same plan with `youtube` and `firefox` only is accepted.
 
@@ -30,7 +31,7 @@ second machine to build the ISO. An Ethernet cable for the online part; a Wi-Fi 
 - [ ] `/var/log/hinteros-install.log` has no network errors (no attempts to fetch from cache.nixos.org or the Forgejo).
 - [ ] Remove the stick, reboot: the box boots from the internal disk (systemd-boot, no menu needed), reaches the launcher with a controller attached. Record: boot time.
 - [ ] The launcher lists YouTube and Firefox only (Jellyfin and Steam are offered but unticked; Crunchyroll, Moonlight and Plex are Store-only).
-- [ ] From another machine: `ssh <admin>@<host>` with the plan's password works; the same for `hinteros` and `root` fails. `sudo` asks for the admin password.
+- [ ] From another machine on the LAN: `ssh <admin>@<host>` with the plan's password works; the same for `hinteros` and `root` fails. `sudo` asks for the admin password. `sudo iptables -S nixos-fw | grep "dport 22"` shows only the local networks as sources.
 - [ ] `ls /etc/hinteros` shows `flake.nix flake.lock state.json facter.json`; `state.json` has the apps, ssh and admin user but no password; `/var/lib/hinteros/admin-password-hash` is `0600 root`.
 - [ ] `diff -r /etc/hinteros /run/current-system/hinteros` shows only `facter.json` as extra.
 - [ ] `lsblk -f`: a 1 GiB vfat ESP (`hinteros-esp`) and an ext4 root (`hinteros-root`) filling the rest.

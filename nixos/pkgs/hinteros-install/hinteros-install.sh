@@ -442,6 +442,11 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
               and ((.admin.hashedPassword | type) != "string" or (.admin.hashedPassword | length) == 0)
             then bad("admin.password"; "admin-password-missing"; "the admin account needs a password (admin.password or admin.hashedPassword)")
            else empty end),
+          # The same minimum as the installer UI (hinteros-launcher, plan.dart minPassword); SSH
+          # logs in with this password. A hash cannot be checked.
+          (if (.admin.password | type) == "string" and (.admin.password | length) > 0
+              and (.admin.password | length) < 8
+            then bad("admin.password"; "admin-password-short"; "the admin password needs at least 8 characters") else empty end),
           (if (.admin.password | type) == "string" and (.admin.password | test("[\n\r\u0000]"))
             then bad("admin.password"; "admin-password-invalid"; "the admin password must not contain line breaks") else empty end),
           (if (.admin.hashedPassword | type) == "string"

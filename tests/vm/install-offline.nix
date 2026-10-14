@@ -68,7 +68,7 @@ let
       hostname = "livingroom";
       admin = {
         user = "james";
-        password = "hunter2";
+        password = "hunter22";
       };
       ssh.enable = true;
       channel = "stable";
@@ -364,7 +364,7 @@ in
         target.succeed("test \"$(id -nG james | tr ' ' '\\n' | grep -cx wheel)\" = 1")
         target.fail("id -nG hinteros | tr ' ' '\\n' | grep -qx wheel")
         target.fail("runuser -u hinteros -- sudo -n true")
-        target.succeed("printf 'hunter2\\n' | runuser -u james -- sudo -S -k true")
+        target.succeed("printf 'hunter22\\n' | runuser -u james -- sudo -S -k true")
         target.fail("printf 'wrong\\n' | runuser -u james -- sudo -S -k true")
         # The hash is not in the config the generation embeds.
         h = target.succeed("cat /var/lib/hinteros/admin-password-hash").strip()
@@ -374,7 +374,7 @@ in
         target.wait_for_unit("sshd.service")
         target.succeed("ss -tln | grep -q ':22 '")
         opts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=6"
-        def pw(user, password="hunter2", cmd="true"):
+        def pw(user, password="hunter22", cmd="true"):
             return f"sshpass -p {password} ssh {opts} {user}@localhost {cmd}"
         target.succeed(pw("james", cmd="id -un"))
         target.fail(pw("james", "wrong"))

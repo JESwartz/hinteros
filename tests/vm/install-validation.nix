@@ -1,8 +1,9 @@
 # hinteros-install refuses bad plans and unsuitable machines before touching the disk: missing
-# admin password, an app that needs a network while offline, a disk that does not exist, is in
-# use, is the system disk or is too small, a BIOS-booted machine, malformed fields, a `rev` that
-# is malformed or needs a network (the installer's own revision validates offline). Every
-# refusal exits 2 with an error line; a marker file system on the target disk survives them all.
+# admin password (or one shorter than 8 characters), an app that needs a network while offline,
+# a disk that does not exist, is in use, is the system disk or is too small, a BIOS-booted
+# machine, malformed fields, a `rev` that is malformed or needs a network (the installer's own
+# revision validates offline). Every refusal exits 2 with an error line; a marker file system on
+# the target disk survives them all.
 # Also `--info` (the installer's revision, version and channel; offline, no root).
 { self, pkgs }:
 let
@@ -15,7 +16,7 @@ let
           hostname = "livingroom";
           admin = {
             user = "james";
-            password = "hunter2";
+            password = "hunter22";
           };
           ssh.enable = true;
           channel = "stable";
@@ -40,6 +41,12 @@ let
       admin = {
         user = "james";
         password = "";
+      };
+    };
+    short-password = plan {
+      admin = {
+        user = "james";
+        password = "1234567";
       };
     };
     bad-hash = plan {
@@ -161,6 +168,7 @@ in
       with subtest("admin password"):
           refused("no-password", "admin-password-missing")
           refused("empty-password", "admin-password-missing")
+          refused("short-password", "admin-password-short")
           refused("bad-hash", "admin-hash-invalid")
           refused("no-admin", "admin-missing")
 
