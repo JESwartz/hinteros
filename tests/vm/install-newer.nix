@@ -186,23 +186,40 @@ in
         assert any("${newerVersion}" in l["message"] for l in lines), lines
 
     with subtest("plan.rev installs the newer release"):
+        def dump():
+            print(installer.execute(
+                "echo '--- install.stderr'; tail -n 80 /tmp/install.stderr; "
+                "echo '--- /var/log/hinteros-install.log'; tail -n 200 /var/log/hinteros-install.log | cut -c1-600; "
+                "echo '--- df'; df -h / /tmp /nix/store /mnt; ps -ef | grep -a '[h]interos-install'"
+            )[1])
+
+        # In its own session (out of the test shell's process group), the exit status written
+        # atomically: a status file that is there is complete.
         installer.succeed(
-            f"({ENV}{ONLINE}timeout 3000 hinteros-install --plan /tmp/newer.json >/tmp/install.out 2>/tmp/install.stderr; "
-            "echo $? >/tmp/install.rc) </dev/null >/dev/null 2>&1 &"
+            "rm -f /tmp/install.rc /tmp/install.out /tmp/install.stderr",
+            f"setsid -f sh -c '{ENV}{ONLINE}timeout 3000 hinteros-install --plan /tmp/newer.json "
+            ">/tmp/install.out 2>/tmp/install.stderr; echo $? >/tmp/install.rc.new && mv /tmp/install.rc.new /tmp/install.rc' "
+            "</dev/null >/dev/null 2>&1",
         )
-        installer.sleep(5)
-        for _ in range(100):
-            if installer.execute("pgrep -f '[l]ibexec/hinteros-install'")[0] != 0:
-                break
+        rc = None
+        gone = 0
+        for _ in range(110):
             installer.sleep(30)
+            status, out = installer.execute("cat /tmp/install.rc")
+            if status == 0 and out.strip():
+                rc = int(out.strip())
+                break
             print(installer.execute("tail -n 3 /tmp/install.out; tail -n 2 /var/log/hinteros-install.log | cut -c1-300")[1])
+            # Gone without a status (killed?): stop waiting after a grace poll.
+            gone = gone + 1 if installer.execute("pgrep -f '[h]interos-install --plan'")[0] != 0 else 0
+            if gone >= 2:
+                break
         out = installer.succeed("cat /tmp/install.out")
-        rc = int(installer.succeed("cat /tmp/install.rc").strip())
         lines = [json.loads(l) for l in out.splitlines() if l.strip()]
         for l in lines:
             print(l)
         if rc != 0:
-            print(installer.execute("tail -n 120 /tmp/install.stderr")[1])
+            dump()
         assert rc == 0, (rc, lines[-3:])
         assert all(l["level"] != "error" for l in lines), lines
         done = lines[-1]
