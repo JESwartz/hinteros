@@ -9,7 +9,10 @@
 #     each further one doubles it; during a lock even the right PIN is refused. The lock and the
 #     failure count survive a reboot (the next wrong PIN locks for the next doubled time); the
 #     right PIN after the wait works and resets the count.
-#   - The admin profile's PIN has no backoff (J4): wrong is only wrong, any number of times.
+#   - The admin profile's PIN has no wait (J4) but 10 wrong tries a boot, counted from the API
+#     and the greeter's PAM helper together: then every check is refused, the right PIN too
+#     (`reboot_required`, `hinteros:reboot`), audited once; a service restart keeps it, a reboot
+#     ends it.
 #   - Admin actions need the admin PIN, from any profile (here p2's session): rename and reset
 #     another profile's PIN, guest on/off, the starter set; another profile's PIN is not enough.
 #     A profile's own changes need its own PIN, which shares the backoff with the picker.
@@ -142,11 +145,51 @@ profiles.mkTest {
         session_of("hinteros-p2")
         assert pin_state("p2") == {"failures": 0, "locked_until": 0}, pin_state("p2")
 
-    with subtest("the admin PIN: no backoff, wrong is only wrong"):
+    with subtest("the admin PIN: no wait, but 10 wrong tries a boot, then only a reboot helps"):
+        def rename_p1(pin):
+            return sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": pin})
+
+        def pam_verify(pin):
+            return machine.succeed(f"printf '{pin}\\0' | env PAM_USER=hinteros hinteros-system pin verify || true").strip()
+
+        locked_out = {"pin": "admin", "reboot_required": True}
+        # API (any profile's session) and the greeter's PAM helper share one count; no wait.
         for _ in range(6):
-            r = sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": "0000"})
+            r = rename_p1("0000")
             assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "admin"}, r
+        for _ in range(3):
+            assert pam_verify("0000") == "hinteros:wrong"
         assert not {x["id"]: x for x in public()["profiles"]}["p1"]["locked_until"]
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p1.tries").strip() == "600 root"
+        # The tenth: refused until a reboot, even the right PIN, on every path.
+        r = rename_p1("0000")
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == locked_out, r
+        r = rename_p1("2468")
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == locked_out, r
+        r = sess("hinteros-p2", "system.guest.set", {"enabled": True, "admin_pin": "2468"})
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == locked_out, r
+        assert pam_verify("2468") == "hinteros:reboot"
+        assert profiles_file()["profiles"]["p1"]["name"] == "James"
+        # Audited once, when it started.
+        out = machine.succeed("journalctl -o verbose HINTEROS_PIN_OUTCOME=lockout_started")
+        assert out.count("HINTEROS_PROFILE=p1") == 1, out
+        # A restart of the service keeps it.
+        machine.succeed("systemctl restart hinteros-system.service")
+        machine.wait_for_unit("hinteros-system.service")
+        for _ in range(60):
+            r = rename_p1("2468")
+            if r.get("error", {}).get("code") != 3001:
+                break
+            time.sleep(1)
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == locked_out, r
+        # A reboot ends it; then the right PIN works and wrong is only wrong again.
+        machine.shutdown()
+        machine.start()
+        machine.wait_for_unit("hinteros-system.service")
+        assert pam_verify("0000") == "hinteros:wrong"
+        enter("p2", "hinteros-p2", "1357")
+        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "James", "pin": "2468"}) == {}
+        assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p1.tries"))["failures"] == 0
 
     with subtest("admin actions need the admin PIN, from any profile"):
         # Rename another profile: no PIN, its own PIN, the admin PIN.
