@@ -62,11 +62,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791584901,
-        "narHash": "sha256-QpuPR+888y1Mv+koZMjQ+AslmJ5i0w6nn7Ap2ifeX1Y=",
-        "ref": "refs/heads/main",
-        "rev": "a73446644b713d3fce358e536851c05025dfaf44",
-        "revCount": 23,
+        "lastModified": 1792004500,
+        "narHash": "sha256-C3sxRAupw5JSJxmmu+bI+Hkdn9EHcCuFKSerVAU01c0=",
+        "ref": "installer-apps",
+        "rev": "ab4ebb7babbf39a181205d58383ab9320899de1b",
+        "revCount": 24,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git"
       },
@@ -112,11 +112,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791965999,
-        "narHash": "sha256-SFHpCEoi9jLyrhRPs5F+uZbrrxSFFpTdLrsUvtD5DtQ=",
-        "ref": "refs/heads/main",
-        "rev": "6b8ba997d79f7045f01c61512c4ddd8c30185094",
-        "revCount": 138,
+        "lastModified": 1792005889,
+        "narHash": "sha256-aP2sXNYdsGCO5mnYX4Y9dfjvE9Qj0ko2yjV4OmBeiDc=",
+        "ref": "integrate",
+        "rev": "3360c7c26d32840520e18fd97f10af2be19a9105",
+        "revCount": 145,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git"
       },
