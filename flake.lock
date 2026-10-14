@@ -86,11 +86,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791948325,
-        "narHash": "sha256-dQEMXtb3rtPWzjvbbo1ZTNAxMajtCLtqlbs+jXmUkTY=",
-        "ref": "refs/heads/main",
-        "rev": "aebef2d9a1c5e38e0d0a79546b12e5763d5c401c",
-        "revCount": 120,
+        "lastModified": 1791953344,
+        "narHash": "sha256-HUW/52bZN06+wMoohEQnO2qX/t+S+zHBnTKbLr32OUk=",
+        "ref": "job-progress",
+        "rev": "54660e3480edcd2ae7ec29cce2a8242b66dd97d8",
+        "revCount": 122,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git"
       },
@@ -112,11 +112,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791950142,
-        "narHash": "sha256-VltXtBN+OpFU1U7bLSQixSZSgeTFy6UzjVuRSxd5q84=",
-        "ref": "refs/heads/main",
-        "rev": "b01899765ab547de874be8df45aa24bf344175c1",
-        "revCount": 130,
+        "lastModified": 1791953507,
+        "narHash": "sha256-7dZxmWYfcIY3e3sYR4OWx8oVs2o5pSkH2xZcF2RPaDQ=",
+        "ref": "job-progress",
+        "rev": "8a3d2577ef16647b0b7fb46980b4b097377a1125",
+        "revCount": 132,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git"
       },
