@@ -64,7 +64,7 @@
       "locked": {
         "lastModified": 1792004500,
         "narHash": "sha256-C3sxRAupw5JSJxmmu+bI+Hkdn9EHcCuFKSerVAU01c0=",
-        "ref": "installer-apps",
+        "ref": "refs/heads/main",
         "rev": "ab4ebb7babbf39a181205d58383ab9320899de1b",
         "revCount": 24,
         "type": "git",
@@ -86,11 +86,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791964068,
-        "narHash": "sha256-gbRpPEiyaBWfNAAmMsCCvJrPBFDvr2jWpgPJg14US70=",
+        "lastModified": 1792007401,
+        "narHash": "sha256-0kjh8wLX3FoQGWEDBmfPuMqJvodIih/kj6spDH5LoEM=",
         "ref": "refs/heads/main",
-        "rev": "7350573648b6c94e76a16de3f06354083c6333e0",
-        "revCount": 130,
+        "rev": "c688e77ae809a03f15c10d511c3d139863c41efd",
+        "revCount": 131,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git"
       },
@@ -114,7 +114,7 @@
       "locked": {
         "lastModified": 1792005889,
         "narHash": "sha256-aP2sXNYdsGCO5mnYX4Y9dfjvE9Qj0ko2yjV4OmBeiDc=",
-        "ref": "integrate",
+        "ref": "refs/heads/main",
         "rev": "3360c7c26d32840520e18fd97f10af2be19a9105",
         "revCount": 145,
         "type": "git",
