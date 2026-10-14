@@ -213,6 +213,14 @@
         profile-apps = import ./tests/vm/profile-apps.nix { inherit self pkgs; };
         apps-migration = import ./tests/vm/apps-migration.nix { inherit self pkgs; };
         profiles-greeter = import ./tests/vm/profiles-greeter.nix { inherit self pkgs; };
+        profiles-switch = import ./tests/vm/profiles-switch.nix { inherit self pkgs; };
+        profiles-pin = import ./tests/vm/profiles-pin.nix { inherit self pkgs; };
+        profiles-isolation = import ./tests/vm/profiles-isolation.nix { inherit self pkgs; };
+        profiles-lifecycle = import ./tests/vm/profiles-lifecycle.nix { inherit self pkgs; };
+        profiles-lock = import ./tests/vm/profiles-lock.nix { inherit self pkgs; };
+        profiles-migration = import ./tests/vm/profiles-migration.nix { inherit self pkgs; };
+        apps-box-features = import ./tests/vm/apps-box-features.nix { inherit self pkgs; };
+        guest = import ./tests/vm/guest.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
         install-offline-hw = import ./tests/vm/install-offline-hw.nix { inherit self pkgs; };
         install-app-failure = import ./tests/vm/install-offline.nix {
@@ -235,6 +243,7 @@
           facterFixture = ./tests/vm/fixtures/facter-lenovo-m900.json;
         };
         install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };
+        install-newer = import ./tests/vm/install-newer.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };

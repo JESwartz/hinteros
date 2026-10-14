@@ -33,6 +33,7 @@ one consistent system.
 | `nixosConfigurations.installer`, `packages.x86_64-linux.iso` | The installer ISO (`nix build .#iso`, see Installer below). `nixosModules.installer` is the same environment without the image bits, which the install VM tests run as a node |
 | `nixosConfigurations.devbox` | Mini PC #1, from `devices/devbox/` (checked-in `state.json`, Intel iGPU, PipeWire, gamescope on DRM, Steam). Deploy: `nixos-rebuild switch --flake .#devbox --target-host deploy@<box> --sudo` (the `deploy` user from `hinteros.dev`; the session user has no sudo); see `tests/couch/m0-spikes.md`. Steam and Plex HTPC (`hinteros.apps.plex-htpc`) are unfree and allowed only by name (derived from the enabled catalog entries into `hinteros.unfreeAllowlist`). Unfree policy: the ISO is fully free (`forbidUnfree` with no `unfreeExceptions`, Steam included); the cache job sets `forbidUnfree` and `unfreeExceptions = config.hinteros.catalog.cacheableUnfree` (Steam, `cache = true` in the catalog); Plex is never cached |
 | `checks.x86_64-linux` | `pre-commit` (nixfmt, statix, deadnix), `state-check` (builds: `hinteros-system check-state`, the daemon's own parser, over `devices/*/state.json`, the VM fixtures and the `state.json` files `hinteros-install --state-dir` writes for representative plans, plus the same after Store-only apps are added), `apps` (eval tests: app registry from the catalog, every catalog entry evaluating in a device, the ISO and the cache job config, icon fields, gamescope mode files, input keys, OSK settings, US layout, cage socket defaults, the gamescope version pin, unfree allowlist, the Store-only streaming apps: kept out of the installer lists, listed as kiosk entries when installed), `tv-apps` (VM test: Firefox kiosk profiles, YouTube TV User-Agent, daemon `apps.list` and `apps.launch`, a Store-only streaming app (Netflix) launches in its own profile, Jellyfin starts), `typing` (VM test: the daemon's uinput keyboard types a URL and a password into Firefox over session API 0.8, and starts the OSK), `hardening` (VM test: unprivileged session user, admin sudo password, password SSH for the admin only, SSH off listens nowhere, dev deploy user), `hardening-eval` (eval tests for the dev assertions), `runtime-eval` (eval tests: scoped polkit rules, BlueZ/NetworkManager/systemd-boot hardening, snapshot wiring, boot counting, GC), `config-sync` (VM test: /etc/hinteros restored from the snapshot at boot, skipped without it), `runtime` (VM test: NetworkManager, BlueZ config, PipeWire socket, pkcheck allows/denies for the session user, boot-complete gate, low-disk warning), `installer-ui` (VM test: the installer environment boots into the launcher in `--installer` mode under cage as root, OCR sees the welcome screen, the catalog index and terms are in the profile, the console is the fallback), `runtime-settings` (VM test: session API 0.7 against the real NetworkManager, PipeWire (null sink), logind/polkit and BlueZ's bus policy: `network.status`, `bluetooth.status` unavailable cleanly, the session user reaches org.bluez and another user does not, `audio.outputs`, `power.capabilities`, `display.modes` under cage), `mk-device` (eval tests for mkDevice and the state translation), `daemon-eval` (eval and build test: the patched InputPlumber, the daemon's pointer theme environment, the system service sandbox, the job unit template, polkit actions and rules, `release.json`, `channels.json` and `allowed_signers` contents, the signer format check, the device flake template's input line), VM tests of the privileged service, which run the real daemon, polkit, logind and systemd (`tests/vm/system/`): `system-escalation` (as the session user, hostile input straight at `system.sock`: unknown fields, forged `uid`/paths/URLs, wrong types, bad framing, non-UTF-8, oversize, nesting bombs, a connection flood; every request refused, same service process, `/etc/hinteros` untouched, no job started, rate limiting, audit entries, the sandbox it runs in), `system-authz` (read-only for members; non-members cannot connect; a member that does not own seat0 gets `permission_denied`/`seat`; the session user passes; `ssh.set` gives `authentication_required`; a rules file returning NO is honored; `pkcheck` per action; audit decisions) and `polkit-agent` (VM test, real polkitd and PAM: the launcher path over the session socket, `system.ssh.set` -> `authentication_requested`, wrong passwords, a client not named `hinteros-launcher` refused, cancel, the right admin password -> job -> sshd on; **the build is a stub**), `session-restart` (VM test: `session.restart` replaces the greetd session, launcher and session daemon, twice; greetd has `Restart=always`), `store-install` (VM test: `store.list`, `system.apps.install`/`remove` through the session socket, terms refusal and `terms-accepted.json`, `delete_data` that never follows symlinks out of the home, hostile `apps.*` input; **the build is a stub**), `install-offline-m900` (the install-offline VM test with the real report of a Lenovo M900), `install-offline-hw` (VM test: an offline install with an Intel mini PC hardware report builds no package, the report is deferred), and `system-jobs` (`job_busy`, cancel before activation, failing build, job events, `base.set` with a real switch that restarts `hinteros-system` during its own job, `rollback` restoring the previous generation and the `/etc/hinteros` snapshot; **the build is a stub**: see the test header), `boot`, `install-offline` and the others below. `update-verify` (git server and cache VMs) is not implemented yet.
+| `scripts/test-plan.sh` `quick`, `targeted [BASE]` or `full`, optional `--run` | Which checks to run: `quick` = the eval checks (minutes); `targeted` = those plus only the VM tests for what changed since BASE (default `origin/main`; changed files and the daemon, launcher and catalog revisions in `flake.lock`); `full` = every check, once per release before promoting a beta. `--run` builds them one at a time, throttled. VM tests never run two at once |
  `fake-steam` (the stub `steam` logs a `steam://rungameid` launch, a "Fake game" window shows, the fake Steam home with its 3 games and 3 tools is installed) and VM tests: `boot` (autologin, cage and the launcher up, OCR finds "HinterOS", both daemon sockets answer hello and ping), `gamescope` (headless gamescope in Steam mode plus the session daemon: base-layer property via xprop, over session API 0.8: `games.list` (tools filtered), fake game launch, Home, `apps.close`, Big Picture as app 769, a Steam Guard pop-up with `steam_attention` and `steam.focus`, all checked by OCR), `gamescope-size` (headless gamescope at 1920x1080 and at 1280x1024 with a smaller nested size: the home app and a daemon-launched X11 app that never ask for fullscreen fill the output edge to edge in a screenshot, their windows, the Xwayland `:0` root and the first `wl_output` equal the output size, `GDK_BACKEND=x11`, gamescope output in the journal; see `nixos/README.md` "Display size") and `input-layer` (InputPlumber with a fake pad: virtual target, intercept modes, DBus events, a profile loaded at runtime and `SendEvent` clicks that answer and reach the virtual mouse: the overlay's InputPlumber patch) |
 | `checks.x86_64-linux.install-validation`, `install-offline`, `install-app-failure`, `offline-inputs` | VM tests of the installer. `install-validation`: bad plans (no admin password, an app that needs a network while offline, a missing, mounted, system or too small disk, another disk with HinterOS partition labels, BIOS boot, malformed fields) are refused before the disk is touched. `install-app-failure`: the same install onto a disk that already holds an old HinterOS install, with one online-only app (`moonlight`, test hook `HINTEROS_INSTALL_ONLINE_APPS`) that cannot be downloaded in the VM: exit 0, `failed_apps` lists it, the box boots, `state.json` excludes it, the other apps are installed. `offline-inputs`: every build-time input of what an offline install builds is on the ISO (`nixos/lib/offline-inputs.nix`). The install VMs have only the installer's own store and no network interface. `install-offline`: a VM with no network and an empty second disk installs a plan (YouTube and Firefox, ssh on, an admin account), then the installed disk is booted via UEFI and checked: session up, `/etc/hinteros` and its snapshot, the pinned lock, sshd with the admin's password, no password for the session user or root, the daemon's `apps.list` |
 | `devShells.default`, `formatter` | Dev shell with the lint tools and git hooks; `nix fmt` |
@@ -50,7 +51,7 @@ a key listed in `release/allowed_signers` of the generation they are running (de
 | `release/version`, `release/notes.md` | The latest stable release's version (`MAJOR.MINOR.PATCH`) and the release notes, newest first, with what changed since then under `## Unreleased` on top (the release commit's message). Nobody bumps the version by hand: `promote stable` does |
 | `release/allowed_signers`, `release/cache-keys` | Release signing keys and binary cache keys every generation trusts (`nixos/modules/release.nix`). Release key fingerprint: `SHA256:NuERttXtUYjtSTqt7kHUqs7TW6rWSHjHOIUlOOADpCE` (ED25519, `hinteros-release`) |
 | `nix run .#promote` | **The way to release.** Shows where `main`, `beta` and `stable` are and asks, with numbered menus: what to release where (main → beta, beta → stable, a hotfix branch → stable), which commit, the security severity, the version, and whether to edit the release notes (in `$EDITOR`). It always shows the finished commit for review and asks before signing and pushing. Takes only `--dry-run`, `--skip-ci` and `--key`; without a CI runner it asks whether to go on without CI. The rows below are the same steps with flags instead of questions, for scripts |
-| `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. The version stays the stable one it builds on: a box shows `0.7.0.<commit> beta`. The very first one needs `--bootstrap` |
+| `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. release/version stays the stable one it builds on; a box shows the next patch and the commit: `0.7.1.<commit> beta` on top of 0.7.0. The very first one needs `--bootstrap` |
 | `nix run .#promote -- stable [--rev <beta release>]` | Shows the changes since the last stable release and asks for the new version (patch, minor, major or typed; `--bump <b>` or `--version <v>` without asking), then signs a commit on top of the beta release that only writes it to `release/version` and names the notes section, after the dogfood confirmation (`--expedite` for high/critical security releases). A box shows `0.8.0 stable`. Then merge `stable` into `main` |
 | `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable`, as the next patch version (the branch leaves `release/version` alone and adds an `## Unreleased` notes section; `Security:` severity required); then merge `stable` into `main` |
 | `sudo hinteros-bootstrap-channel <stable\|beta> <rev>` | On a box, over SSH: move it onto a channel at a rev once, outside the update UI (boxes installed before they trusted the release key). A box whose system predates the script runs it from that very rev: `sudo nix run "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros.git?ref=beta&rev=<rev>#hinteros-bootstrap-channel" -- beta <rev>` |
@@ -134,22 +135,25 @@ An example is in `/etc/hinteros-installer/plan.example.json` on the ISO:
 | `acceptedTerms` | Optional `{"<id>": "<terms version>"}`. An app whose catalog entry has vendor terms (Steam, Plex) is refused (`terms-not-accepted`) unless the accepted version equals the version in the catalog index on this installer. The accepted ones are recorded on the box in `/var/lib/hinteros/terms-accepted.json` (root, 0600): `{"<id>": [{"version", "accepted_at", "by": "installer"}]}` |
 | `wifi` | Optional `{ssid, psk}`: connects before the install and keeps the connection on the installed box |
 | `network` | Optional: `auto` (default; online if cache.nixos.org answers), `online` (fail if not) or `offline` |
+| `rev` | Optional: the HinterOS revision to install (40 hex digits). Absent or this installer's own revision: install the version on the installer (offline if need be). Another revision must be the newer release `--check-newer` reported (see below); it is verified again before anything is touched and needs the network |
 
 The plan may hold a plain-text password: keep it on tmpfs and delete it afterwards (`--plan -`
-reads it from stdin). `--validate-only` checks the plan and the machine and touches nothing. `--state-dir DIR` (tests) checks the plan only and writes the `state.json` files the install would produce (`DIR/system`, `DIR/apps`).
+reads it from stdin). `--validate-only` checks the plan and the machine and touches nothing. With a newer `rev` it also checks that the network is there and the revision verifies (below). `--state-dir DIR` (tests) checks the plan only and writes the `state.json` files the install would produce (`DIR/system`, `DIR/apps`).
 
 **Progress.** stdout is one JSON object per line, for example
 `{"phase":"system","stage":"install","percent":57,"level":"info","message":"..."}`. `phase` is
 `system` or `apps` (see below); during the apps stage a line may also carry `app` (a catalog id).
-Stages in order: `validate` (0-8), `partition` (10-20), `facter` (22-26), `config` (28-30),
+Stages in order: `validate` (0-8), `fetch` (9, only when installing a newer `rev`), `partition` (10-20), `facter` (22-26), `config` (28-30),
 `install` (32-70, from nix's own progress), `snapshot` (72-73) - all phase `system` - then, if the
 plan has apps, `apps` (74-96, phase `apps`), `finalize` (97), `done` (100). Percentages never go
 backwards. `level` is `info`, `warn` or `error`. An `error` line also has a `code`
 (`admin-password-missing`, `app-needs-network`, `disk-not-found`, `disk-in-use`, `disk-too-small`,
-`other-hinteros-disk`, `not-uefi`, `install-failed`, ...) and the exit status is 2 (the plan or the
+`other-hinteros-disk`, `not-uefi`, `install-failed`, `rev-needs-network`, `fetch-failed`, ...) and the exit status is 2 (the plan or the
 machine was refused, nothing was touched) or 1 (the base system could not be installed). Tool
 output goes to stderr and `/var/log/hinteros-install.log`; when a build fails the log also holds
 nix's error messages in full and the build log (`nix log`) of every derivation that failed.
+The `done` line also carries `rev` and `version`: the HinterOS revision and release that were
+installed (its message names them too).
 
 **Two stages.** Installing HinterOS and installing the apps are separate, so a broken app can
 never cost the user the system:
@@ -157,7 +161,7 @@ never cost the user the system:
 1. **System stage** (phase `system`): the base system with no catalog apps (`state.json`
    `apps: []`), offline from the ISO's store if need be. It ends with a bootable box. If it fails
    online (a download, or the hardware report does not build), it is retried once as the generic
-   offline system from the ISO; if it still fails the run exits 1.
+   offline system from the ISO (not for a newer `rev`, below); if it still fails the run exits 1.
 2. **Apps stage** (phase `apps`, only if the plan lists apps): the selected apps are built into the
    installed system (`nix build` of the full config against the new root; offline for the `onIso`
    apps, downloading for the others) and made the next boot's generation with
@@ -198,6 +202,59 @@ dependency failed" after a failed download of `bash-5.3.tar.gz`. Every nix call 
 passes `--option substitute true`. NixOS test VMs always have a user-mode `eth0`, which is why this
 went unnoticed: the install tests now run the installer with only its own store image and no NIC at
 all.
+
+### What the installer carries
+
+The UI asks the backend which HinterOS the stick carries and which channel it is for, so it can
+show that version and pick the channel before anything goes online:
+
+```
+hinteros-install --info
+{"iso":{"rev":"<40 hex>","version":"0.7.0"},"channel":"stable"}
+```
+
+`iso.rev` is the revision the installer is built from (`hinteros.installer.isoRev`; all zeros for
+an ISO built from a dirty tree), `iso.version` that revision's `release/version`, `channel` the
+installer's channel (`hinteros.installer.channel`, the default `channel` of a plan). It is built
+into the installer: no network, no root, nothing logged, one line on stdout, exit 0. A beta
+installer's `iso.version` is the stable version it builds on, as on a box. Tested by
+`install-validation`.
+
+### A newer HinterOS than the ISO's
+
+With a network, the installer can install the newest release of its channel instead of the one
+on the stick. The UI asks the backend, shows both versions and lets the person choose; the ISO's
+version stays the default and the only choice offline.
+
+```
+hinteros-install --check-newer [--channel stable|beta]   # default: the installer's channel
+{"channel":"stable","iso":{"rev":"<40 hex>","version":"0.7.0"},"newer":{"rev":"<40 hex>","version":"0.7.1","date":1767225600,"signer":"release"}}
+```
+
+It fetches the channel's tip from the repo (`hinteros.update.repo`; a partial clone: commits and
+trees, plus the tip's `release/version`) and verifies it as a box verifies an update
+(hinteros-system's `update.rs`): an SSH signature by a key in **this installer's**
+`release/allowed_signers` (`hinteros.update.allowedSigners`) and a fast-forward from the ISO's
+revision. `newer` is null when the tip is the ISO's revision or older. `version` is the tip's
+`release/version`, or its first 12 hex digits if it has none; `date` is the commit time (Unix
+seconds). One object on stdout, exit 0. On failure, one error line in the progress format
+(`{"phase":"check","stage":"check","level":"error","code":...,"message":...}`) and exit 1
+(`repo-unreachable`, `timeout`, `channel-missing`, `unsigned`, `unknown-signer`,
+`not-fast-forward`) or 2 (`channel-invalid`, `iso-rev-unknown`: an ISO built from a dirty tree).
+No root needed. Every git step has a time limit and the steps that talk to the repo stop after 2
+minutes together (`timeout`): the check takes a few seconds normally and never much over 2 minutes.
+
+A plan with that `rev` installs it: validation needs the network (`rev-needs-network`) and checks
+the channel again (`rev-not-tip` if the tip has moved on, the codes above if it does not
+verify; exit 2); then, before the disk is touched, the `fetch` stage downloads the revision, locks
+the device flake to it (`nix flake lock --override-input hinteros
+git+<repo>?ref=<channel>&rev=<rev>`, as hinteros-system and `hinteros-bootstrap-channel` do) and
+reads its catalog (`fetch-failed`, exit 1). The system and apps stages build from that lock, so
+the apps are that revision's: a picked app it no longer offers, or whose vendor terms changed, is
+an `app-failed` warning (the Store asks again later). There is no offline fallback: if the system
+stage fails (also after one retry without the hardware report) the run exits 1, and the UI offers
+to try again or to go back to the ISO's version. Tested by `install-newer` (a local channel repo
+with throwaway keys; `HINTEROS_INSTALL_ONLINE_PROBE` stands in for the network).
 
 ### Offline installs
 

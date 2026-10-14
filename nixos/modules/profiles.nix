@@ -253,10 +253,15 @@ in
         '';
 
         # Devices follow the active session: logind moves the ACLs at every switch. DRM and
-        # joysticks are uaccess in systemd's own rules; uinput is not.
-        services.udev.extraRules = ''
-          KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
-        '';
+        # joysticks are uaccess in systemd's own rules; uinput is not. The tag must be set before
+        # systemd's 71-seat.rules and 73-seat-late.rules (which run the `uaccess` builtin for tagged
+        # devices), so not in extraRules (99-local.rules): there it came too late and /dev/uinput
+        # never got an ACL (VM profiles-switch).
+        services.udev.packages = [
+          (pkgs.writeTextDir "lib/udev/rules.d/70-hinteros-uinput.rules" ''
+            KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+          '')
+        ];
 
         # The greeter reads the public view the service writes at start; the console font is set
         # before the first splash (no vconsole setup on tty1 while it paints).

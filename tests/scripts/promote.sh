@@ -171,7 +171,7 @@ pass "--bump on beta: refused"
 expect_ok beta --bootstrap --key "$work/k1" --dry-run
 [ -z "$(remote beta)" ] || die "dry run created beta"
 grep -q "would run: git push" "$work/out" || die "dry run did not show the push"
-grep -q "HinterOS 0.6.0 beta" "$work/out" || die "dry run did not show the message"
+grep -q "HinterOS 0.6.1 beta" "$work/out" || die "dry run did not show the message"
 pass "dry run: shows the commit and the push, creates nothing"
 
 expect_refused "is not in the allowed signers" beta --bootstrap --key "$work/bad" --security none
@@ -188,12 +188,12 @@ beta1=$(remote beta)
 [ -n "$beta1" ] || die "no beta after bootstrap"
 [ "$(o rev-parse "$beta1^{tree}")" = "$(dev rev-parse "$main1^{tree}")" ] || die "bootstrap tree differs from main"
 [ "$(o rev-list --parents -n1 "$beta1")" = "$beta1 $main1" ] || die "bootstrap parents are not just main"
-[ "$(o log -1 --format=%s "$beta1")" = "HinterOS 0.6.0 beta" ] || die "bad subject"
+[ "$(o log -1 --format=%s "$beta1")" = "HinterOS 0.6.1 beta" ] || die "bad subject"
 o log -1 --format=%B "$beta1" | grep -q "Everything so far" || die "notes not in the message"
 ! o log -1 --format=%B "$beta1" | grep -q "^Security:" || die "Security: none must add no trailer"
-grep -q "beta is HinterOS 0.6.0.${beta1:0:7} beta" "$work/out" || die "the beta's name is not shown"
+grep -q "beta is HinterOS 0.6.1.${beta1:0:7} beta" "$work/out" || die "the beta's name is not shown"
 box_verifies "$beta1" "$beta1" || die "bootstrap commit does not verify against its own signers"
-pass "bootstrap: 'HinterOS 0.6.0 beta', tree = main, parent = main, shown as 0.6.0.<hash> beta, verifies"
+pass "bootstrap: 'HinterOS 0.6.1 beta', tree = main, parent = main, shown as 0.6.1.<hash> beta, verifies"
 
 expect_refused "already exists" beta --bootstrap --key "$work/k1" --security none
 pass "--bootstrap when beta exists: refused"
@@ -214,7 +214,7 @@ grep -q "nixpkgs: 111111111111 -> 222222222222" "$work/out" || die "nixpkgs chan
 grep -q "Fix a browser hole" "$work/out" || die "the commits are not listed"
 [ "$(o rev-list --parents -n1 "$beta2")" = "$beta2 $beta1 $main2" ] || die "parents are not beta, main"
 [ "$(o rev-parse "$beta2^{tree}")" = "$(dev rev-parse "$main2^{tree}")" ] || die "tree differs from main"
-[ "$(o log -1 --format=%s "$beta2")" = "HinterOS 0.6.0 beta" ] || die "the second beta has another version"
+[ "$(o log -1 --format=%s "$beta2")" = "HinterOS 0.6.1 beta" ] || die "the second beta has another version"
 o log -1 --format=%B "$beta2" | grep -qx "Security: medium" || die "no Security trailer"
 box_verifies "$beta2" "$beta1" || die "beta does not verify against the old tip's signers"
 pass "second beta, same version: fast-forward, tree = main, parents beta+main, trailer, verifies"
@@ -283,9 +283,9 @@ main3=$(dev rev-parse HEAD)
 expect_ok beta --key "$work/k1" --security none --yes
 beta3=$(remote beta)
 o merge-base --is-ancestor "$stable1" "$beta3" || die "stable is not an ancestor of beta"
-[ "$(o log -1 --format=%s "$beta3")" = "HinterOS 0.6.0 beta" ] || die "beta 3 subject"
+[ "$(o log -1 --format=%s "$beta3")" = "HinterOS 0.6.1 beta" ] || die "beta 3 subject"
 [ "$(o rev-parse "$beta3^{tree}")" = "$(dev rev-parse "$main3^{tree}")" ] || die "tree differs"
-pass "after merging stable into main: beta 0.6.0.<hash>, stable is an ancestor"
+pass "after merging stable into main: beta 0.6.1.<hash>, stable is an ancestor"
 
 expect_refused "is already on stable" stable --bump keep --yes --key "$work/k1"
 pass "--bump keep after the first stable: refused"
@@ -294,9 +294,9 @@ pass "the same version again: refused"
 expect_ok stable --dry-run --key "$work/k1"
 grep -q "1) patch  0.6.1" "$work/out" || die "the menu does not offer patch first"
 ! grep -q "keep" "$work/out" || die "the menu offers keep after the first stable"
-grep -q "using 0.7.0" "$work/out" || die "the dry run does not default to minor"
+grep -q "using 0.6.1" "$work/out" || die "the dry run does not default to patch"
 grep -q "After 0.6.0" "$work/out" || die "the changes since stable are not listed"
-pass "dry run after the first stable: patch/minor/major/other, minor by default"
+pass "dry run after the first stable: patch/minor/major/other, patch by default"
 expect_ok stable --bump minor --yes --key "$work/k1"
 stable2=$(remote stable)
 [ "$(o rev-list --parents -n1 "$stable2")" = "$stable2 $beta3" ] || die "stable 0.7.0's parent"
@@ -354,10 +354,10 @@ main4=$(dev rev-parse HEAD)
 expect_ok beta --key "$work/k1" --security none --yes
 beta4=$(remote beta)
 [ "$(o rev-parse "$beta4^{tree}")" = "$(dev rev-parse "$main4^{tree}")" ] || die "tree differs"
-[ "$(o log -1 --format=%s "$beta4")" = "HinterOS 0.7.1 beta" ] || die "beta after the hotfix"
+[ "$(o log -1 --format=%s "$beta4")" = "HinterOS 0.7.2 beta" ] || die "beta after the hotfix"
 o merge-base --is-ancestor "$stable3" "$beta4" || die "stable is not an ancestor of beta"
-box_verifies "$beta4" "$beta3" || die "beta 0.7.1.<hash> does not verify"
-pass "after merging stable into main: beta 0.7.1.<hash>, stable is an ancestor again"
+box_verifies "$beta4" "$beta3" || die "beta 0.7.2.<hash> does not verify"
+pass "after merging stable into main: beta 0.7.2.<hash>, stable is an ancestor again"
 
 # --- the menus (no mode given), on a terminal ----------------------------------------------
 # A fresh remote. `script` gives promote a terminal; the answers are typed in advance.
@@ -418,9 +418,9 @@ mbeta=$(mo rev-parse -q --verify refs/heads/beta) || {
   cat "$work/out"
   die "the menus did not release beta"
 }
-[ "$(mo log -1 --format=%s "$mbeta")" = "HinterOS 0.7.0 beta" ] || die "menus: beta subject"
+[ "$(mo log -1 --format=%s "$mbeta")" = "HinterOS 0.7.1 beta" ] || die "menus: beta subject"
 grep -q "This release makes it" "$work/out" || die "menus: the first beta was not explained"
-grep -q "beta is HinterOS 0.7.0.${mbeta:0:7} beta" "$work/out" || die "menus: the beta's name"
+grep -q "beta is HinterOS 0.7.1.${mbeta:0:7} beta" "$work/out" || die "menus: the beta's name"
 pass "menus: release main to beta, the first one started without --bootstrap"
 
 # 1 release beta to stable, 1 newest beta, 2 edit the notes then 1 use them, 1 keep 0.7.0,
@@ -468,7 +468,7 @@ lbeta=$(git -C "$work/l" -c gpg.format=ssh -c user.signingkey="$work/k1" \
   commit-tree -S "$lmain^{tree}" -p "$lmain" -m "HinterOS 0.7.0" -m "- Profiles.")
 git -C "$work/l" push -q origin "$lbeta:refs/heads/beta" 2>/dev/null
 run_menus '1\n' --key "$work/k1"
-grep -q "1) HinterOS 0.7.0.${lbeta:0:7} beta" "$work/out" || {
+grep -q "1) HinterOS 0.7.1.${lbeta:0:7} beta" "$work/out" || {
   cat "$work/out"
   die "the menus do not offer the old-style beta release for stable"
 }
