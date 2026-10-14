@@ -1106,7 +1106,13 @@ build_env() {
     "(builtins.getFlake \"path:$cfg\").nixosConfigurations.hinteros.config.hinteros.appEnv.build (builtins.fromJSON ''$1'')"
   if [ "$NIX_RC" -eq 0 ]; then
     ENV_OUT=$(tail -n 1 "$NIXOUT")
-    [ -n "$ENV_OUT" ] && [ -e "$MNT$ENV_OUT/share/hinteros/apps.json" ] || NIX_RC=1
+    # Inside the target: the env is a tree of absolute /nix/store symlinks, which seen from the
+    # installer point into the installer's store. An env that is not on this medium (a newer
+    # revision's, whose manifest names another system_rev) is only in the target's store.
+    if [ -z "$ENV_OUT" ] || ! chroot "$MNT" "$base_system/sw/bin/test" -e "$ENV_OUT/share/hinteros/apps.json"; then
+      echo "the env built (${ENV_OUT:-no output}) has no share/hinteros/apps.json in the target" >>"$LOG"
+      NIX_RC=1
+    fi
   fi
   [ "$NIX_RC" -eq 0 ]
 }
