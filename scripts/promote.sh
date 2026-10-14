@@ -27,6 +27,14 @@
 # the way a box will and pushes the channel branch as a fast-forward. --dry-run does everything
 # except signing and pushing.
 #
+# The remote is not trusted for what is signed: whoever runs the Forgejo server can add or change
+# commits there and set CI green. So it must be started in the owner's checkout of the system repo:
+# the branch the target comes from (main, or the hotfix branch) must be the same commit locally and
+# on the remote, and the target must be on it; a beta release must verify against the release
+# signers before it goes to stable. Before signing it shows what changed since the channel's last
+# release: the commits, a diffstat and, for each flake input whose lock changed, the old and new
+# rev and (from a clone of that input next to this checkout, e.g. ../hinteros-daemon) its commits.
+#
 # Environment:
 #   HINTEROS_RELEASE_KEY   signing key file (default ~/.ssh/hinteros/release_ed25519)
 #   PROMOTE_REPO_URL       remote to fetch from and push to (default: `origin` of the current repo)
@@ -181,6 +189,16 @@ url=${PROMOTE_REPO_URL:-}
 if [ -z "$url" ]; then
   [ -n "$local_repo" ] || die "run inside a checkout of the system repo, or set PROMOTE_REPO_URL"
   url=$(git -C "$local_repo" remote get-url origin) || die "the current repo has no 'origin' remote"
+fi
+
+# Clones of the flake inputs next to the checkout (../hinteros-daemon etc.), also from a worktree.
+inputs_dir=
+if [ -n "$local_repo" ]; then
+  common=$(git -C "$local_repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=
+  case "$common" in
+    */.git) inputs_dir=$(dirname "$(dirname "$common")") ;;
+    *) inputs_dir=$(dirname "$local_repo") ;;
+  esac
 fi
 
 # Forgejo API from an https remote: https://host/<path>.git -> https://host/api/v1, <path>.
@@ -384,6 +402,36 @@ list_changes() {
   info "$n commit(s):"
   g log --no-merges --format='           %h %s' "$@" | { grep -v ' HinterOS [0-9]' || true; } | head -40 || true
   [ "$n" -le 40 ] || info "... and $((n - 40)) more"
+}
+
+# The files changed between two commits, at most 40 lines.
+diff_stat() {
+  info "diffstat ${1:0:12}..${2:0:12}:"
+  g diff --stat=100 --stat-count=40 "$1" "$2" | sed 's/^/          /'
+}
+
+# The target must be on the promoter's own branch, which must be the remote's: the remote can
+# have commits that the promoter did not see (anyone with access to the Forgejo server can add
+# them and set CI green). local_check <branch> <target>
+local_check() {
+  local branch=$1 target=$2 mine theirs
+  step "Your checkout"
+  [ -n "$local_repo" ] || fail "run promote in your checkout of the system repo"
+  info "$local_repo"
+  mine=$(git -C "$local_repo" rev-parse -q --verify "refs/heads/$branch^{commit}") \
+    || fail "your checkout has no local $branch. Check it out, review it and run promote again."
+  theirs=$(tip "$branch")
+  if [ "$mine" != "$theirs" ]; then
+    info "your local $branch = $mine"
+    info "origin/$branch     = $theirs"
+    if git -C "$local_repo" merge-base --is-ancestor "$theirs" "$mine" 2>/dev/null; then
+      fail "your local $branch has commits that are not on origin/$branch. Push first."
+    fi
+    fail "origin/$branch is not your local $branch. Pull and review first."
+  fi
+  ok "origin/$branch = your local $branch ($mine)"
+  is_ancestor "$target" "$mine" || fail "${target:0:12} is not on your local $branch"
+  ok "${target:0:12} is on your local $branch"
 }
 
 # release/allowed_signers of a commit, in ssh-keygen's format with the namespace pinned to git,
@@ -673,19 +721,40 @@ notes_of() {
   ok "release notes: the '## $version' section ($(wc -l <"$tmp/notes.top") lines)"
 }
 
-# Component and nixpkgs revisions that change between two commits' flake.lock.
+# Component and nixpkgs revisions that change between two commits' flake.lock. For a changed
+# input with a clone next to the checkout ($inputs_dir/<input>), also its commits in between.
 lock_changes() {
-  local old=$1 new=$2
+  local old=$1 new=$2 k p r dir n
   g show "$new:flake.lock" >"$tmp/new.lock" 2>/dev/null || return 0
   if [ -n "$old" ] && g show "$old:flake.lock" >"$tmp/old.lock" 2>/dev/null; then :; else
     echo '{"nodes":{}}' >"$tmp/old.lock"
   fi
-  jq -r --slurpfile o "$tmp/old.lock" '
+  while IFS=$'\t' read -r k p r; do
+    if [ "$p" = "$r" ]; then
+      info "$k: ${r:0:12} (unchanged)"
+      continue
+    elif [ -z "$p" ]; then
+      info "$k: ${r:0:12}"
+      continue
+    fi
+    info "$k: ${p:0:12} -> ${r:0:12}"
+    dir=${inputs_dir:+$inputs_dir/$k}
+    if [ -z "$dir" ] || [ ! -e "$dir/.git" ]; then continue; fi
+    if ! git -C "$dir" cat-file -e "$r^{commit}" 2>/dev/null; then
+      warn "$k ${r:0:12} is not in $dir. Fetch it and review it."
+      continue
+    fi
+    if ! git -C "$dir" cat-file -e "$p^{commit}" 2>/dev/null; then
+      info "  ${p:0:12} is not in $dir"
+      continue
+    fi
+    git -C "$dir" merge-base --is-ancestor "$p" "$r" || warn "$k: ${r:0:12} does not contain ${p:0:12}"
+    n=$(git -C "$dir" rev-list --no-merges --count "$p..$r")
+    git -C "$dir" log --no-merges --format='           %h %s' "$p..$r" | head -20 || true
+    [ "$n" -le 20 ] || info "  ... and $((n - 20)) more in $dir"
+  done < <(jq -r --slurpfile o "$tmp/old.lock" '
     .nodes | to_entries[] | select(.value.locked.rev != null)
-    | .key as $k | .value.locked.rev as $r | ($o[0].nodes[$k].locked.rev // "") as $p
-    | if $p == $r then "  [info] \($k): \($r[0:12]) (unchanged)"
-      elif $p == "" then "  [info] \($k): \($r[0:12])"
-      else "  [info] \($k): \($p[0:12]) -> \($r[0:12])" end' "$tmp/new.lock"
+    | [.key, ($o[0].nodes[.key].locked.rev // ""), .value.locked.rev] | @tsv' "$tmp/new.lock")
 }
 
 # Writes the release commit message to $tmp/msg.
@@ -750,6 +819,8 @@ promote_beta() {
     ok "previous beta tip: $beta_tip"
   fi
 
+  local_check main "$target"
+
   ci_check "$target" "the main commit (unstable base)"
 
   step "Version"
@@ -785,6 +856,7 @@ promote_beta() {
   step "Changes"
   if [ -n "$beta_tip" ]; then
     list_changes "$beta_tip..$target"
+    diff_stat "$beta_tip" "$target"
     lock_changes "$beta_tip" "$target"
   else
     lock_changes "" "$target"
@@ -907,11 +979,23 @@ promote_stable() {
     warn "origin/stable does not exist. This release makes it."
   fi
 
+  # The remote can show any commit as beta: it must have a signature that a release key made.
+  step "Signature of the beta release"
+  if [ -n "$stable_tip" ]; then
+    info "release/allowed_signers of the current stable"
+    signers_of "$stable_tip" "$tmp/beta.signers"
+  else
+    info "there is no stable: release/allowed_signers of the beta release"
+    signers_of "$target" "$tmp/beta.signers"
+  fi
+  verify "$target" "$tmp/beta.signers"
+
   ci_check "$target" "the beta release (both bases)"
 
   step "Changes since the last stable release"
   if [ -n "$stable_tip" ]; then
     list_changes "$stable_tip..$target"
+    diff_stat "$stable_tip" "$target"
   else
     info "$(g rev-list --no-merges --count "$target") commit(s): all commits"
   fi
@@ -1016,10 +1100,13 @@ promote_hotfix() {
   [ "$target" != "$stable_tip" ] || fail "$hotfix_branch has no commits after stable"
   ok "starts from origin/stable $stable_tip ($(g rev-list --count "$stable_tip..$target") commit(s) after it)"
 
+  local_check "$hotfix_branch" "$target"
+
   ci_check "$target" "the hotfix (both bases)"
 
   step "Changes"
   list_changes "$stable_tip..$target"
+  diff_stat "$stable_tip" "$target"
   lock_changes "$stable_tip" "$target"
 
   step "Security"

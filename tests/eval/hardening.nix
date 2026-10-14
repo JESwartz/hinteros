@@ -262,6 +262,81 @@ let
         [ "hinteros-admin" ]
       ];
     };
+    # Port 22 only from the local networks, with the backend the box uses; never to all sources.
+    testSshFirewallLocalOnly = {
+      expr =
+        lib.all
+          (
+            cfg:
+            let
+              fw = cfg.networking.firewall;
+              rules = if cfg.networking.nftables.enable then fw.extraInputRules else fw.extraCommands;
+            in
+            !cfg.services.openssh.openFirewall
+            && !(lib.elem 22 fw.allowedTCPPorts)
+            && lib.all (n: lib.hasInfix n rules) [
+              "10.0.0.0/8"
+              "172.16.0.0/12"
+              "192.168.0.0/16"
+              "169.254.0.0/16"
+              "fc00::/7"
+              "fe80::/10"
+            ]
+            && !lib.hasInfix "0.0.0.0/0" rules
+            && !lib.hasInfix "::/0" rules
+          )
+          [
+            (mkS sshState [ adminOn ])
+            dev
+            devbox
+          ];
+      expected = true;
+    };
+    testSshFirewallIptablesRule = {
+      expr =
+        lib.hasInfix
+          "iptables -w -A nixos-fw -p tcp --dport 22 -s 192.168.0.0/16 -m comment --comment hinteros-ssh -j nixos-fw-accept"
+          (mkS sshState [ adminOn ]).networking.firewall.extraCommands;
+      expected = true;
+    };
+    testSshFirewallNftablesRule = {
+      expr =
+        lib.hasInfix "ip6 saddr { fc00::/7, fe80::/10 } tcp dport { 22 } accept"
+          (mkS sshState [
+            adminOn
+            { networking.nftables.enable = true; }
+          ]).networking.firewall.extraInputRules;
+      expected = true;
+    };
+    testSshFirewallNoRuleWhenOff = {
+      expr = lib.hasInfix "hinteros-ssh" (
+        c.networking.firewall.extraCommands + c.networking.firewall.extraInputRules
+      );
+      expected = false;
+    };
+    testSshAllowFromOverride = {
+      expr =
+        lib.hasInfix "-s 0.0.0.0/0 "
+          (mkS sshState [
+            adminOn
+            {
+              hinteros.ssh.allowFrom = [
+                "0.0.0.0/0"
+                "::/0"
+              ];
+            }
+          ]).networking.firewall.extraCommands;
+      expected = true;
+    };
+    testSshAllowFromBadFails = {
+      expr = failed (
+        mkS sshState [
+          adminOn
+          { hinteros.ssh.allowFrom = [ "10.0.0.0/8 -j ACCEPT; true" ]; }
+        ]
+      );
+      expected = true;
+    };
     testSshOffByDefault = {
       expr = c.services.openssh.enable;
       expected = false;

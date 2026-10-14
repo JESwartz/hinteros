@@ -48,7 +48,7 @@ let
           hostname = "livingroom";
           admin = {
             user = "james";
-            password = "hunter2";
+            password = "hunter22";
           };
           channel = "stable";
           apps = [ "youtube" ];

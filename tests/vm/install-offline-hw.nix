@@ -25,7 +25,7 @@ let
       hostname = "mini-pc-7";
       admin = {
         user = "james";
-        password = "hunter2";
+        password = "hunter22";
       };
       ssh.enable = true;
       channel = "stable";
