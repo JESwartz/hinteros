@@ -696,11 +696,14 @@ let
       expr = [
         (settings gs).gamescope.apps_display
         ((settings cage).gamescope.apps_display or "unset")
-        (lib.all (p: lib.elem p (map baseNameOf (gs.config.hinteros.session.gamescope.package.patches or [ ]))) [
-          "xwayland-no-abstract-socket.patch"
-          "xwayland-size-all.patch"
-          "xwayland-apps-no-input-emulation.patch"
-        ])
+        (lib.all
+          (p: lib.elem p (map baseNameOf (gs.config.hinteros.session.gamescope.package.patches or [ ])))
+          [
+            "xwayland-no-abstract-socket.patch"
+            "xwayland-size-all.patch"
+            "xwayland-apps-no-input-emulation.patch"
+          ]
+        )
       ];
       expected = [
         "auto+2"
