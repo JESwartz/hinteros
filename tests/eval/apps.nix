@@ -369,6 +369,11 @@ let
         plex = (entry plex "plex-htpc").permissions;
         enable = (settings base).sandbox.enable;
         bwrap = lib.hasSuffix "/bin/bwrap" (settings base).sandbox.bwrap;
+        # Apps play through the play-only socket; `mic` gets the full one.
+        pulse = {
+          inherit ((settings base).sandbox) pulse_socket pulse_record_socket;
+          unit = base.config.systemd.user.services ? hinteros-pulse-play;
+        };
         off =
           (settings (mk {
             hinteros.sandbox.enable = false;
@@ -388,6 +393,11 @@ let
         plex.gamepad = "required";
         enable = true;
         bwrap = true;
+        pulse = {
+          pulse_socket = "pulse/play";
+          pulse_record_socket = "pulse/native";
+          unit = true;
+        };
         off = false;
         protectTunables = false;
       };

@@ -110,6 +110,37 @@ let
   # lower-numbered rules file that returns NO.
   greeterOn = config.hinteros.profiles.greeter.enable or false;
   keyboardHome = cfg.input.keyboardHome;
+
+  # The play-only sound socket for sandboxed apps (design/sandbox.md, `mic`): a second
+  # pipewire-pulse at $XDG_RUNTIME_DIR/pulse/play that refuses every record stream (the rule
+  # matches every client: a client can set any property it likes, but not remove one), module
+  # loading (a module could open a new, unrestricted socket) and source volume. Apps with `mic`
+  # get the full pulse/native. No WirePlumber rule: the restriction is in this server alone.
+  playPulse = config.hinteros.sandbox.enable && config.services.pipewire.pulse.enable;
+  playPulseConf = pkgs.writeText "pipewire-pulse-play.conf" ''
+    context.properties = { }
+    context.spa-libs = {
+      audio.convert.* = audioconvert/libspa-audioconvert
+      support.*       = support/libspa-support
+    }
+    context.modules = [
+      { name = libpipewire-module-rt args = { nice.level = -11 rtportal.enabled = false } flags = [ ifexists nofail ] }
+      { name = libpipewire-module-protocol-native }
+      { name = libpipewire-module-client-node }
+      { name = libpipewire-module-adapter }
+      { name = libpipewire-module-metadata }
+      { name = libpipewire-module-protocol-pulse }
+    ]
+    pulse.properties = {
+      server.address = [ "unix:play" ]
+      server.dbus-name = ""
+      pulse.allow-module-loading = false
+    }
+    pulse.rules = [
+      { matches = [ { pulse.server.type = "~.*" } { pulse.server.type = null } ]
+        actions = { quirks = [ block-record-stream block-source-volume ] } }
+    ]
+  '';
   polkitRules = ''
     polkit.addRule(function (action, subject) {
       if (action.id.indexOf("org.hinteros.system.") === 0 &&
@@ -376,6 +407,10 @@ in
       sandbox = {
         enable = lib.mkDefault config.hinteros.sandbox.enable;
         bwrap = lib.mkDefault (lib.getExe pkgs.bubblewrap);
+      }
+      // lib.optionalAttrs playPulse {
+        pulse_socket = lib.mkDefault "pulse/play";
+        pulse_record_socket = lib.mkDefault "pulse/native";
       };
       # Runtime settings (API 0.7): the audio client is pactl (PipeWire's PulseAudio server finds
       # its socket through XDG_RUNTIME_DIR, which the user manager sets). An absolute path: the
@@ -616,9 +651,25 @@ in
       # on screen (the hinteros group). The greeter runs its own instance (session.nix).
       # It is wanted by default.target, which the user manager reaches at autologin, i.e. at
       # the same time as the compositor and home app start.
+      user.services.hinteros-pulse-play = lib.mkIf playPulse {
+        description = "HinterOS: play-only PulseAudio socket for apps";
+        wantedBy = [ "default.target" ];
+        unitConfig.ConditionGroup = cfg.group;
+        requires = [ "pipewire.socket" ];
+        after = [ "pipewire.service" ];
+        serviceConfig = {
+          ExecStart = "${lib.getExe' config.services.pipewire.package "pipewire"} -c ${playPulseConf}";
+          Restart = "on-failure";
+          RestartSec = 1;
+        };
+      };
+
       user.services.hinteros-session = {
         description = "HinterOS session daemon";
         wantedBy = [ "default.target" ];
+        # The play-only sound socket is there before the first app starts.
+        wants = lib.optional playPulse "hinteros-pulse-play.service";
+        after = lib.optional playPulse "hinteros-pulse-play.service";
         unitConfig.ConditionGroup = cfg.group;
         environment = {
           RUST_LOG = cfg.logLevel;
