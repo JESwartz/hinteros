@@ -88,6 +88,12 @@ profiles.mkTest {
         machine.succeed(f"runuser -u hinteros -- sh -c 'echo {command} > {path}.cmd'")
         machine.wait_until_fails(f"test -e {path}.cmd", timeout=30)
 
+    def lan_filter(owner, gone):
+        # design/sandbox.md `lan`: the table filters the nolan cgroup of the profile in front only
+        # (the other's session ended, and its daemon cleared its own).
+        machine.wait_until_succeeds(f"${pkgs.nftables}/bin/nft list table inet hinteros_lan | grep -q 'comment \"uid {uid(owner)}\"'", timeout=60)
+        machine.wait_until_fails(f"${pkgs.nftables}/bin/nft list table inet hinteros_lan | grep -q 'comment \"uid {uid(gone)}\"'", timeout=60)
+
     def wait_blocked(path, n):
         for _ in range(90):
             if len(events(path, "switch_blocked")) >= n:
@@ -105,6 +111,7 @@ profiles.mkTest {
                 break
             machine.sleep(1)
         assert "moonlight" in [a["id"] for a in sess_ok("hinteros", "apps.list")["apps"]]
+        lan_filter("hinteros", "hinteros-p2")
 
     with subtest("p1 leaves processes the session daemon never started"):
         u1 = uid("hinteros")
@@ -181,6 +188,7 @@ profiles.mkTest {
         assert cur["id"] == "p2" and cur["locked"] and not cur["admin"], cur
         # The token was used up.
         machine.fail("test -e /run/hinteros/switch.json")
+        lan_filter("hinteros-p2", "hinteros")
 
     with subtest("devices follow the active session; no static device groups"):
         # Keyboards never: no profile has an ACL on one or can read it (a game could log the admin
@@ -236,6 +244,7 @@ profiles.mkTest {
         machine.fail("systemctl is-active p2-system.service")
         acl = machine.succeed("getfacl -p /dev/uinput")
         assert "user:hinteros:" in acl and "user:hinteros-p2:" not in acl, acl
+        lan_filter("hinteros", "hinteros-p2")
         assert machine.succeed("cat /proc/sys/kernel/random/boot_id").strip() == boot_id
   '';
 }

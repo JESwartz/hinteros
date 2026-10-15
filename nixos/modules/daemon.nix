@@ -117,6 +117,14 @@ let
   # loading (a module could open a new, unrestricted socket) and source volume. Apps with `mic`
   # get the full pulse/native. No WirePlumber rule: the restriction is in this server alone.
   playPulse = config.hinteros.sandbox.enable && config.services.pipewire.pulse.enable;
+
+  # `lan` (design/sandbox.md): apps without it start in the session daemon's `nolan` cgroup
+  # (Delegate=yes), which hinteros-lan-filter.service keeps off the local network with an
+  # nftables table of its own (`inet hinteros_lan`, `socket cgroupv2`), on whatever firewall
+  # backend. hinteros-system (no CAP_NET_ADMIN, no netlink) only writes the cgroups to
+  # /run/hinteros/lan-filter.json and restarts the unit.
+  lanFilter = config.hinteros.sandbox.enable && config.hinteros.sandbox.lan.enable;
+  lanFilterCmd = "${lib.getExe cfg.system.package} lan-filter-apply --nft ${lib.getExe pkgs.nftables}";
   playPulseConf = pkgs.writeText "pipewire-pulse-play.conf" ''
     context.properties = { }
     context.spa-libs = {
@@ -226,6 +234,19 @@ in
         design/sandbox.md): every app with `sandbox = true` (all catalog apps but Steam) gets
         its own home and sees none of the HinterOS sockets, the D-Bus buses, uinput or the real
         home. Off: apps run as the profile user, as before.
+      '';
+    };
+
+    sandbox.lan.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Enforce the `lan` app permission (design/sandbox.md): a sandboxed app without it cannot
+        reach the local network (private, link-local, loopback, multicast and on-link addresses,
+        this box's own services), only DNS to the box's nameservers and the internet. The session
+        daemon's user unit gets `Delegate=yes`; `hinteros-lan-filter.service` loads the nftables
+        table `inet hinteros_lan`. Off: `lan` is not listed and every app reaches the network.
+        Needs `hinteros.sandbox.enable`.
       '';
     };
 
@@ -412,6 +433,7 @@ in
       sandbox = {
         enable = lib.mkDefault config.hinteros.sandbox.enable;
         bwrap = lib.mkDefault (lib.getExe pkgs.bubblewrap);
+        lan_filter = lib.mkDefault lanFilter;
       }
       // lib.optionalAttrs playPulse {
         pulse_socket = lib.mkDefault "pulse/play";
@@ -441,6 +463,22 @@ in
     ];
 
     security.polkit.enable = true;
+    # The on-link networks are part of the local network (a home network on public addresses,
+    # the ISP's IPv6 prefix): load the table again when NetworkManager changes a connection.
+    networking.networkmanager.dispatcherScripts =
+      lib.mkIf (lanFilter && config.networking.networkmanager.enable)
+        [
+          {
+            type = "basic";
+            source = pkgs.writeShellScript "hinteros-lan-filter-hook" ''
+              case "$2" in
+                up | down | dhcp4-change | dhcp6-change | connectivity-change)
+                  exec ${config.systemd.package}/bin/systemctl --no-block start hinteros-lan-filter.service
+                  ;;
+              esac
+            '';
+          }
+        ];
     environment = {
       # sw/bin/hinteros-session and sw/bin/hinteros-system (hinteros-system compares them across
       # generations for session_restart_required), plus the per-generation files and polkit actions.
@@ -513,6 +551,48 @@ in
         };
       };
 
+      # `lan` (design/sandbox.md): loads the nftables table `inet hinteros_lan` for the cgroups in
+      # /run/hinteros/lan-filter.json (hinteros-system restarts it over D-Bus on lan_filter.*;
+      # the path unit and NetworkManager's hook when the nameservers or the network change). One
+      # nft transaction: when it fails the old table stays. The only HinterOS unit with
+      # CAP_NET_ADMIN; it needs the host's network namespace (no PrivateNetwork).
+      hinteros-lan-filter = lib.mkIf lanFilter {
+        description = "HinterOS: keep apps without lan off the local network";
+        after = [
+          "nftables.service"
+          "firewall.service"
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = lanFilterCmd;
+          User = "root";
+          CapabilityBoundingSet = [ "CAP_NET_ADMIN" ];
+          RestrictAddressFamilies = [
+            "AF_NETLINK"
+            "AF_UNIX"
+          ];
+          ProtectSystem = "strict";
+          ProtectHome = true;
+          PrivateTmp = true;
+          NoNewPrivileges = true;
+          # nft's expressions (socket, fib, reject) still load their modules on first use.
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectKernelLogs = true;
+          ProtectControlGroups = true;
+          ProtectClock = true;
+          ProtectHostname = true;
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          SystemCallArchitectures = "native";
+          SystemCallFilter = [ "@system-service" ];
+          UMask = "0077";
+        };
+      };
+
       # Ctrl+Super+D (`input.keyboardHome`): the only reader of keyboards on the box. A profile
       # account never gets keyboard access (no uaccess rule, no group `input`): a game could log
       # the admin password typed into the launcher's prompt or on the admin console. Each press
@@ -571,6 +651,13 @@ in
     };
 
     systemd = {
+      # The nameservers DNS may go to come from /etc/resolv.conf: load the table again when it
+      # changes (no cgroup filtered: the unit removes the table, which costs nothing).
+      paths.hinteros-lan-filter = lib.mkIf lanFilter {
+        wantedBy = [ "multi-user.target" ];
+        pathConfig.PathModified = "/etc/resolv.conf";
+      };
+
       services.hinteros-system = {
         description = "HinterOS system service";
         wantedBy = [ "multi-user.target" ];
@@ -580,7 +667,8 @@ in
           # picker, another session) is frozen until it is again (hinteros-system's freeze.rs):
           # device fds it opened before a switch (/dev/uinput) stay open, and must not reach the
           # admin console.
-          ExecStart = "${lib.getExe cfg.system.package} --freeze-inactive";
+          ExecStart =
+            "${lib.getExe cfg.system.package} --freeze-inactive" + lib.optionalString lanFilter " --lan-filter";
           # Root, because it starts the jobs that rebuild the system. The socket is created in the
           # runtime directory, owned by root:hinteros, mode 0660.
           User = "root";
@@ -709,7 +797,11 @@ in
           ProtectKernelModules = true;
           # No ProtectKernelTunables: with /proc/sys read-only bind-mounted over, bwrap cannot
           # mount a new /proc for the app sandbox. bwrap makes /proc/sys read-only inside it.
-          ProtectControlGroups = true;
+          # `lan`: the daemon owns its cgroup subtree (its leaf `daemon`, `nolan` for apps without
+          # lan), so /sys/fs/cgroup stays writable for it. The profile user can write its own
+          # user@<uid>.service subtree from any other process anyway.
+          ProtectControlGroups = !lanFilter;
+          Delegate = lanFilter;
           RestrictRealtime = true;
           LockPersonality = true;
         };
