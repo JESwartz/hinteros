@@ -163,7 +163,10 @@ packages from the ISO (offline) or downloads them (online) into the target, `"<d
 packages"` (or `"Nothing to copy"` / `"Nothing to download"`); `build` builds what is not prebuilt,
 `"Building <name> (<i> of <n>)"` or `"<done> of <n> built"` (`"Nothing to build"`), and these
 lines also carry `build` (the name of the newest running build, without hash and version; absent
-when none runs), `build_index` (1-based) and `build_total`; `bootloader` runs
+when none runs), `build_index` (1-based), `build_total` and, with `build`, `build_percent` (how far
+that build is, 0..99, from its stdenv phase as in hinteros-system's `nixlog.rs`; absent before its
+first standard phase and for builders without phases), and `step_percent` counts the running
+builds by their phase too; `bootloader` runs
 `nixos-install --system` with the built system (the system profile and the boot loader) and ends
 with `"System installed, boot loader written"`. A retry (`warn`, code `system-retry` or
 `bootloader-retry`) starts again from `packages`. `level` is `info`, `warn` or `error`. An `error` line also has a `code`
