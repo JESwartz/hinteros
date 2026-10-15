@@ -1,13 +1,17 @@
 # The `lan` permission (design/sandbox.md): a sandboxed app without it reaches neither the home
 # network nor this box's own services, only DNS and the internet. Three nodes:
 #   - router: the home router (192.168.1.3, 2001:db8:1::3), the box's gateway and nameserver
-#     (dnsmasq: inet.test is 203.0.113.2), with a web server on 8080, forwarding to ...
+#     (dnsmasq: inet.test is 203.0.113.2), with a web server on 8080, forwarding to ... It also
+#     answers on a benchmarking address (198.18.0.1) and on two NAT64 addresses (well-known
+#     prefix): its own (64:ff9b::192.168.1.3) and the internet's (64:ff9b::203.0.113.2), all
+#     routed through it, not on-link.
 #   - inet: "the internet" (203.0.113.2, a documentation address behind the router), web server
 #     on 8080.
 #   - machine: the box, with a "Jellyfin server" on 127.0.0.1:8096 and [::1]:8096.
 # A probe app records from inside its sandbox what it reaches. Without `lan`: no TCP to the
-# router (IPv4, its on-link IPv6 address, its link-local address) or to loopback, no UDP to the
-# router, to multicast or to broadcast; DNS to the router (UDP and TCP) and the internet work.
+# router (IPv4, its on-link IPv6 address, its link-local address, 198.18.0.1, its NAT64 address)
+# or to loopback, no UDP to the router, to multicast or to broadcast; DNS to the router (UDP and
+# TCP), the internet and NAT64 to the internet work.
 # With `lan` everything works; denying it (apps.set_permission) applies at the next start.
 # The filter survives a session daemon restart (a new cgroup) and fails closed: without the
 # system service no app without `lan` starts, an app with it does; it starts once the service is
@@ -54,6 +58,9 @@ let
         check dns_tcp dns +tcp
         check inet_http get http://203.0.113.2:8080/
         check inet_name get http://inet.test:8080/
+        check bench_http get http://198.18.0.1:8080/
+        check nat64_lan_http get "http://[64:ff9b::c0a8:103]:8080/"
+        check nat64_inet_http get "http://[64:ff9b::cb00:7102]:8080/"
       } > "$HOME/probe.tmp"
       mv "$HOME/probe.tmp" "$HOME/probe.txt"
       exec sleep infinity
@@ -77,6 +84,23 @@ in
       ];
       networking = {
         firewall.enable = false;
+        # Routed to it by the box (special-purpose ranges, not on-link).
+        interfaces.eth1.ipv4.addresses = [
+          {
+            address = "198.18.0.1";
+            prefixLength = 32;
+          }
+        ];
+        interfaces.eth1.ipv6.addresses = [
+          {
+            address = "64:ff9b::c0a8:103";
+            prefixLength = 128;
+          }
+          {
+            address = "64:ff9b::cb00:7102";
+            prefixLength = 128;
+          }
+        ];
         interfaces.eth2.ipv4.addresses = pkgs.lib.mkForce [
           {
             address = "203.0.113.1";
@@ -131,6 +155,20 @@ in
       networking = {
         defaultGateway = "192.168.1.3";
         nameservers = [ "192.168.1.3" ];
+        interfaces.eth1.ipv4.routes = [
+          {
+            address = "198.18.0.0";
+            prefixLength = 15;
+            via = "192.168.1.3";
+          }
+        ];
+        interfaces.eth1.ipv6.routes = [
+          {
+            address = "64:ff9b::";
+            prefixLength = 96;
+            via = "2001:db8:1::3";
+          }
+        ];
       };
 
       # "Jellyfin" on this box: loopback only.
@@ -197,6 +235,9 @@ in
     ).strip()
     machine.wait_until_succeeds(f"curl -sf -m 5 -o /dev/null 'http://[{router_ll}%eth1]:8080/'")
     machine.wait_until_succeeds("curl -sf -m 5 -o /dev/null 'http://[2001:db8:1::3]:8080/'")
+    machine.wait_until_succeeds("curl -sf -m 5 -o /dev/null http://198.18.0.1:8080/")
+    machine.wait_until_succeeds("curl -sf -m 5 -o /dev/null 'http://[64:ff9b::c0a8:103]:8080/'")
+    machine.wait_until_succeeds("curl -sf -m 5 -o /dev/null 'http://[64:ff9b::cb00:7102]:8080/'")
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
@@ -238,8 +279,9 @@ in
         res["cgroup"] = cg
         return res
 
-    local = ["lan_http", "lan6_http", "ll6_http", "loop_http", "loop6_http", "udp_lan", "mcast", "bcast"]
-    open_ = ["dns", "dns_tcp", "inet_http", "inet_name"]
+    local = ["lan_http", "lan6_http", "ll6_http", "loop_http", "loop6_http", "udp_lan", "mcast", "bcast",
+             "bench_http", "nat64_lan_http"]
+    open_ = ["dns", "dns_tcp", "inet_http", "inet_name", "nat64_inet_http"]
 
     def expect(res, lan):
         assert res["cgroup"].endswith("/hinteros-session.service/daemon" if lan else "/hinteros-session.service/nolan"), res
@@ -262,6 +304,11 @@ in
         assert f'"user.slice/user-{uid}.slice/user@{uid}.service/app.slice/hinteros-session.service/nolan"' in t, t
         assert "192.168.1.3" in t, t  # the nameserver
         assert "2001:db8:1::/64" in t, t  # on-link
+        # Special-purpose ranges, NAT64 of local networks (not of the internet).
+        for net in ["0.0.0.0/8", "198.18.0.0/15", "240.0.0.0/4", "64:ff9b:1::/48", "64:ff9b::c0a8:0/112"]:
+            assert net in t, (net, t)
+        assert "64:ff9b::/96" not in t, t
+        assert "198.18.0.0/15" not in machine.succeed("ip -4 route show proto kernel"), "198.18/15 must not be on-link here"
         state = json.loads(machine.succeed("cat /run/hinteros/lan-filter.json"))
         assert state["cgroups"] == {uid: f"user.slice/user-{uid}.slice/user@{uid}.service/app.slice/hinteros-session.service/nolan"}, state
 
