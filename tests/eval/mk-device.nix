@@ -228,6 +228,7 @@ let
             "hinteros-firefox-kiosk"
           ]
         ) (map lib.getName c2.environment.systemPackages))
+        # The profile's app env is on no search path of the session (no wrapper; only the daemon reads it).
         (lib.hasInfix "hinteros-profile-env" c2.hinteros.session.command)
         (lib.hasInfix "hinteros-profile-env" c.hinteros.session.command)
         # Firefox policies stay box-wide.
@@ -243,7 +244,7 @@ let
         false
         [ ]
         [ ]
-        true
+        false
         false
         true
         false

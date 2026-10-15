@@ -96,6 +96,12 @@ rec {
           description = "https URL of the vendor's own logo, fetched by the daemon at runtime (session.toml `icon_url`).";
         };
 
+        iconSha256 = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Hex SHA-256 of the `iconUrl` file (the catalog's `icon.sha256`): the daemon refuses a download with another hash (session.toml `icon_sha256`).";
+        };
+
         siteUrl = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
@@ -207,6 +213,9 @@ rec {
     // lib.optionalAttrs (value.icon != null) { icon = toString value.icon; }
     // lib.optionalAttrs (value.desktopId != null) { desktop_id = value.desktopId; }
     // lib.optionalAttrs (value.iconUrl != null) { icon_url = value.iconUrl; }
+    // lib.optionalAttrs (value.iconUrl != null && value.iconSha256 != null) {
+      icon_sha256 = value.iconSha256;
+    }
     // lib.optionalAttrs (value.siteUrl != null) { site_url = value.siteUrl; }
     // lib.optionalAttrs value.firefoxProfile {
       firefox_profile = "~/.local/share/hinteros/firefox/${name}";
@@ -237,6 +246,7 @@ rec {
       listed = e.app != null;
       desktopId = e.icon.desktopId or null;
       iconUrl = e.icon.iconUrl or null;
+      iconSha256 = e.icon.sha256 or null;
       siteUrl = e.icon.siteUrl or null;
       firefoxProfile = e.icon.firefoxProfile or false;
       sandbox = e.sandbox or true;

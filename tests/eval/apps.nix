@@ -572,12 +572,16 @@ let
         (entry base "youtube").site_url
         (lib.hasPrefix "https://" (entry base "youtube").icon_url)
         (entry crunchy "crunchyroll" ? icon_url)
+        (builtins.match "[0-9a-f]{64}" (entry base "youtube").icon_sha256 != null)
+        (entry crunchy "crunchyroll" ? icon_sha256)
         (lib.any (a: a ? icon) (settings base).apps)
       ];
       expected = [
         "org.jellyfin.JellyfinDesktop"
         "~/.local/share/hinteros/firefox/youtube"
         "https://www.youtube.com"
+        true
+        false
         true
         false
         false
@@ -745,6 +749,31 @@ let
         false
         false
         true
+      ];
+    };
+    # gamescope's Vulkan loader: only the system's drivers and implicit layers (no profile, home
+    # or app env); a VM's VK_ICD_FILENAMES keeps its driver; cage gets nothing.
+    testGamescopeVulkanSearchPaths = {
+      expr = [
+        (lib.hasInfix "VK_IMPLICIT_LAYER_PATH=/run/opengl-driver/share/vulkan/implicit_layer.d:/run/opengl-driver-32/share/vulkan/implicit_layer.d'" (
+          sessionCmd gs
+        ))
+        (lib.hasInfix "VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d:/run/opengl-driver-32/share/vulkan/icd.d'" (
+          sessionCmd gs
+        ))
+        (lib.hasInfix "VK_DRIVER_FILES" (
+          sessionCmd (mk {
+            hinteros.session.compositor = "gamescope";
+            hinteros.session.environment.VK_ICD_FILENAMES = "/x.json";
+          })
+        ))
+        (lib.hasInfix "VK_" (sessionCmd cage))
+      ];
+      expected = [
+        true
+        true
+        false
+        false
       ];
     };
     # gamescope: apps on Xwayland sized to the output (README "Display size"), output logged.

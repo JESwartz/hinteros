@@ -144,17 +144,8 @@ let
     exec "$@"
   '';
 
-  # Per-profile apps (apps.md, "The session side"): the profile's app env on PATH and
-  # XDG_DATA_DIRS for the compositor and everything it starts (steam:// handlers, xdg-open).
-  # /run/hinteros/apps/<user> is a symlink chain that hinteros-system repoints, so later installs
-  # show up without a new session.
-  profileEnvWrapper = pkgs.writeShellScript "hinteros-profile-env" ''
-    link=/run/hinteros/apps/''${USER:-$(${pkgs.coreutils}/bin/id -un)}
-    export PATH="$link/bin''${PATH:+:$PATH}"
-    export XDG_DATA_DIRS="$link/share:''${XDG_DATA_DIRS:-/run/current-system/sw/share}"
-    exec "$@"
-  '';
-  perProfile = config.hinteros.appEnv.perProfile or false;
+  # The profile's app env (app-env.nix) is not on the session's PATH or XDG_DATA_DIRS: its
+  # packages are only trusted inside the app sandbox. The session daemon reads it by path.
   greeterOn = config.hinteros.profiles.greeter.enable or false;
 
   # A new session of the user (greetd restarted, the compositor crashed) may find the previous
@@ -165,6 +156,28 @@ let
     ${lib.getExe' config.systemd.package "systemctl"} --user --no-block try-restart hinteros-session.service || true
     exec "$@"
   '';
+
+  # gamescope's Vulkan loader (and its children's: the home app, Xwayland) reads only the
+  # system's drivers and implicit layers, in /run/opengl-driver(-32) (hardware.graphics; also
+  # where a gamescope WSI layer would be). Not $XDG_DATA_DIRS, $XDG_DATA_HOME or
+  # $XDG_CONFIG_DIRS, so no file in a home or a profile can put a library into the compositor.
+  # Apps and Steam (and its games) are the session daemon's children, not gamescope's: they keep
+  # the loader's defaults. A test VM that picks its driver with VK_ICD_FILENAMES (`environment`)
+  # keeps it.
+  vulkanEnvironment = lib.optionalAttrs (cfg.compositor == "gamescope") (
+    {
+      VK_IMPLICIT_LAYER_PATH = lib.concatStringsSep ":" [
+        "/run/opengl-driver/share/vulkan/implicit_layer.d"
+        "/run/opengl-driver-32/share/vulkan/implicit_layer.d"
+      ];
+    }
+    // lib.optionalAttrs (!(cfg.environment ? VK_ICD_FILENAMES)) {
+      VK_DRIVER_FILES = lib.concatStringsSep ":" [
+        "/run/opengl-driver/share/vulkan/icd.d"
+        "/run/opengl-driver-32/share/vulkan/icd.d"
+      ];
+    }
+  );
 
   # Nothing greetd runs may write to the VT: greetd connects a session's stdout/stderr to it, so a
   # log line would flash on the TV between two compositors (and scribble over the PAM splash).
@@ -179,15 +192,11 @@ let
     "hinteros-compositor"
     (lib.getExe' pkgs.coreutils "env")
   ]
-  ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment
+  ++ lib.mapAttrsToList (name: value: "${name}=${value}") (vulkanEnvironment // cfg.environment)
   ++ lib.optional (cfg.compositor == "gamescope") cfg.displayEnvWrapper;
 
   sessionCommand = lib.escapeShellArgs (
-    [ sessionStart ]
-    ++ compositorPrefix
-    ++ lib.optional perProfile profileEnvWrapper
-    ++ compositorCommand.${cfg.compositor}
-    ++ homeCommand
+    [ sessionStart ] ++ compositorPrefix ++ compositorCommand.${cfg.compositor} ++ homeCommand
   );
 
   # The greeter (profiles.md, "The pieces"). greetd runs `greeterLink` as `hinteros-greeter` at
