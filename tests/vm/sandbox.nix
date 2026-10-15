@@ -206,8 +206,8 @@ in
     blocked = ["keyctl_blocked", "add_key_blocked", "io_uring_blocked", "tiocsti_blocked",
                "tioclinux_blocked", "userfaultfd_blocked", "perf_blocked", "fsopen_blocked",
                "no_randomize_blocked", "x32_blocked", "i386_killed", "packet_blocked"]
-    works = ["x11", "pulse", "home_writable", "play", "render", "nested_bwrap", "userns",
-             "personality_query"] + blocked
+    # (No personality_query: the session unit's LockPersonality also refuses the query.)
+    works = ["x11", "pulse", "home_writable", "play", "render", "nested_bwrap", "userns"] + blocked
 
     def expect(res, **want):
         for k in hidden:
