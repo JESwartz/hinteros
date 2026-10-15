@@ -69,11 +69,11 @@ let
           throw "hinteros.appEnv.build: hinteros.forbidUnfree is set but the env needs unfree packages: ${lib.concatStringsSep ", " forbidden}"
         else
           envPkgsFor unfree;
-      # The box's inputs to apps (catalog.md, format 3). Steam is stock pkgs.steam (spike 8):
-      # its drivers come from /run/opengl-driver(-32) at run time.
+      # The box's inputs to apps (catalog.md, format 3). Steam is stock pkgs.steam (spike 8) with
+      # our sockets hidden (lib/steam.nix); its drivers come from /run/opengl-driver(-32) at run time.
       box = {
         firefoxKiosk = config.hinteros.firefoxKiosk.mkWrapper p;
-        inherit (p) steam;
+        steam = import ../lib/steam.nix p.steam;
       };
       apps =
         (lib.evalModules {

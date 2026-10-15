@@ -207,6 +207,7 @@
         sandbox-apps = import ./tests/vm/sandbox-apps.nix { inherit self pkgs; };
         sandbox-pad = import ./tests/vm/sandbox-pad.nix { inherit self pkgs; };
         sandbox-lan = import ./tests/vm/sandbox-lan.nix { inherit self pkgs; };
+        steam-sockets = import ./tests/vm/steam-sockets.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
         system-escalation = import ./tests/vm/system-escalation.nix { inherit self pkgs; };
         system-authz = import ./tests/vm/system-authz.nix { inherit self pkgs; };
