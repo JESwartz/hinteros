@@ -418,7 +418,7 @@ let
         of = c: {
           lan_filter = (settings c).sandbox.lan_filter;
           inherit ((user c)) Delegate ProtectControlGroups;
-          flag = ((units c).hinteros-system.environment.HINTEROS_LAN_FILTER or null) == "1";
+          flag = ((units c).hinteros-system.environment.HINTEROS_LAN_FILTER or null) == "true";
           unit = (units c) ? hinteros-lan-filter;
           path = c.config.systemd.paths ? hinteros-lan-filter;
         };

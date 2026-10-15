@@ -558,6 +558,9 @@ in
       # CAP_NET_ADMIN; it needs the host's network namespace (no PrivateNetwork).
       hinteros-lan-filter = lib.mkIf lanFilter {
         description = "HinterOS: keep apps without lan off the local network";
+        # resolvconf writes /etc/resolv.conf several times at boot: no start limit, else the path
+        # unit gives up and lan_filter.set fails until the limit passes.
+        startLimitIntervalSec = 0;
         after = [
           "nftables.service"
           "firewall.service"
@@ -666,7 +669,7 @@ in
         }
         # `lan_filter.*` (the local network filter). In the environment, so it stays when a test
         # replaces ExecStart.
-        // lib.optionalAttrs lanFilter { HINTEROS_LAN_FILTER = "1"; };
+        // lib.optionalAttrs lanFilter { HINTEROS_LAN_FILTER = "true"; };
         serviceConfig = {
           # --freeze-inactive: a profile whose session is not the active one (a text console, the
           # picker, another session) is frozen until it is again (hinteros-system's freeze.rs):
