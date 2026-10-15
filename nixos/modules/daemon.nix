@@ -661,14 +661,18 @@ in
       services.hinteros-system = {
         description = "HinterOS system service";
         wantedBy = [ "multi-user.target" ];
-        environment.RUST_LOG = cfg.logLevel;
+        environment = {
+          RUST_LOG = cfg.logLevel;
+        }
+        # `lan_filter.*` (the local network filter). In the environment, so it stays when a test
+        # replaces ExecStart.
+        // lib.optionalAttrs lanFilter { HINTEROS_LAN_FILTER = "1"; };
         serviceConfig = {
           # --freeze-inactive: a profile whose session is not the active one (a text console, the
           # picker, another session) is frozen until it is again (hinteros-system's freeze.rs):
           # device fds it opened before a switch (/dev/uinput) stay open, and must not reach the
           # admin console.
-          ExecStart =
-            "${lib.getExe cfg.system.package} --freeze-inactive" + lib.optionalString lanFilter " --lan-filter";
+          ExecStart = "${lib.getExe cfg.system.package} --freeze-inactive";
           # Root, because it starts the jobs that rebuild the system. The socket is created in the
           # runtime directory, owned by root:hinteros, mode 0660.
           User = "root";
