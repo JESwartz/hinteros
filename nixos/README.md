@@ -97,12 +97,13 @@ the middle of a correct 1920x1080 output. From the gamescope 3.16.31 source:
   that size never changes: a later `display.set_mode` or a TV switched on after boot leaves apps
   letterboxed or upscaled, and the `wl_output` the daemon reads as the "current mode" keeps the
   start size, so `display.set_mode` never saw its switch ("gamescope did not switch"). **Fix:**
-  `--xwayland-count 3`: gamescope then sizes Xwayland `:0` (home app, OSK, Steam) and its
+  `--xwayland-count` 2 + N (N app displays, below): gamescope then sizes Xwayland `:0` (home app, OSK, Steam) and its
   `wl_output` to the output at start and on every mode change, and keeps the nested aspect equal to
   the output's (`steamcompmgr.cpp`, `wlserver_set_xwayland_server_mode(0, ...)`). `:1`
   (`STEAM_GAME_DISPLAY_0`) keeps the nested size (Steam sizes it; our Steam is not given it, so its
-  games run on `:0` today). `:2` holds every app the daemon starts (`[gamescope] apps_display =
-  "auto+2"`); `xwayland-size-all.patch` makes it follow the output like `:0`. No `-W/-H/-w/-h` are
+  games run on `:0` today). `:2` and up are the app displays, one per app the daemon starts
+  (`[gamescope] apps_display = "auto+2"`); `xwayland-size-all.patch` makes them follow the output
+  like `:0`. No `-W/-H/-w/-h` are
   passed, so gamescope keeps choosing the mode (save file) and `display.set_mode` stays live.
 
 gamescope's and the home app's stdout/stderr are in the journal: `journalctl -t hinteros-compositor`
@@ -110,13 +111,25 @@ gamescope's and the home app's stdout/stderr are in the journal: `journalctl -t 
 `gamescope-size` test covers this (headless, so no live mode change; `gamescopectl screenshot`
 repaints at the nested size).
 
-Display split (app sandbox, `hinteros-docs/design/sandbox.md` step 3): a sandboxed app gets only
-`:2`'s socket file, so it cannot read or type into the home app (PIN entry) or the OSK on `:0`.
-Patches (`overlay.nix`): no Xwayland listens on an abstract socket `@/tmp/.X11-unix/X<n>` (else
-reachable from the sandbox, which shares the network namespace), and `:2` starts without
+Display split (app sandbox, `hinteros-docs/design/sandbox.md` step 3): each running app gets an
+app display of its own (`:2` and up; the daemon picks a free one, README "Own display" there),
+and in the sandbox only that socket file, so it cannot read or type into the home app (PIN
+entry), the OSK on `:0` or another app. Steam and its games use none. Patches (`overlay.nix`):
+no Xwayland listens on an abstract socket `@/tmp/.X11-unix/X<n>` (else reachable from the
+sandbox, which shares the network namespace), and every one from `#2` on starts without
 `LIBEI_SOCKET` (else an app's XTEST goes through gamescope to the focused window on any
-Xwayland). The `gamescope-sandbox` test covers this. gamescope still syncs the clipboard
-between its Xwaylands.
+Xwayland). gamescope still syncs the clipboard between its Xwaylands.
+
+How many app displays (N): the profile's setting (Settings, "Apps open at once", 1 to 8, session
+API `apps.displays.set`), one number in `$XDG_STATE_HOME/hinteros/app-displays`, else
+`hinteros.session.gamescope.appDisplays` (default 4). gamescope makes its Xwaylands at start
+only, so `hinteros-app-displays` (`session.nix`, in front of gamescope only, never the daemon)
+reads it at each session start, writes it to `$XDG_RUNTIME_DIR/hinteros/app-displays` for the
+daemon (this session's number; a daemon restart keeps it) and sets `--xwayland-count`. A change
+applies at the next session start (`session.restart`). With every app display in use the
+launcher asks which app to close; nothing closes on its own. The `gamescope-sandbox` test covers
+this (two apps on two displays, a full set, the setting across a restart) and prints the
+Xwaylands' memory.
 
 ## Device config, runtime settings and maintenance (M5/M6 groundwork)
 
