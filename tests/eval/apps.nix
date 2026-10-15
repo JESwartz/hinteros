@@ -384,13 +384,19 @@ let
       expected = {
         firefox = {
           sandbox = true;
-          permissions.downloads = "optional";
+          permissions = {
+            downloads = "optional";
+            lan = "optional";
+          };
         };
         youtube = {
           sandbox = true;
           hasPermissions = false;
         };
-        plex.gamepad = "required";
+        plex = {
+          gamepad = "required";
+          lan = "optional";
+        };
         enable = true;
         bwrap = true;
         pulse = {
@@ -402,6 +408,75 @@ let
         protectTunables = false;
       };
     };
+    # design/sandbox.md `lan`: the daemon owns its cgroup subtree, session.toml turns the filter
+    # on, hinteros-system takes lan_filter.* and the oneshot unit (the only one with
+    # CAP_NET_ADMIN) loads the table; the path unit follows /etc/resolv.conf. Off: none of it.
+    testLanFilter =
+      let
+        units = c: c.config.systemd.services;
+        user = c: c.config.systemd.user.services.hinteros-session.serviceConfig;
+        of = c: {
+          lan_filter = (settings c).sandbox.lan_filter;
+          inherit ((user c)) Delegate ProtectControlGroups;
+          flag = ((units c).hinteros-system.environment.HINTEROS_LAN_FILTER or null) == "true";
+          unit = (units c) ? hinteros-lan-filter;
+          path = c.config.systemd.paths ? hinteros-lan-filter;
+        };
+        on = units base;
+      in
+      {
+        expr = {
+          on = of base;
+          off = of (mk {
+            hinteros.sandbox.lan.enable = false;
+          });
+          noSandbox = of (mk {
+            hinteros.sandbox.enable = false;
+          });
+          caps = on.hinteros-lan-filter.serviceConfig.CapabilityBoundingSet;
+          families = on.hinteros-lan-filter.serviceConfig.RestrictAddressFamilies;
+          systemCaps = on.hinteros-system.serviceConfig.CapabilityBoundingSet;
+          systemFamilies = on.hinteros-system.serviceConfig.RestrictAddressFamilies;
+          exec = lib.hasInfix "lan-filter-apply --nft /nix/store/" on.hinteros-lan-filter.serviceConfig.ExecStart;
+          resolv = base.config.systemd.paths.hinteros-lan-filter.pathConfig.PathModified;
+        };
+        expected = {
+          on = {
+            lan_filter = true;
+            Delegate = true;
+            ProtectControlGroups = false;
+            flag = true;
+            unit = true;
+            path = true;
+          };
+          off = {
+            lan_filter = false;
+            Delegate = false;
+            ProtectControlGroups = true;
+            flag = false;
+            unit = false;
+            path = false;
+          };
+          noSandbox = {
+            lan_filter = false;
+            Delegate = false;
+            ProtectControlGroups = true;
+            flag = false;
+            unit = false;
+            path = false;
+          };
+          caps = [ "CAP_NET_ADMIN" ];
+          families = [
+            "AF_NETLINK"
+            "AF_UNIX"
+          ];
+          # hinteros-system itself still has no network and no CAP_NET_ADMIN.
+          systemCaps = [ "CAP_SYS_PTRACE" ];
+          systemFamilies = [ "AF_UNIX" ];
+          exec = true;
+          resolv = "/etc/resolv.conf";
+        };
+      };
     # Daemon README, "Pointer and on-screen keyboard": plain Firefox gets address_bar, kiosk apps do not.
     testAddressBar = {
       expr = [

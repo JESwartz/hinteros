@@ -256,7 +256,7 @@ rec {
     import json
     import time
 
-    ENV = "HINTEROS_SESSION_API=0.18 HINTEROS_SYSTEM_API=0.9 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=0.18 HINTEROS_SYSTEM_API=0.10 PYTHONPATH=/etc/hinteros-test"
 
     def env_path(key):
         """The store path of a prebuilt app env (mkTest `envs`)."""
