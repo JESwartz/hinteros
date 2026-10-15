@@ -53,12 +53,21 @@ let
       locale_ok() {
         test -z "$(locale 2>&1 >/dev/null)"
       }
+      render_nodes() {
+        local f out=""
+        for f in /dev/dri/renderD*; do
+          if [ -e "$f" ]; then out="$out''${f##*/},"; fi
+        done
+        echo "$out"
+      }
       {
         check tls curl -fsS https://${host}/
         check fonts fonts_ok
         check locale locale_ok
         check play play
-        check dri test -d /dev/dri
+        # The GPU: render nodes only (the VM may have none), never the display (card) nodes.
+        check dri_card sh -c 'ls /dev/dri/card*'
+        echo "dri_render=$(render_nodes)"
         check opengl test -e /run/opengl-driver/lib
       } > "$HOME/probe.tmp" 2> "$HOME/probe.err"
       mv "$HOME/probe.tmp" "$HOME/probe.txt"
@@ -199,7 +208,13 @@ in
     base_userns = userns_of("[h]interos-apps-probe|^sleep infinity$")
     print("user namespaces of the sandbox", base_userns)
     assert base_userns >= 1, base_userns
-    probe_failed = [k for k in ("tls", "fonts", "locale", "play", "dri", "opengl") if res[k] != "yes"]
+    probe_failed = [k for k in ("tls", "fonts", "locale", "play", "opengl") if res[k] != "yes"]
+    if res["dri_card"] != "no":
+        probe_failed.append("dri_card")
+    host_render = machine.succeed("ls /dev/dri | grep renderD | tr '\\n' , || true").strip()
+    print("render nodes on the host:", repr(host_render), machine.succeed("ls -l /dev/dri || true"))
+    if res["dri_render"] != host_render:
+        probe_failed.append("dri_render")
     ok("apps.close", {"id": "probe"})
     machine.wait_until_fails("pgrep -u hinteros -f [h]interos-apps-probe", timeout=30)
 

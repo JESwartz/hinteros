@@ -206,6 +206,32 @@ in
         # No setuid sudo at all unless dev.
         security.sudo.enable = lib.mkDefault admin;
 
+        # Kernel attack surface for code running as a profile user (games, web pages, apps; the app
+        # sandbox's seccomp filter also blocks most of these). Checked against what the box runs:
+        # Steam/Proton, gamescope, InputPlumber, pipewire, NetworkManager, nix, systemd and the
+        # sandboxed apps use none of io_uring (no liburing in the closure), perf, unprivileged
+        # BPF or ptrace of non-descendants (Chromium's crash handler is allowed by
+        # PR_SET_PTRACER, which scope 1 honours).
+        boot.kernel.sysctl = {
+          # Kernel pointers hidden from everyone, also root (default 1: from users).
+          "kernel.kptr_restrict" = 2;
+          "kernel.dmesg_restrict" = 1;
+          # 3: no perf for users at all where the kernel knows it (upstream treats it as 2).
+          "kernel.perf_event_paranoid" = 3;
+          # 1: off until reboot (the kernel default 2 can be switched back by root).
+          "kernel.unprivileged_bpf_disabled" = 1;
+          "net.core.bpf_jit_harden" = 2;
+          # 2: io_uring off for everyone, root too; nothing on the box uses it.
+          "kernel.io_uring_disabled" = 2;
+          # Only parents may ptrace (their descendants), not any process of the same user.
+          "kernel.yama.ptrace_scope" = 1;
+          "fs.protected_hardlinks" = 1;
+          "fs.protected_symlinks" = 1;
+          # 2: also group-writable sticky directories (systemd's default is 1).
+          "fs.protected_fifos" = 2;
+          "fs.protected_regular" = 2;
+        };
+
         # The audit trail survives reboots; capped so it can't fill the disk.
         services.journald.settings.Journal = {
           Storage = "persistent";

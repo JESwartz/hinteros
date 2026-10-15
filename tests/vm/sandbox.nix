@@ -5,8 +5,18 @@
 # the `downloads` grant, /dev/input only with `gamepad`. An apps.set_permission opt-out applies on
 # the next launch, and a required permission cannot be denied. Sound: every app can play; only
 # an app with `mic` can record (the others get the play-only socket, pulse/play).
+# System calls (seccomp filter): keyrings, io_uring, TIOCSTI/TIOCLINUX, userfaultfd, perf, the new
+# mount API, ADDR_NO_RANDOMIZE, x32 and AF_PACKET fail with the filter's errno; i386 kills; a
+# user namespace with a mount and a nested bwrap still work. The same probe outside the sandbox
+# shows the kernel alone allows them. GPU: the render node (vgem) is there, the card nodes not.
 { self, pkgs }:
 let
+  # System call checks, `<check>=yes|no` (see the source).
+  seccompProbe = pkgs.runCommandCC "hinteros-seccomp-probe" { } ''
+    mkdir -p $out/bin
+    $CC -O1 -o $out/bin/hinteros-seccomp-probe ${./fixtures/seccomp-probe.c}
+  '';
+
   # Writes one `<check>=yes|no` line per check to $HOME/probe.txt, then waits to be closed.
   probe = pkgs.writeShellApplication {
     name = "hinteros-sandbox-probe";
@@ -14,6 +24,8 @@ let
       pkgs.coreutils
       pkgs.pulseaudio
       pkgs.xdpyinfo
+      pkgs.bubblewrap
+      seccompProbe
     ];
     text = ''
       check() {
@@ -60,6 +72,11 @@ let
         check downloads test -e "$HOME/Downloads/marker"
         check input test -d /dev/input
         check udev test -e /run/udev
+        check render ls /dev/dri/renderD128
+        check card sh -c 'ls /dev/dri/card*'
+        check nested_bwrap bwrap --unshare-all --ro-bind /nix /nix --proc /proc --dev /dev \
+          --tmpfs /tmp -- "$(command -v true)"
+        hinteros-seccomp-probe
       } > "$HOME/probe.tmp"
       mv "$HOME/probe.tmp" "$HOME/probe.txt"
       exec sleep infinity
@@ -122,9 +139,13 @@ in
       };
     };
 
+    # A render node (vgem) next to the card node, to see that only render nodes get in.
+    boot.kernelModules = [ "vgem" ];
+
     environment.systemPackages = [
       pkgs.socat
       pkgs.pulseaudio
+      seccompProbe
     ];
   };
 
@@ -179,8 +200,14 @@ in
         return res
 
     hidden = ["session_sock", "system_sock", "run_hinteros", "uinput", "real_home", "other_app",
-              "bus", "system_bus", "wayland", "gamescope", "pipewire", "wayland_env", "dbus_env"]
-    works = ["x11", "pulse", "home_writable", "play"]
+              "bus", "system_bus", "wayland", "gamescope", "pipewire", "wayland_env", "dbus_env",
+              "card"]
+    # The system call filter (all "yes" means blocked as designed), nested sandboxes, the GPU.
+    blocked = ["keyctl_blocked", "add_key_blocked", "io_uring_blocked", "tiocsti_blocked",
+               "tioclinux_blocked", "userfaultfd_blocked", "perf_blocked", "fsopen_blocked",
+               "no_randomize_blocked", "x32_blocked", "i386_killed", "packet_blocked"]
+    # (No personality_query: the session unit's LockPersonality also refuses the query.)
+    works = ["x11", "pulse", "home_writable", "play", "render", "nested_bwrap", "userns"] + blocked
 
     def expect(res, **want):
         for k in hidden:
@@ -189,6 +216,17 @@ in
             assert res[k] == "yes", (k, res)
         for k, v in want.items():
             assert res[k] == ("yes" if v else "no"), (k, res)
+
+    # The host has card and render nodes; outside the sandbox the kernel alone allows what the
+    # filter blocks (io_uring and x32 are off without it too).
+    machine.succeed("ls /dev/dri/card* && ls /dev/dri/renderD128")
+    outside = dict(line.split("=", 1) for line in machine.succeed(
+        "runuser -u hinteros -- hinteros-seccomp-probe < /dev/null").split())
+    print("outside the sandbox", outside)
+    for k in blocked:
+        if k not in ("io_uring_blocked", "x32_blocked"):
+            assert outside[k] == "no", (k, outside)
+    assert outside["userns"] == "yes", outside
 
     # The plain app first: no permissions, so no Downloads, no /dev/input and no recording.
     expect(run("plain"), downloads=False, input=False, udev=False, record=False)

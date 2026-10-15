@@ -234,6 +234,34 @@ let
         true
       ];
     };
+    testKernelSysctls = {
+      expr = lib.getAttrs [
+        "kernel.kptr_restrict"
+        "kernel.dmesg_restrict"
+        "kernel.perf_event_paranoid"
+        "kernel.unprivileged_bpf_disabled"
+        "net.core.bpf_jit_harden"
+        "kernel.io_uring_disabled"
+        "kernel.yama.ptrace_scope"
+        "fs.protected_hardlinks"
+        "fs.protected_symlinks"
+        "fs.protected_fifos"
+        "fs.protected_regular"
+      ] c.boot.kernel.sysctl;
+      expected = {
+        "kernel.kptr_restrict" = 2;
+        "kernel.dmesg_restrict" = 1;
+        "kernel.perf_event_paranoid" = 3;
+        "kernel.unprivileged_bpf_disabled" = 1;
+        "net.core.bpf_jit_harden" = 2;
+        "kernel.io_uring_disabled" = 2;
+        "kernel.yama.ptrace_scope" = 1;
+        "fs.protected_hardlinks" = 1;
+        "fs.protected_symlinks" = 1;
+        "fs.protected_fifos" = 2;
+        "fs.protected_regular" = 2;
+      };
+    };
     testJournalPersistent = {
       expr = [
         c.services.journald.settings.Journal.Storage
