@@ -205,6 +205,7 @@
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         sandbox = import ./tests/vm/sandbox.nix { inherit self pkgs; };
         sandbox-apps = import ./tests/vm/sandbox-apps.nix { inherit self pkgs; };
+        sandbox-pad = import ./tests/vm/sandbox-pad.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
         system-escalation = import ./tests/vm/system-escalation.nix { inherit self pkgs; };
         system-authz = import ./tests/vm/system-authz.nix { inherit self pkgs; };
