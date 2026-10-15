@@ -193,6 +193,7 @@
         boot = import ./tests/vm/boot.nix { inherit self pkgs; };
         gamescope = import ./tests/vm/gamescope.nix { inherit self pkgs; };
         gamescope-size = import ./tests/vm/gamescope-size.nix { inherit self pkgs; };
+        gamescope-sandbox = import ./tests/vm/gamescope-sandbox.nix { inherit self pkgs; };
         input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
         fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
         config-sync = import ./tests/vm/config-sync.nix { inherit self pkgs; };

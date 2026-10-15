@@ -1,0 +1,39 @@
+diff -ru c/src/wlserver.cpp d/src/wlserver.cpp
+--- c/src/wlserver.cpp	2026-10-14 23:34:53.969936142 -0400
++++ d/src/wlserver.cpp	2026-10-14 23:34:53.987675817 -0400
+@@ -1879,6 +1879,9 @@
+ 		.enable_wm = false,
+ 		.no_touch_pointer_emulation = g_bNoTouchPointerEmulation,
+ 		.force_xrandr_emulation = true,
++		// HinterOS: the apps' Xwayland (#2 and later): an app's XTEST (libei) would type into
++		// the globally focused window, also the home app on #0.
++		.no_input_emulation = nIndex >= 2,
+ 	};
+ 	xwayland_server = wlr_xwayland_server_create(display, &xwayland_options);
+ 	if (!xwayland_server)
+diff -ru c/subprojects/wlroots/include/wlr/xwayland/server.h d/subprojects/wlroots/include/wlr/xwayland/server.h
+--- c/subprojects/wlroots/include/wlr/xwayland/server.h	2026-10-14 23:34:53.973947842 -0400
++++ d/subprojects/wlroots/include/wlr/xwayland/server.h	2026-10-14 23:34:53.981706936 -0400
+@@ -20,6 +20,9 @@
+ 	bool no_touch_pointer_emulation;
+ 	bool force_xrandr_emulation;
+ 	int terminate_delay; // in seconds, 0 to terminate immediately
++	// HinterOS: start Xwayland without LIBEI_SOCKET, so that XTEST stays inside this X server
++	// instead of going to the compositor as input for whatever has focus.
++	bool no_input_emulation;
+ };
+ 
+ struct wlr_xwayland_server {
+diff -ru c/subprojects/wlroots/xwayland/server.c d/subprojects/wlroots/xwayland/server.c
+--- c/subprojects/wlroots/xwayland/server.c	2026-10-14 23:34:53.972242221 -0400
++++ d/subprojects/wlroots/xwayland/server.c	2026-10-14 23:34:53.984923424 -0400
+@@ -109,6 +109,9 @@
+ 	char wayland_socket_str[16];
+ 	snprintf(wayland_socket_str, sizeof(wayland_socket_str), "%d", server->wl_fd[1]);
+ 	setenv("WAYLAND_SOCKET", wayland_socket_str, true);
++	if (server->options.no_input_emulation) {
++		unsetenv("LIBEI_SOCKET");
++	}
+ 
+ 	wlr_log(WLR_INFO, "Starting Xwayland on :%d", server->display);
+ 

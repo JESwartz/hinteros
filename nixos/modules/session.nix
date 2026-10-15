@@ -21,22 +21,26 @@ let
     # Wayland socket in the home app's environment; apps run on Xwayland (GDK_BACKEND below).
     #
     # App size (read from the gamescope 3.16.31 source; README "Display size"):
-    # --xwayland-count 2: with more than one Xwayland, gamescope sizes the first (:0, where the
-    #   home app and everything the daemon starts run) to the *output* mode, at start
+    # --xwayland-count 3: with more than one Xwayland, gamescope sizes the first (:0, the home
+    #   app, the OSK and Steam) to the *output* mode, at start
     #   (wlserver.cpp, gamescope_xwayland_server_t) and after every mode change
     #   (steamcompmgr.cpp: wlserver_set_xwayland_server_mode(0, output size), and the nested
     #   height follows the output's aspect). With a single Xwayland its size is the nested size,
     #   fixed at start (main.cpp: nested = output at start, never updated): a display.set_mode to
     #   another size, or a display that came up after gamescope (a TV switched on after boot:
     #   gamescope starts at 1280x720), left every app letterboxed or upscaled. The second
-    #   Xwayland (:1, STEAM_GAME_DISPLAY_0) is the one SteamOS gives games; our apps do not use it.
+    #   Xwayland (:1, STEAM_GAME_DISPLAY_0) is the one SteamOS gives games. The third (:2) holds
+    #   every app the daemon starts (daemon.nix `apps_display`), so that no app can read or type
+    #   into the home app (PIN entry) or the OSK. Patched (nixos/overlay.nix): every Xwayland but
+    #   :1 follows the output like :0, and none listens on an abstract socket (a sandboxed app
+    #   gets only :2's socket file, but shares the network namespace).
     # --force-windows-fullscreen: every focused X11 app window is resized to its Xwayland root
     #   (= the output), also windows that never ask for fullscreen or pin their size.
     ++ [
       "-e"
       "--expose-wayland"
       "--xwayland-count"
-      "2"
+      "3"
       "--force-windows-fullscreen"
       # The pointer (right stick in keyboard-profile apps) never fades on inactivity (the
       # daemon hides it on the D-pad), and is large enough to see on a TV (`cursor` options).

@@ -1,0 +1,31 @@
+--- a/src/wlserver.cpp	2026-10-14 23:20:30.503076993 -0400
++++ b/src/wlserver.cpp	2026-10-14 23:21:32.519340422 -0400
+@@ -1903,7 +1903,9 @@
+ 
+ 	int width = g_nNestedWidth;
+ 	int height = g_nNestedHeight;
+-	if ( g_nXWaylandCount > 1 && nIndex == 0 )
++	// HinterOS: every Xwayland but the first game display (#1, STEAM_GAME_DISPLAY_0, which
++	// Steam sizes with GAMESCOPE_XWAYLAND_MODE_CONTROL) starts at the output size, not only #0.
++	if ( g_nXWaylandCount > 1 && nIndex != 1 )
+ 	{
+ 		width = g_nOutputWidth;
+ 		height = g_nOutputHeight;
+--- a/src/steamcompmgr.cpp	2026-10-14 23:20:30.503202047 -0400
++++ b/src/steamcompmgr.cpp	2026-10-14 23:21:32.523100584 -0400
+@@ -10267,8 +10267,13 @@
+ 			{
+ 				g_nNestedHeight = ( g_nNestedWidth * g_nOutputHeight ) / g_nOutputWidth;
+ 				wlserver_lock();
+-				// Update only Steam, the root ctx, with the new output size for now
+-				wlserver_set_xwayland_server_mode( 0, g_nOutputWidth, g_nOutputHeight, g_nOutputRefresh );
++				// HinterOS: update every Xwayland but the first game display (#1) with the new
++				// output size, not only the root ctx (#0): #2 holds the sandboxed apps.
++				for ( size_t i = 0; i < size_t( g_nXWaylandCount ); i++ )
++				{
++					if ( i != 1 )
++						wlserver_set_xwayland_server_mode( i, g_nOutputWidth, g_nOutputHeight, g_nOutputRefresh );
++				}
+ 				wlserver_unlock();
+ 			}
+ 

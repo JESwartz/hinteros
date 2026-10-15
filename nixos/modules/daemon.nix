@@ -367,6 +367,11 @@ in
         wayland_display = lib.mkDefault (
           if config.hinteros.session.compositor == "gamescope" then "gamescope-0" else "wayland-0"
         );
+      }
+      # Apps on gamescope's third Xwayland (session.nix, design/sandbox.md step 3), away from the
+      # home app and the OSK on the first. Cage has one Xwayland: apps stay on :0.
+      // lib.optionalAttrs (config.hinteros.session.compositor == "gamescope") {
+        apps_display = lib.mkDefault "auto+2";
       };
       osk = {
         inherit (cfg.osk) enable summon;
