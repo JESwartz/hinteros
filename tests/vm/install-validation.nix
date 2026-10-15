@@ -1,8 +1,11 @@
 # hinteros-install refuses bad plans and unsuitable machines before touching the disk: missing
-# admin password, an app that needs a network while offline, a disk that does not exist, is in
-# use, is the system disk or is too small, a BIOS-booted machine, malformed fields, a `rev` that
-# is malformed or needs a network (the installer's own revision validates offline). Every
-# refusal exits 2 with an error line; a marker file system on the target disk survives them all.
+# admin password (or one shorter than 8 characters), an app that needs a network while offline, a
+# disk that does not exist, is in use, is the system disk or is too small, a BIOS-booted machine,
+# malformed fields, a `rev` that is malformed or needs a network (the installer's own revision
+# validates offline), a plan whose diskSeq is missing or not the disk's, and a disk replaced
+# (unplugged and plugged in again, so it gets a new disk sequence number under the same name) after
+# the plan was made or after the plan was checked, just before erasing. Every refusal exits 2 with
+# an error line; a marker file system on the target disk survives them all.
 # Also `--info` (the installer's revision, version and channel; offline, no root).
 { self, pkgs }:
 let
@@ -15,7 +18,7 @@ let
           hostname = "livingroom";
           admin = {
             user = "james";
-            password = "hunter2";
+            password = "hunter22";
           };
           ssh.enable = true;
           channel = "stable";
@@ -40,6 +43,12 @@ let
       admin = {
         user = "james";
         password = "";
+      };
+    };
+    short-password = plan {
+      admin = {
+        user = "james";
+        password = "1234567";
       };
     };
     bad-hash = plan {
@@ -95,6 +104,9 @@ let
     iso-rev = plan { rev = isoRev; };
     other-rev = plan { rev = "1111111111111111111111111111111111111111"; };
     in-use-disk = plan { };
+    no-disk-seq = plan { diskSeq = null; };
+    bad-disk-seq = plan { diskSeq = "2"; };
+    wrong-disk-seq = plan { diskSeq = 9999; };
   };
 in
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
@@ -113,6 +125,7 @@ in
     ''
       import json
 
+      ${builtins.readFile ./install/copy-plan.py}
       CASES = {${
         builtins.concatStringsSep ", " (pkgs.lib.mapAttrsToList (n: v: ''"${n}": "${v}"'') cases)
       }}
@@ -120,21 +133,22 @@ in
       installer.start()
       installer.wait_for_unit("multi-user.target")
       installer.succeed("udevadm settle")
-      installer.copy_from_host(CASES["ok"], "/tmp/ok.json")
+      copy_plan(CASES["ok"], "/tmp/ok.json")
 
       # A marker on the target disk: any partitioning or formatting would destroy it.
       installer.succeed("mkfs.ext4 -q -L marker /dev/vdb")
 
-      def run(name, extra_env=""):
-          installer.copy_from_host(CASES[name], f"/tmp/{name}.json")
+      def run(name, extra_env="", seq=None, validate_only=True):
+          copy_plan(CASES[name], f"/tmp/{name}.json", seq)
+          flag = " --validate-only" if validate_only else ""
           status, out = installer.execute(
-              f"{extra_env} hinteros-install --plan /tmp/{name}.json --validate-only 2>/tmp/{name}.err"
+              f"{extra_env} hinteros-install --plan /tmp/{name}.json{flag} 2>/tmp/{name}.err"
           )
           lines = [json.loads(l) for l in out.splitlines() if l.strip()]
           return status, lines
 
-      def refused(name, code, extra_env="HINTEROS_INSTALL_ALLOW_BIOS=1"):
-          status, lines = run(name, extra_env)
+      def refused(name, code, extra_env="HINTEROS_INSTALL_ALLOW_BIOS=1", seq=None, validate_only=True):
+          status, lines = run(name, extra_env, seq, validate_only)
           errors = [l for l in lines if l["level"] == "error"]
           print(name, status, errors)
           assert status == 2, (name, status, lines)
@@ -161,6 +175,7 @@ in
       with subtest("admin password"):
           refused("no-password", "admin-password-missing")
           refused("empty-password", "admin-password-missing")
+          refused("short-password", "admin-password-short")
           refused("bad-hash", "admin-hash-invalid")
           refused("no-admin", "admin-missing")
 
@@ -222,8 +237,50 @@ in
           status, _ = installer.execute("hinteros-install --info --plan /tmp/ok.json 2>/dev/null")
           assert status == 2, status
 
+      with subtest("the disk is the one the plan names: its disk sequence number"):
+          refused("no-disk-seq", "disk-seq-invalid")
+          refused("bad-disk-seq", "disk-seq-invalid")
+          refused("wrong-disk-seq", "disk-changed")
+
+          def seq():
+              return int(installer.succeed("cat /sys/class/block/vdb/diskseq"))
+
+          # Unplug the target and plug it in again: the same name (vdb), a new disk sequence number.
+          # A virtio disk is a PCI device; removing it and rescanning the bus does this.
+          REPLUG = (
+              "d=$(readlink -f /sys/block/vdb/device/..) && echo 1 > $d/remove && udevadm settle && "
+              "test ! -e /sys/block/vdb && echo 1 > /sys/bus/pci/rescan && udevadm settle && test -b /dev/vdb"
+          )
+          old = seq()
+          installer.succeed(REPLUG)
+          new = seq()
+          assert new != old, (old, new)
+          # The plan was made before: refused when it is checked.
+          refused("ok", "disk-changed", seq=old)
+          refused("ok", "disk-changed", seq=old, validate_only=False)
+          status, lines = run("ok", "HINTEROS_INSTALL_ALLOW_BIOS=1", seq=new)
+          assert status == 0, lines
+
+          # Replaced after the plan was checked, just before erasing (a test hook runs then): the
+          # install stops before it touches the disk.
+          status, lines = run(
+              "ok",
+              f"HINTEROS_INSTALL_ALLOW_BIOS=1 HINTEROS_INSTALL_BEFORE_WIPE='{REPLUG}'",
+              validate_only=False,
+          )
+          print("replaced before erasing", status, lines)
+          assert status == 2, (status, lines)
+          assert lines[-1]["level"] == "error" and lines[-1]["code"] == "disk-changed", lines[-1]
+          assert any(l["stage"] == "validate" and l["percent"] == 8 for l in lines), lines
+          assert not any(l["stage"] in ("partition", "packages", "build", "bootloader", "done") for l in lines), lines
+          assert seq() != new
+          assert 'LABEL="marker"' in installer.succeed("blkid /dev/vdb")
+          installer.succeed("test -z \"$(lsblk -nro NAME /dev/vdb | tail -n +2)\"")
+          installer.fail("mountpoint -q /mnt")
+          installer.fail("test -e /dev/hinteros-target")
+
       with subtest("without --validate-only a refused plan still touches nothing"):
-          installer.copy_from_host(CASES["no-password"], "/tmp/np.json")
+          copy_plan(CASES["no-password"], "/tmp/np.json")
           status, _ = installer.execute("HINTEROS_INSTALL_ALLOW_BIOS=1 hinteros-install --plan /tmp/np.json 2>/dev/null")
           assert status == 2, status
           assert 'LABEL="marker"' in installer.succeed("blkid /dev/vdb")

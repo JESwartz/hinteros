@@ -429,11 +429,13 @@ in
 
     # Autologin: the session user holds the devices through static groups. With the greeter
     # (profiles.nix) no account has them: logind's uaccess gives them to the active session.
+    # Never `input`: it reads every keyboard (the admin password on the admin console). The
+    # compositor gets its input devices from logind (TakeDevice), joysticks are uaccess, and
+    # Ctrl+Super+D is the hinteros-keyboard unit's (daemon.nix).
     users.users.${cfg.user} = {
       isNormalUser = true;
       extraGroups = lib.optionals (!greeterOn) [
         "video"
-        "input"
         "uinput" # the daemon injects key presses for keyboard-driven apps
       ];
     };

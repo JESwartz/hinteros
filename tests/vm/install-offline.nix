@@ -68,7 +68,7 @@ let
       hostname = "livingroom";
       admin = {
         user = "james";
-        password = "hunter2";
+        password = "hunter22";
       };
       ssh.enable = true;
       channel = "stable";
@@ -126,6 +126,7 @@ in
     from datetime import timedelta
 
     ${builtins.readFile ./install/system-steps.py}
+    ${builtins.readFile ./install/copy-plan.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
@@ -135,7 +136,7 @@ in
     # Nothing but lo: this is what turns nix's substitution off on a box without a network.
     installer.succeed("test \"$(ls /sys/class/net)\" = lo")
 
-    installer.copy_from_host("${plan}", "/tmp/plan.json")
+    copy_plan("${plan}", "/tmp/plan.json")
     installer.copy_from_host("${extraModule}", "/tmp/extra-module.nix")
 
     ${
@@ -345,9 +346,9 @@ in
         target.succeed("findmnt -no FSTYPE / | grep -qx ext4")
         target.succeed("findmnt -no FSTYPE /boot | grep -qx vfat")
 
-    with subtest("the privileged service answers (system API 0.8) and knows its channel"):
+    with subtest("the privileged service answers (system API 0.9) and knows its channel"):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.8", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "0.9", "client": {"name": "install-test", "version": "0"}}}
         info = {"jsonrpc": "2.0", "id": 1, "method": "system.info", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, info))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:/run/hinteros/system.sock"
@@ -364,7 +365,7 @@ in
         target.succeed("test \"$(id -nG james | tr ' ' '\\n' | grep -cx wheel)\" = 1")
         target.fail("id -nG hinteros | tr ' ' '\\n' | grep -qx wheel")
         target.fail("runuser -u hinteros -- sudo -n true")
-        target.succeed("printf 'hunter2\\n' | runuser -u james -- sudo -S -k true")
+        target.succeed("printf 'hunter22\\n' | runuser -u james -- sudo -S -k true")
         target.fail("printf 'wrong\\n' | runuser -u james -- sudo -S -k true")
         # The hash is not in the config the generation embeds.
         h = target.succeed("cat /var/lib/hinteros/admin-password-hash").strip()
@@ -374,7 +375,7 @@ in
         target.wait_for_unit("sshd.service")
         target.succeed("ss -tln | grep -q ':22 '")
         opts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=6"
-        def pw(user, password="hunter2", cmd="true"):
+        def pw(user, password="hunter22", cmd="true"):
             return f"sshpass -p {password} ssh {opts} {user}@localhost {cmd}"
         target.succeed(pw("james", cmd="id -un"))
         target.fail(pw("james", "wrong"))

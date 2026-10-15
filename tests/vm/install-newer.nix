@@ -48,7 +48,7 @@ let
           hostname = "livingroom";
           admin = {
             user = "james";
-            password = "hunter2";
+            password = "hunter22";
           };
           channel = "stable";
           apps = [ "youtube" ];
@@ -87,6 +87,7 @@ in
     import json
 
     ${builtins.readFile ./install/system-steps.py}
+    ${builtins.readFile ./install/copy-plan.py}
     REVS = json.loads('${builtins.toJSON revs}')
     CASES = {${lib.concatStringsSep ", " (lib.mapAttrsToList (n: v: ''"${n}": "${v}"'') cases)}}
     ONLINE = "HINTEROS_INSTALL_ONLINE_PROBE=file:///tmp/online "
@@ -103,7 +104,7 @@ in
         "touch /tmp/online",
     )
     for name, path in CASES.items():
-        installer.copy_from_host(path, f"/tmp/{name}.json")
+        copy_plan(path, f"/tmp/{name}.json")
     # A marker on the target disk: any partitioning or formatting would destroy it.
     installer.succeed("mkfs.ext4 -q -L marker /dev/vdb")
 

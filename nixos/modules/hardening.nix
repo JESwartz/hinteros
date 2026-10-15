@@ -47,6 +47,15 @@ let
     lib.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users)
   );
 
+  # The networks that may reach sshd (hinteros.ssh.allowFrom), split by family.
+  sshFrom6 = lib.filter (lib.hasInfix ":") cfg.ssh.allowFrom;
+  sshFrom4 = lib.filter (s: !lib.hasInfix ":" s) cfg.ssh.allowFrom;
+  sshPorts = map toString config.services.openssh.ports;
+  isCidr =
+    s:
+    builtins.match "[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}" s != null
+    || builtins.match "[0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3}" s != null;
+
   sudoRuleOptions = lib.concatMap (
     r: lib.concatMap (c: c.options or [ ]) r.commands
   ) config.security.sudo.extraRules;
@@ -74,6 +83,28 @@ in
       type = lib.types.bool;
       default = false;
       description = "Run sshd (set from state.json `settings.ssh.enable`; hinteros-system gates flipping it behind the admin password via polkit `org.hinteros.system.ssh`, defined in daemon.nix). Needs hinteros.admin: the admin account is the only login.";
+    };
+
+    ssh.allowFrom = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [
+        "10.0.0.0/8"
+        "172.16.0.0/12"
+        "192.168.0.0/16"
+        "169.254.0.0/16"
+        "fc00::/7"
+        "fe80::/10"
+      ];
+      example = [
+        "0.0.0.0/0"
+        "::/0"
+      ];
+      description = ''
+        Source networks (IPv4 and IPv6 CIDR) the firewall lets reach sshd. Default: the local
+        networks only (RFC 1918, IPv4 link-local, IPv6 ULA and link-local). sshd's own
+        `openFirewall` stays off, so nothing else opens its port. `[ "0.0.0.0/0" "::/0" ]` opens
+        it to all networks.
+      '';
     };
 
     dev = {
@@ -144,6 +175,10 @@ in
             message = "hinteros hardening: no profile account may read the system journal (audit trail).";
           }
           {
+            assertion = lib.all (u: !(lib.elem "input" (groupsOf u))) profileUsers;
+            message = "hinteros hardening: no profile account may be in group input, even in dev: it reads every keyboard (the admin password). Ctrl+Super+D is the hinteros-keyboard unit's.";
+          }
+          {
             assertion = dev || !greeterOn || inDeviceGroups == [ ];
             message = "hinteros hardening: users in device groups (${lib.concatStringsSep ", " inDeviceGroups}) with the greeter; devices follow the active session (uaccess).";
           }
@@ -182,11 +217,50 @@ in
 
       (lib.mkIf cfg.ssh.enable { services.openssh.enable = true; })
 
-      # SSH, whoever enabled it (state.json, or dev). Plain username + password for now; key-only,
-      # key import, a LAN-only firewall and rate limiting are backlog.
+      # SSH, whoever enabled it (state.json, the installer plan, or dev). Plain username + password
+      # for now, so the firewall lets only the local networks (hinteros.ssh.allowFrom) reach it;
+      # key-only, key import and rate limiting are backlog.
       (lib.mkIf config.services.openssh.enable {
+        assertions = [
+          {
+            assertion = lib.all isCidr cfg.ssh.allowFrom;
+            message = "hinteros hardening: hinteros.ssh.allowFrom: every entry must be an IPv4 or IPv6 CIDR (e.g. 192.168.0.0/16, fe80::/10).";
+          }
+        ];
+
+        # The port is open only to hinteros.ssh.allowFrom, never to all sources.
+        networking.firewall = lib.mkMerge [
+          (lib.mkIf config.networking.nftables.enable {
+            extraInputRules = lib.concatStrings [
+              (lib.optionalString (sshFrom4 != [ ]) ''
+                ip saddr { ${lib.concatStringsSep ", " sshFrom4} } tcp dport { ${lib.concatStringsSep ", " sshPorts} } accept comment "hinteros-ssh"
+              '')
+              (lib.optionalString (sshFrom6 != [ ]) ''
+                ip6 saddr { ${lib.concatStringsSep ", " sshFrom6} } tcp dport { ${lib.concatStringsSep ", " sshPorts} } accept comment "hinteros-ssh"
+              '')
+            ];
+          })
+          (lib.mkIf (!config.networking.nftables.enable) {
+            extraCommands = lib.concatStrings (
+              lib.concatMap (
+                port:
+                map (
+                  src:
+                  "iptables -w -A nixos-fw -p tcp --dport ${port} -s ${src} -m comment --comment hinteros-ssh -j nixos-fw-accept\n"
+                ) sshFrom4
+                ++ lib.optionals config.networking.enableIPv6 (
+                  map (
+                    src:
+                    "ip6tables -w -A nixos-fw -p tcp --dport ${port} -s ${src} -m comment --comment hinteros-ssh -j nixos-fw-accept\n"
+                  ) sshFrom6
+                )
+              ) sshPorts
+            );
+          })
+        ];
+
         services.openssh = {
-          openFirewall = lib.mkDefault true;
+          openFirewall = lib.mkDefault false;
           # Host keys: the NixOS default (/etc/ssh, generated on first start, per box).
           settings = {
             PasswordAuthentication = true;

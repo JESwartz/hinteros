@@ -14,20 +14,37 @@ written for the person using the box.
   chooses; they show what they free first and need the admin PIN.
 - Automatic clean-up is a setting: on or off, how often, and how many versions to keep.
 - Updates and app installs show what they install, how many parts are built, and the time
-  taken. Hide the job page and the top bar keeps showing the job.
+  elapsed (mm:ss). Hide the job page and the top bar keeps showing the job.
+- When an update needs a session restart, the session restarts after 30 seconds. Choose
+  Later to stop it. The count runs only while the launcher is on screen.
 - Installer: the system install shows its steps (copy or download the packages, build HinterOS,
-  install the boot loader), each with its count. A wheel turns while the install runs.
+  install the boot loader), each with its count and the time elapsed. A wheel turns while the
+  install runs.
+- Installer: the disk is identified by its disk sequence number. If the disk is replaced
+  during setup or the download, the install stops before it erases anything.
 - Installer: you can pick VacuumTube and Plex. Fixed: the app list showed Crunchyroll and not
   Steam.
 - Settings has seven groups: Profiles, Updates, Storage, Network, Display and sound,
   Accessibility and System.
 - The Store describes each app in short words.
-- Time zone: pick it in the first-boot setup and in Settings; a map shows the zone. The
-  change applies at once (Settings needs the admin PIN).
+- Time zone: pick it in the first-boot setup and in Settings. The list is in UTC offset
+  order; the map above it follows the zone you move to. The change applies at once (Settings
+  needs the admin PIN).
+- Display: the resolution is a drop-down, in Settings and in the first-boot setup.
 - Steam games that Steam names with another app id (for example a game with its own
   `steam_appid.txt`) now show at once, also with Steam open, and leave Continue when they end.
 - Apps that are not installed no longer show on a new box.
 - Keyboard: press Ctrl + Windows + D to go to Home.
+- Each beta has its own version (0.7.2, 0.7.3, ...). Stable takes the tested beta's version.
+  A box on the 0.7.1 beta shows the first new beta as 0.7.3 until it updates.
+- Security: games and apps can no longer read the keyboard. A profile that is not on screen
+  is paused until it is back.
+- Security: after 10 wrong admin PINs the admin PIN is refused, also the right one, until the
+  box restarts.
+- Security: a channel switch shows the checked version before you confirm. The box refuses a
+  version older than one it already saw for that channel.
+- Security: SSH, when on, accepts connections only from local networks. The admin password
+  must have 8 or more characters.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.
 

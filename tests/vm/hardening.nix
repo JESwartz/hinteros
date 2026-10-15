@@ -1,8 +1,9 @@
 # Hardening baseline on built systems (threat-model.md). Non-dev boxes: the session user is not
 # in wheel, cannot sudo, cannot talk to the nix daemon; the admin account's sudo always asks for
-# its password; with SSH on (state.json) the admin logs in with username + password while the
-# session user and root cannot; with SSH off nothing listens. Dev box: the separate key-based
-# deploy user has passwordless sudo and nix, the session user still nothing.
+# its password; with SSH on (state.json) the admin logs in with username + password, from the
+# local networks only (a global IPv6 source is refused), while the session user and root cannot;
+# with SSH off nothing listens. Dev box: the separate key-based deploy user has passwordless sudo
+# and nix, the session user still nothing.
 #
 # Profiles (profiles.md "One Unix user per profile", "Device access per seat"; DECISIONS D4, S2):
 # on a schema-2 box in greeter mode (started after the others), every account (p1, p2, the guest)
@@ -11,7 +12,10 @@
 # root; app profiles and the published links are root's; the sockets and the public view have
 # the modes the design states; the guest's home is emptied at boot; logind kills a session's
 # processes at once; device ACLs (uinput, DRM) name only the active profile, none at the picker;
-# lingering is denied.
+# no profile has an ACL on a keyboard, can read one or can write to keyboard.sock (only the
+# hinteros-keyboard unit reads keyboards); lingering is denied. A profile whose session is not in
+# front (`chvt 2`) is frozen: a process of it that holds /dev/uinput from before the switch makes
+# no progress, also across a restart of hinteros-system; back on its VT it is thawed.
 { self, pkgs }:
 let
   inherit (pkgs) lib;
@@ -109,6 +113,7 @@ in
     profiles.python
     + ''
       MACHINE = "${nodes.machine.networking.primaryIPAddress}"
+      MACHINE6 = "${nodes.machine.networking.primaryIPv6Address}"
       DEV = "${nodes.dev.networking.primaryIPAddress}"
       QUIET = "${nodes.quiet.networking.primaryIPAddress}"
       for m in (machine, quiet, dev, lan):
@@ -185,6 +190,20 @@ in
 
       assert admin_ssh("sudo -n true") != 0
       assert admin_ssh("'echo hunter2 | sudo -S -k true'") == 0
+
+      # ---- SSH only from the local networks --------------------------------------------------------
+      # Port 22 is open only to RFC 1918, link-local and ULA sources: the test network's IPv4
+      # (192.168.1.0/24) logs in above, its IPv6 (2001:db8::/32, global) is refused.
+      fw = "${nodes.machine.networking.firewall.package}/bin"
+      rules = machine.succeed(f"{fw}/iptables -S nixos-fw; {fw}/ip6tables -S nixos-fw")
+      ssh_rules = [l for l in rules.splitlines() if " --dport 22 " in l + " "]
+      assert ssh_rules and all(" -s " in l for l in ssh_rules), rules
+      local_nets = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10")
+      for net in local_nets:
+          assert any(f"-s {net} " in l for l in ssh_rules), (net, rules)
+      lan.succeed(f"ping -6 -c1 -W3 {MACHINE6}")
+      lan.succeed(f"nc -z -w3 {MACHINE} 22")
+      lan.fail(f"nc -z -w3 {MACHINE6} 22")
 
       # ---- SSH off: nothing listens ----------------------------------------------------------------
       quiet.fail("systemctl is-active sshd.service")
@@ -273,5 +292,67 @@ in
           cage = machine.succeed("pgrep -u hinteros -o -f '/bin/cage '").strip()
           machine.fail(f"pkcheck --action-id org.freedesktop.login1.set-self-linger --process {cage}")
           machine.fail("runuser -u hinteros-p2 -- cat /dev/uinput")
+
+          # Keyboards: no profile has an ACL on one or can read it; only hinteros-keyboard does
+          # (Ctrl+Super+D), through keyboard.sock, which no profile can write to.
+          keyboards = machine.succeed(
+              "for d in /dev/input/event*; do udevadm info -q property $d | grep -qx ID_INPUT_KEYBOARD=1 && echo $d; done; true"
+          ).split()
+          assert keyboards, machine.succeed("ls -l /dev/input")
+          for dev in keyboards:
+              acl = machine.succeed(f"getfacl -p {dev}")
+              assert "user:hinteros" not in acl, (dev, acl)
+              for u in ACCOUNTS:
+                  machine.fail(f"runuser -u {u} -- test -r {dev}")
+          machine.wait_until_succeeds("journalctl -b -u hinteros-keyboard | grep -q 'keyboard found'", timeout=30)
+          assert mode("/run/hinteros/keyboard.sock") == "660 root:hinteros-keyboard", mode("/run/hinteros/keyboard.sock")
+          for u in ACCOUNTS:
+              machine.fail(f"runuser -u {u} -- test -w /run/hinteros/keyboard.sock")
+
+      with subtest("profiles: a session not in front is frozen, and thawed when it is again"):
+          u1 = uid("hinteros")
+          slice = f"user-{u1}.slice"
+          user_env = f"XDG_RUNTIME_DIR=/run/user/{u1} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{u1}/bus"
+          # A process of p1 (in its slice) that opens /dev/uinput while p1 is in front and then
+          # counts, like a game that would type into the admin console after a switch.
+          machine.succeed(
+              f"runuser -u hinteros -- env {user_env} systemd-run --user --unit=uinput-holder python3 -c "
+              "'import time; f = open(\"/dev/uinput\", \"wb\"); n = 0\n"
+              "while True:\n n += 1; open(\"/home/hinteros/ticks\", \"w\").write(str(n)); time.sleep(0.1)'"
+          )
+          holder = machine.wait_until_succeeds("pgrep -u hinteros -f 'dev/uinput'", timeout=30).split()[0]
+          machine.wait_until_succeeds("test -s /home/hinteros/ticks")
+
+          def ticks():
+              return int(machine.succeed("cat /home/hinteros/ticks").strip() or 0)
+
+          def freezer():
+              return machine.succeed(f"systemctl show -p FreezerState --value {slice}").strip()
+
+          def still(what):
+              a = ticks()
+              machine.sleep(2)
+              assert ticks() == a, f"p1 ran {what}"
+
+          assert freezer() == "running", freezer()
+          machine.succeed("chvt 2")
+          machine.wait_until_succeeds(f"systemctl show -p FreezerState --value {slice} | grep -qx frozen", timeout=10)
+          machine.succeed(f"grep -qx 'frozen 1' /sys/fs/cgroup/user.slice/{slice}/cgroup.events")
+          # The fd outlives the switch (logind cannot revoke it); frozen, it is of no use.
+          machine.succeed(f"ls -l /proc/{holder}/fd | grep -q /dev/uinput")
+          still("while frozen")
+          machine.wait_until_succeeds("journalctl -b -u hinteros-system | grep -q 'frozen: its session is not the active one'")
+          # A restart of the service thaws on the way out and freezes again at start.
+          machine.succeed("systemctl restart hinteros-system")
+          machine.wait_until_succeeds(f"systemctl show -p FreezerState --value {slice} | grep -qx frozen", timeout=10)
+          still("after a restart of hinteros-system")
+
+          machine.succeed("chvt 1")
+          machine.wait_until_succeeds(f"systemctl show -p FreezerState --value {slice} | grep -qx running", timeout=10)
+          a = ticks()
+          machine.wait_until_succeeds(f"test \"$(cat /home/hinteros/ticks)\" -gt {a}", timeout=10)
+          machine.succeed("pgrep -u hinteros -f '/bin/cage '")
+          sess_ok("hinteros", "profile.current")
+          machine.succeed(f"runuser -u hinteros -- env {user_env} systemctl --user stop uinput-holder")
     '';
 }

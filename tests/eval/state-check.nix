@@ -51,7 +51,7 @@ let
       hostname = "tv-2";
       admin = {
         user = "alex";
-        password = "pw";
+        password = "password";
       };
       channel = "beta";
       apps = appIds.preselected;
@@ -76,10 +76,11 @@ let
       builtins.toJSON (
         {
           disk = "/dev/vdb";
+          diskSeq = 1;
           hostname = "hinteros";
           admin = {
             user = "james";
-            password = "hunter2";
+            password = "hunter22";
           };
         }
         // p
@@ -117,6 +118,14 @@ pkgs.runCommand "hinteros-state-check"
     test "$(jq -c .ids states/minimal/apps/starter.json)" = '[]'
     test "$(jq -c .settings.ssh.enable states/online-ssh/apps/state.json)" = true
     test "$(jq -r .settings.admin.user states/online-ssh/apps/state.json)" = alex
+
+    # The plan validation: an admin password shorter than 8 characters (the installer UI's
+    # minimum) is refused with exit 2, also without SSH.
+    jq --argjson t "$terms" '. + {acceptedTerms: $t} | .admin.password = "1234567"' ${planFiles.minimal} > short.json
+    rc=0
+    hinteros-install --plan short.json --state-dir states-short > short.log || rc=$?
+    test "$rc" = 2 || { cat short.log; echo "a short admin password: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"admin-password-short"' short.log || { cat short.log; exit 1; }
 
     find states -name state.json | sort
     hinteros-system check-state ${

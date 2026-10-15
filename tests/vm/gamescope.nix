@@ -1,9 +1,11 @@
 # Real compositor plus session daemon (spike 3 as an automated test): gamescope runs headless
 # on lavapipe (software Vulkan) in Steam mode (-e) with the xterm placeholder as home app under
 # the reaper (launcher app id). The daemon sets GAMESCOPECTRL_BASELAYER_APPID. Over the session
-# socket (API 0.16) the test checks games.list (tools filtered), launching a fake Steam game (it
+# socket (API 0.17) the test checks games.list (tools filtered), launching a fake Steam game (it
 # comes to the front, OCR of gamescope's own screenshot), Home (SIGUSR1, and Ctrl+Super+D on the
-# VM's keyboard; Ctrl+D alone is not Home), apps.close (app_exited closed, placeholder back),
+# VM's keyboard, read by the hinteros-keyboard unit and delivered by hinteros-system as
+# keyboard_home; the session user cannot read a keyboard; Ctrl+D alone is not Home), apps.close
+# (app_exited closed, placeholder back),
 # Steam itself (Big Picture, app 769) and a Steam Guard style pop-up (steam_attention,
 # steam.focus). Covers session wiring and flags; the launcher flow
 # tests use cage (tests/vm/boot.nix) because Flutter cannot present GL frames under software gamescope
@@ -111,14 +113,14 @@
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPE_FOCUSED_APP | grep -q 4100000000"), timeout=60)
     wait_sees("the placeholder", "hinteros", "placeholder")
 
-    # Session API 0.16 over the socket.
+    # Session API 0.17 over the socket.
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.16", "client": {"name": "gamescope-test", "version": "0"}}}
+                 "params": {"api_version": "0.17", "client": {"name": "gamescope-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         out = machine.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"))
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
-        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.16", replies[0]
+        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.17", replies[0]
         return replies
 
     def call(method, params=None, wait=2):
@@ -149,7 +151,7 @@
     # A long-lived subscriber, so events can be checked after the fact.
     sub = [
         {"jsonrpc": "2.0", "id": 0, "method": "hello",
-         "params": {"api_version": "0.16", "client": {"name": "gamescope-test-events", "version": "0"}}},
+         "params": {"api_version": "0.17", "client": {"name": "gamescope-test-events", "version": "0"}}},
         {"jsonrpc": "2.0", "id": 1, "method": "subscribe",
          "params": {"events": ["app_started", "app_exited", "focus_changed", "steam_attention", "home_pressed"]}},
     ]
@@ -196,10 +198,17 @@
     ok("apps.launch", {"url": "steam://rungameid/1000002"})
     wait_sees("the fake game again", "fakegame", absent=("placeholder",))
 
-    # Keyboard Home: Ctrl + Super + D, read by the daemon from the VM's keyboard (the session user
-    # is in group input here; with the greeter it is a uaccess ACL, see hardening). Ctrl + D alone
-    # does nothing; the chord is Home at once, like SIGUSR1, and the game keeps running.
-    machine.wait_until_succeeds(f"journalctl -b _UID={uid} | grep -q 'keyboard found'", timeout=30)
+    # Keyboard Home: Ctrl + Super + D on the VM's keyboard. Only the hinteros-keyboard unit reads
+    # it (the session user cannot open a keyboard: no group input, no ACL); hinteros-system sends
+    # keyboard_home to the seat0 owner's daemon. Ctrl + D alone does nothing; the chord is Home at
+    # once, like SIGUSR1, and the game keeps running.
+    keyboards = machine.succeed(
+        "for d in /dev/input/event*; do udevadm info -q property $d | grep -qx ID_INPUT_KEYBOARD=1 && echo $d; done; true"
+    ).split()
+    assert keyboards, machine.succeed("ls -l /dev/input")
+    for dev in keyboards:
+        machine.fail(f"runuser -u hinteros -- test -r {dev}")
+    machine.wait_until_succeeds("journalctl -b -u hinteros-keyboard | grep -q 'keyboard found'", timeout=30)
     homes = len(events("home_pressed"))
     machine.send_key("ctrl-d")
     machine.sleep(3)

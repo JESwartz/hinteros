@@ -14,23 +14,24 @@ second machine to build the ISO. An Ethernet cable for the online part; a Wi-Fi 
 - [ ] `sudo dd if=result/iso/hinteros-installer.iso of=/dev/sdX bs=4M conv=fsync status=progress` (check the device with `lsblk`).
 - [ ] The mini PC boots the stick in UEFI mode (boot menu key, pick the UEFI entry). Record: time to the console, any boot menu or Secure Boot complaint, whether the display and the keyboard work.
 - [ ] The console shows the HinterOS installer notice (not an installer UI: none is wired yet) and `hinteros-install` is on the PATH.
-- [ ] `lsblk` shows the internal disk; note its by-id path (`ls -l /dev/disk/by-id/`) for the plan.
+- [ ] `lsblk -o PATH,DISK-SEQ,MODEL,SIZE` shows the internal disk; note its by-id path (`ls -l /dev/disk/by-id/`) and its `DISK-SEQ` (`diskSeq` in the plan).
 
 ## Refusals (nothing may be touched)
 
 - [ ] `sudo hinteros-install --plan plan.json --validate-only` with a good plan ends with a `done` line and changes nothing.
 - [ ] A plan without `admin.password` is refused (`admin-password-missing`, exit status 2).
+- [ ] A plan with an `admin.password` of 7 characters is refused (`admin-password-short`, exit status 2).
 - [ ] A plan naming the USB stick as `disk` is refused (`disk-in-use`).
 - [ ] With the network cable out, a plan with `steam` is refused (`app-needs-network`); the same plan with `youtube` and `firefox` only is accepted.
 
 ## Offline install (cable out, no Wi-Fi)
 
-- [ ] `plan.json`: the internal disk, `hostname`, an admin user and password, `ssh.enable` true, `apps` `["youtube","firefox"]`.
+- [ ] `plan.json`: the internal disk and its `diskSeq`, `hostname`, an admin user and password, `ssh.enable` true, `apps` `["youtube","firefox"]`.
 - [ ] `sudo hinteros-install --plan plan.json` runs to `done` (100%). Record: total time, the progress lines look sensible (stage and percent only go forward), warnings (`facter-failed`?).
 - [ ] `/var/log/hinteros-install.log` has no network errors (no attempts to fetch from cache.nixos.org or the Forgejo).
 - [ ] Remove the stick, reboot: the box boots from the internal disk (systemd-boot, no menu needed), reaches the launcher with a controller attached. Record: boot time.
 - [ ] The launcher lists YouTube and Firefox only (Jellyfin and Steam are offered but unticked; Crunchyroll, Moonlight and Plex are Store-only).
-- [ ] From another machine: `ssh <admin>@<host>` with the plan's password works; the same for `hinteros` and `root` fails. `sudo` asks for the admin password.
+- [ ] From another machine on the LAN: `ssh <admin>@<host>` with the plan's password works; the same for `hinteros` and `root` fails. `sudo` asks for the admin password. `sudo iptables -S nixos-fw | grep "dport 22"` shows only the local networks as sources.
 - [ ] `ls /etc/hinteros` shows `flake.nix flake.lock state.json facter.json`; `state.json` has the apps, ssh and admin user but no password; `/var/lib/hinteros/admin-password-hash` is `0600 root`.
 - [ ] `diff -r /etc/hinteros /run/current-system/hinteros` shows only `facter.json` as extra.
 - [ ] `lsblk -f`: a 1 GiB vfat ESP (`hinteros-esp`) and an ext4 root (`hinteros-root`) filling the rest.
