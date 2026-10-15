@@ -5,8 +5,11 @@
 # (apps.launch / Home / apps.focus) and keyboard input, and from inside its sandbox reach
 # neither #0 nor #1: not through socket files (only #2's is bound) and not through the abstract
 # sockets @/tmp/.X11-unix/X<n> (gamescope is patched not to open them; the sandbox shares the
-# network namespace). XTEST from #2 must not type into the home app. A fake Steam game must not
-# land on #2. Prints the Xwaylands' RSS.
+# network namespace). XTEST from #2 must not type into the home app. Steam's and gamescope's
+# control properties set on #2 (its root: GAMESCOPECTRL_BASELAYER_APPID, mode control, new
+# Xwayland; the app's window: STEAM_GAME, STEAM_OVERLAY, STEAM_INPUT_FOCUS,
+# GAMESCOPE_EXTERNAL_OVERLAY) change neither focus nor the app's id nor global state; the same
+# mode control on #0 still works. A fake Steam game must not land on #2. Prints the Xwaylands' RSS.
 { self, pkgs }:
 let
   # Logs every line typed into it (the home app: it must never get the app's XTEST keys).
@@ -219,6 +222,39 @@ in
     typed_home = machine.execute(f"cat {home}/home-typed")[1]
     print("home app got:", repr(typed_home))
     assert "injected" not in typed_home, typed_home
+
+    # Control properties from the apps' display count for nothing (the home app has focus).
+    def focused():
+        return root_prop("GAMESCOPE_FOCUSED_APP")
+
+    def focusable():
+        return root_prop("GAMESCOPE_FOCUSABLE_APPS")
+
+    assert str(app_id) in focusable(), focusable()
+    sockets = machine.succeed("ls /tmp/.X11-unix").split()
+    ctrl_before = root_prop("GAMESCOPECTRL_BASELAYER_APPID")
+    machine.succeed(as_user(f"xprop -root -f GAMESCOPECTRL_BASELAYER_APPID 32c -set GAMESCOPECTRL_BASELAYER_APPID {app_id}", ":2"))
+    machine.succeed(as_user("xprop -root -f GAMESCOPE_XWAYLAND_MODE_CONTROL 32c -set GAMESCOPE_XWAYLAND_MODE_CONTROL 1,320,240,1", ":2"))
+    machine.succeed(as_user("xprop -root -f GAMESCOPE_CREATE_XWAYLAND_SERVER 32c -set GAMESCOPE_CREATE_XWAYLAND_SERVER 7", ":2"))
+    for atom, value in [("STEAM_GAME", 4100000000), ("STEAM_OVERLAY", 1), ("STEAM_INPUT_FOCUS", 1),
+                        ("GAMESCOPE_EXTERNAL_OVERLAY", 1)]:
+        machine.succeed(as_user(f"xprop -name probe -f {atom} 32c -set {atom} {value}", ":2"))
+    machine.sleep(3)
+    assert "4100000000" in focused(), ("focus moved", focused())
+    assert root_prop("GAMESCOPECTRL_BASELAYER_APPID") == ctrl_before, root_prop("GAMESCOPECTRL_BASELAYER_APPID")
+    assert str(app_id) in focusable(), ("the app's id changed", focusable())
+    assert geometry("-root", ":1") == (640, 512), ("mode control from :2", geometry("-root", ":1"))
+    assert machine.succeed("ls /tmp/.X11-unix").split() == sockets, "a new Xwayland from :2"
+    # The app's window is still an ordinary app window with its own id.
+    ok("apps.focus", {"id": "probe"})
+    wait_focused(app_id)
+    machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
+    wait_focused(4100000000)
+    # The same mode control on :0 still works (and is undone).
+    machine.succeed(as_user("xprop -root -f GAMESCOPE_XWAYLAND_MODE_CONTROL 32c -set GAMESCOPE_XWAYLAND_MODE_CONTROL 1,320,240,1", ":0"))
+    machine.wait_until_succeeds(as_user("xwininfo -root | grep -q 'Width: 320'", ":1"), timeout=30)
+    machine.succeed(as_user("xprop -root -f GAMESCOPE_XWAYLAND_MODE_CONTROL 32c -set GAMESCOPE_XWAYLAND_MODE_CONTROL 1,640,512,1", ":0"))
+    machine.wait_until_succeeds(as_user("xwininfo -root | grep -q 'Width: 640'", ":1"), timeout=30)
 
     # A fake Steam game does not land on the apps' display.
     ok("apps.launch", {"url": "steam://rungameid/1000002"})

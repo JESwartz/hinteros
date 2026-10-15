@@ -27,12 +27,19 @@ final: prev: {
   # xwayland-apps-no-input-emulation.patch: each Xwayland sent XTEST input to gamescope (libei,
   #   LIBEI_SOCKET), which gave it to the focused window on any Xwayland: an app on #2 could type
   #   into the home app. #2 now starts without LIBEI_SOCKET, so XTEST stays inside #2.
+  # xwayland-apps-no-control.patch: gamescope read Steam's and its own control properties on every
+  #   Xwayland: an app on #2 could set GAMESCOPECTRL_BASELAYER_APPID on its root (which app has
+  #   focus), claim the home app's id with STEAM_GAME, make itself an overlay (STEAM_OVERLAY,
+  #   GAMESCOPE_EXTERNAL_OVERLAY, STEAM_INPUT_FOCUS) or change global settings (FPS, VRR,
+  #   scaling, modes, screenshots). On #2 and later (any number of app displays) only the window
+  #   properties of ordinary X11 apps count now; their app id comes from the process tree.
   gamescope = prev.gamescope.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./pkgs/gamescope/keep-output-on-exit.patch
       ./pkgs/gamescope/xwayland-no-abstract-socket.patch
       ./pkgs/gamescope/xwayland-size-all.patch
       ./pkgs/gamescope/xwayland-apps-no-input-emulation.patch
+      ./pkgs/gamescope/xwayland-apps-no-control.patch
     ];
   });
 
