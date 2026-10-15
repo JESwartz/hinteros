@@ -53,6 +53,13 @@ let
       locale_ok() {
         test -z "$(locale 2>&1 >/dev/null)"
       }
+      render_nodes() {
+        local f out=""
+        for f in /dev/dri/renderD*; do
+          if [ -e "$f" ]; then out="$out''${f##*/},"; fi
+        done
+        echo "$out"
+      }
       {
         check tls curl -fsS https://${host}/
         check fonts fonts_ok
@@ -60,7 +67,7 @@ let
         check play play
         # The GPU: render nodes only (the VM may have none), never the display (card) nodes.
         check dri_card sh -c 'ls /dev/dri/card*'
-        echo "dri_render=$(ls /dev/dri 2>/dev/null | grep renderD | tr '\n' , || true)"
+        echo "dri_render=$(render_nodes)"
         check opengl test -e /run/opengl-driver/lib
       } > "$HOME/probe.tmp" 2> "$HOME/probe.err"
       mv "$HOME/probe.tmp" "$HOME/probe.txt"
