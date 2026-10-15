@@ -2,14 +2,15 @@
 # must cover the whole output, at the output's resolution, whatever its aspect. Regression test
 # for the real-hardware bug where the launcher (a native Wayland client) was drawn as a small,
 # blurry square: gamescope 3.16.31 never sizes Wayland toplevels, so apps now run on Xwayland,
-# whose first and third servers follow the output (--xwayland-count 3, xwayland-size-all.patch)
+# whose first server and the app displays (:2 and up) follow the output (--xwayland-count 2 + 4,
+# xwayland-size-all.patch)
 # and whose focused windows are resized to it (--force-windows-fullscreen).
 #
 # Two machines with gamescope's headless backend (lavapipe, as in tests/vm/gamescope.nix):
 #   wide:   a 1920x1080 output.
 #   square: a 1280x1024 (5:4) output with a smaller nested size (-w 640 -h 512). That stands in
 #           for gamescope having started before the display came up (it then starts at 1280x720):
-#           Xwaylands :0 and :2 must still be the output size, not the nested size (:1 is).
+#           Xwaylands :0 and :2-:5 must still be the output size, not the nested size (:1 is).
 # On each: the home app (an xterm, solid blue, that asks for a 20x4-character window and never
 # for fullscreen) runs under the reaper like the launcher; its window and the Xwayland root must
 # equal the output size and a gamescope screenshot must be blue edge to edge. Then the daemon
@@ -174,8 +175,9 @@ in
         m.wait_for_unit("hinteros-session.service", "hinteros")
         m.wait_until_succeeds(as_user("xprop -root GAMESCOPECTRL_BASELAYER_APPID | grep -q 4100000000"), timeout=90)
         assert geometry("-root") == (w, h), ("Xwayland :0 root", geometry("-root"))
-        # The apps' Xwayland (:2) follows the output too (xwayland-size-all.patch).
-        assert geometry("-root", ":2") == (w, h), ("Xwayland :2 root", geometry("-root", ":2"))
+        # Every app display (:2-:5) follows the output too (xwayland-size-all.patch).
+        for n in range(2, 6):
+            assert geometry("-root", f":{n}") == (w, h), (f"Xwayland :{n} root", geometry("-root", f":{n}"))
         if nested:
             assert geometry("-root", ":1") == nested, ("Xwayland :1 root", geometry("-root", ":1"))
         # The first wl_output (what the daemon's display.modes/set_mode read as the current

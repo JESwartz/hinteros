@@ -10,6 +10,7 @@ let
 
   compositorCommand = {
     gamescope = [
+      appDisplaysWrapper
       (lib.getExe cfg.gamescope.package)
     ]
     ++ lib.optionals (cfg.gamescope.backend != null) [
@@ -29,18 +30,20 @@ let
     #   fixed at start (main.cpp: nested = output at start, never updated): a display.set_mode to
     #   another size, or a display that came up after gamescope (a TV switched on after boot:
     #   gamescope starts at 1280x720), left every app letterboxed or upscaled. The second
-    #   Xwayland (:1, STEAM_GAME_DISPLAY_0) is the one SteamOS gives games. The third (:2) holds
-    #   every app the daemon starts (daemon.nix `apps_display`), so that no app can read or type
-    #   into the home app (PIN entry) or the OSK. Patched (nixos/overlay.nix): every Xwayland but
-    #   :1 follows the output like :0, and none listens on an abstract socket (a sandboxed app
-    #   gets only :2's socket file, but shares the network namespace).
+    #   Xwayland (:1, STEAM_GAME_DISPLAY_0) is the one SteamOS gives games. The others (:2 and
+    #   up, the app displays) each hold one app the daemon starts (daemon.nix `apps_display`), so
+    #   that no app can read or type into the home app (PIN entry), the OSK or another app. Their
+    #   number is the profile's setting (`appDisplaysWrapper` sets the count below). Patched
+    #   (nixos/overlay.nix): every Xwayland but :1 follows the output like :0, none listens on an
+    #   abstract socket (a sandboxed app gets only its own display's socket file, but shares the
+    #   network namespace), and none from #2 on gets LIBEI_SOCKET.
     # --force-windows-fullscreen: every focused X11 app window is resized to its Xwayland root
     #   (= the output), also windows that never ask for fullscreen or pin their size.
     ++ [
       "-e"
       "--expose-wayland"
       "--xwayland-count"
-      "3"
+      (toString (2 + cfg.gamescope.appDisplays))
       "--force-windows-fullscreen"
       # The pointer (right stick in keyboard-profile apps) never fades on inactivity (the
       # daemon hides it on the D-pad), and is large enough to see on a TV (`cursor` options).
@@ -142,6 +145,38 @@ let
     export GAMESCOPE_PATCHED_EDID_FILE="$XDG_RUNTIME_DIR/gamescope-edid"
     export GAMESCOPE_MODE_SAVE_FILE="$state/gamescope-modes"
     exec "$@"
+  '';
+
+  # App displays (daemon README "Own display"): gamescope makes its Xwaylands at start only, so
+  # the profile's number of app displays (`apps.displays.set`, one number in
+  # $XDG_STATE_HOME/hinteros/app-displays; else `gamescope.appDisplays`) is read here, written
+  # for the session daemon as this session's number ($XDG_RUNTIME_DIR/hinteros/app-displays,
+  # hidden from Steam and the sandbox), and becomes `--xwayland-count` 2 + n. Only in front of
+  # gamescope: the daemon (restarted on its own) must keep reading what this gamescope has.
+  appDisplaysWrapper = pkgs.writeShellScript "hinteros-app-displays" ''
+    n=$(${pkgs.coreutils}/bin/cat "''${XDG_STATE_HOME:-$HOME/.local/state}/hinteros/app-displays" 2>/dev/null)
+    n=''${n//[[:space:]]/}
+    case "$n" in
+      [1-8]) ;;
+      *) n=${toString cfg.gamescope.appDisplays} ;;
+    esac
+    if [ -n "''${XDG_RUNTIME_DIR:-}" ]; then
+      ${pkgs.coreutils}/bin/mkdir -p -m 0700 "$XDG_RUNTIME_DIR/hinteros"
+      echo "$n" > "$XDG_RUNTIME_DIR/hinteros/app-displays.new" \
+        && ${pkgs.coreutils}/bin/mv -f "$XDG_RUNTIME_DIR/hinteros/app-displays.new" "$XDG_RUNTIME_DIR/hinteros/app-displays"
+    fi
+    args=()
+    count=
+    for a in "$@"; do
+      if [ "$count" = next ]; then
+        a=$((2 + n))
+        count=done
+      elif [ -z "$count" ] && [ "$a" = --xwayland-count ]; then
+        count=next
+      fi
+      args+=("$a")
+    done
+    exec "''${args[@]}"
   '';
 
   # Per-profile apps (apps.md, "The session side"): the profile's app env on PATH and
@@ -378,6 +413,16 @@ in
         description = ''
           gamescope `--backend`. `null` lets gamescope choose (DRM on a bare TTY). `headless`
           renders without a display and is what the `gamescope` VM test uses.
+        '';
+      };
+      appDisplays = lib.mkOption {
+        type = lib.types.ints.between 1 8;
+        default = 4;
+        description = ''
+          How many app displays (Xwaylands :2 and up, one per running app the session daemon
+          starts) a session gets when its profile has not chosen (Settings, `apps.displays.set`,
+          read at each session start). gamescope starts with `--xwayland-count` 2 + that
+          number. Each idle Xwayland costs some memory.
         '';
       };
       extraArgs = lib.mkOption {

@@ -750,7 +750,7 @@ let
     # gamescope: apps on Xwayland sized to the output (README "Display size"), output logged.
     testGamescopeAppSize = {
       expr = [
-        (lib.hasInfix "--xwayland-count 3 --force-windows-fullscreen" (sessionCmd gs))
+        (lib.hasInfix "--xwayland-count 6 --force-windows-fullscreen" (sessionCmd gs))
         (lib.hasInfix "GDK_BACKEND=x11" (sessionCmd gs))
         gs.config.systemd.user.services.hinteros-session.environment.GDK_BACKEND
         (lib.hasInfix "systemd-cat --identifier hinteros-compositor" (sessionCmd gs))
@@ -766,11 +766,16 @@ let
         "unset"
       ];
     };
-    # gamescope: apps on the third Xwayland, patched (design/sandbox.md step 3); cage: one display.
+    # gamescope: each app on an Xwayland of its own from the third on, patched
+    # (design/sandbox.md step 3), their number read before gamescope starts; cage: one display.
     testGamescopeAppsDisplay = {
       expr = [
         (settings gs).gamescope.apps_display
         ((settings cage).gamescope.apps_display or "unset")
+        (settings gs).gamescope.app_displays
+        (lib.hasInfix "hinteros-app-displays" (sessionCmd gs))
+        (lib.hasInfix "hinteros-app-displays" (sessionCmd cage))
+        (lib.hasInfix "hinteros-app-displays" gs.config.systemd.user.services.hinteros-session.serviceConfig.ExecStart)
         (lib.all
           (p: lib.elem p (map baseNameOf (gs.config.hinteros.session.gamescope.package.patches or [ ])))
           [
@@ -783,6 +788,10 @@ let
       expected = [
         "auto+2"
         "unset"
+        4
+        true
+        false
+        false
         true
       ];
     };
