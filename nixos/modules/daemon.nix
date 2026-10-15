@@ -187,6 +187,17 @@ in
       };
     };
 
+    sandbox.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Start apps in the session daemon's bwrap sandbox (session.toml `[sandbox]`,
+        design/sandbox.md): every app with `sandbox = true` (all catalog apps but Steam) gets
+        its own home and sees none of the HinterOS sockets, the D-Bus buses, uinput or the real
+        home. Off: apps run as the profile user, as before.
+      '';
+    };
+
     daemon = {
       enable = lib.mkEnableOption "the HinterOS session daemon and system service";
 
@@ -360,6 +371,12 @@ in
         library_debounce_ms = lib.mkDefault 500;
       };
       close.timeout_ms = lib.mkDefault 5000;
+      # The app sandbox (design/sandbox.md). bwrap by absolute store path: unprivileged, it needs
+      # no setuid wrapper, only user namespaces.
+      sandbox = {
+        enable = lib.mkDefault config.hinteros.sandbox.enable;
+        bwrap = lib.mkDefault (lib.getExe pkgs.bubblewrap);
+      };
       # Runtime settings (API 0.7): the audio client is pactl (PipeWire's PulseAudio server finds
       # its socket through XDG_RUNTIME_DIR, which the user manager sets). An absolute path: the
       # user unit's PATH is the profile's, which does not carry it.
@@ -634,7 +651,8 @@ in
           RestartSec = 1;
           NoNewPrivileges = true;
           ProtectKernelModules = true;
-          ProtectKernelTunables = true;
+          # No ProtectKernelTunables: with /proc/sys read-only bind-mounted over, bwrap cannot
+          # mount a new /proc for the app sandbox. bwrap makes /proc/sys read-only inside it.
           ProtectControlGroups = true;
           RestrictRealtime = true;
           LockPersonality = true;

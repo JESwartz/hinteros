@@ -355,6 +355,43 @@ let
       );
       expected = false;
     };
+    # design/sandbox.md: every app entry says whether it is sandboxed and carries the catalog's
+    # permissions; session.toml turns the sandbox on with bwrap by store path.
+    testSandboxSettings = {
+      expr = {
+        firefox = {
+          inherit (entry base "firefox") sandbox permissions;
+        };
+        youtube = {
+          inherit (entry base "youtube") sandbox;
+          hasPermissions = (entry base "youtube") ? permissions;
+        };
+        plex = (entry plex "plex-htpc").permissions;
+        enable = (settings base).sandbox.enable;
+        bwrap = lib.hasSuffix "/bin/bwrap" (settings base).sandbox.bwrap;
+        off =
+          (settings (mk {
+            hinteros.sandbox.enable = false;
+          })).sandbox.enable;
+        protectTunables =
+          base.config.systemd.user.services.hinteros-session.serviceConfig ? ProtectKernelTunables;
+      };
+      expected = {
+        firefox = {
+          sandbox = true;
+          permissions.downloads = "optional";
+        };
+        youtube = {
+          sandbox = true;
+          hasPermissions = false;
+        };
+        plex.gamepad = "required";
+        enable = true;
+        bwrap = true;
+        off = false;
+        protectTunables = false;
+      };
+    };
     # Daemon README, "Pointer and on-screen keyboard": plain Firefox gets address_bar, kiosk apps do not.
     testAddressBar = {
       expr = [

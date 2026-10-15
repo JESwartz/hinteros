@@ -147,10 +147,11 @@ in
     machine.wait_until_succeeds("grep -F '\"focus\"' /tmp/posted.log | grep -F '\"t\"'", timeout=60)
     machine.screenshot("typing-before")
 
-    # The extension is installed and active in the kiosk profile (policy force-install on ESR)...
+    # The extension is installed and active in the kiosk profile (policy force-install on ESR),
+    # which is in the app's sandbox home (design/sandbox.md)...
     machine.wait_until_succeeds(
         "jq -e '.addons[] | select(.id == \"hinteros-osk@hinteros\" and .active == true)' "
-        "/home/hinteros/.local/share/hinteros/firefox/firefox/extensions.json",
+        "/home/hinteros/.local/share/hinteros/sandbox/firefox/.local/share/hinteros/firefox/firefox/extensions.json",
         timeout=120,
     )
     # ...and the text field's focus reached the daemon, which showed the keyboard by itself.

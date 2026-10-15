@@ -135,6 +135,34 @@ rec {
           '';
         };
 
+        sandbox = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Start the app in the session daemon's bwrap sandbox (session.toml `sandbox`, see
+            design/sandbox.md). Every catalog app except Steam; needs `hinteros.sandbox.enable`.
+          '';
+        };
+
+        permissions = lib.mkOption {
+          type = lib.types.attrsOf (
+            lib.types.enum [
+              "required"
+              "optional"
+            ]
+          );
+          default = { };
+          example = {
+            gamepad = "required";
+            downloads = "optional";
+          };
+          description = ''
+            What the app may use in its sandbox (the catalog's `permissions`): `gamepad`, `mic`,
+            `downloads`, each `required` or `optional` (the profile user can deny it). Written
+            to session.toml as `permissions`.
+          '';
+        };
+
         backKey = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
@@ -185,7 +213,11 @@ rec {
     }
     // lib.optionalAttrs (value.input != null) { inherit (value) input; }
     // lib.optionalAttrs value.addressBar { address_bar = true; }
-    // lib.optionalAttrs (value.backKey != null) { back_key = value.backKey; };
+    // lib.optionalAttrs (value.backKey != null) { back_key = value.backKey; }
+    // lib.optionalAttrs (value.permissions != { }) { inherit (value) permissions; }
+    // {
+      inherit (value) sandbox;
+    };
 
   # mkDefault on every leaf: settings stay overridable one by one. Derivations (the `package`)
   # are values, not attribute sets to walk into.
@@ -207,6 +239,8 @@ rec {
       iconUrl = e.icon.iconUrl or null;
       siteUrl = e.icon.siteUrl or null;
       firefoxProfile = e.icon.firefoxProfile or false;
+      sandbox = e.sandbox or true;
+      permissions = e.permissions or { };
     }
     // (
       if e.app == null then
