@@ -95,6 +95,8 @@ in
           enable = true;
           name = "Probe";
           package = probe;
+          # The https server is on this box (127.0.0.1): local network.
+          permissions.lan = "required";
         };
       };
 
