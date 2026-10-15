@@ -228,14 +228,21 @@ in
         machine.wait_until_succeeds(f"test -s {out}", timeout=90)
         res = dict(line.split("=", 1) for line in machine.succeed(f"cat {out}").split())
         print(app, res)
+        # The cgroup the probe runs in (its reaper moved there before it started anything); the
+        # daemon stays in its leaf.
+        cg = machine.succeed("cat /proc/$(pgrep -u hinteros -o -f [h]interos-lan-probe)/cgroup").strip()
+        daemon = machine.succeed(f"{user} systemctl --user show -p MainPID --value hinteros-session.service").strip()
+        machine.succeed(f"grep -qx {daemon} {unit_cg}/daemon/cgroup.procs")
         ok("apps.close", {"id": app})
         machine.wait_until_fails("pgrep -u hinteros -f [h]interos-lan-probe", timeout=30)
+        res["cgroup"] = cg
         return res
 
     local = ["lan_http", "lan6_http", "ll6_http", "loop_http", "loop6_http", "udp_lan", "mcast", "bcast"]
     open_ = ["dns", "dns_tcp", "inet_http", "inet_name"]
 
     def expect(res, lan):
+        assert res["cgroup"].endswith("/hinteros-session.service/daemon" if lan else "/hinteros-session.service/nolan"), res
         for k in local:
             assert res[k] == ("yes" if lan else "no"), (k, res)
         for k in open_:
