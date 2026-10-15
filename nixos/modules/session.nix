@@ -196,10 +196,7 @@ let
   ++ lib.optional (cfg.compositor == "gamescope") cfg.displayEnvWrapper;
 
   sessionCommand = lib.escapeShellArgs (
-    [ sessionStart ]
-    ++ compositorPrefix
-    ++ compositorCommand.${cfg.compositor}
-    ++ homeCommand
+    [ sessionStart ] ++ compositorPrefix ++ compositorCommand.${cfg.compositor} ++ homeCommand
   );
 
   # The greeter (profiles.md, "The pieces"). greetd runs `greeterLink` as `hinteros-greeter` at
