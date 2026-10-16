@@ -3,7 +3,8 @@
 # its password; with SSH on (state.json) the admin logs in with username + password, from the
 # local networks only (a global IPv6 source is refused), while the session user and root cannot;
 # with SSH off nothing listens. Dev box: the separate key-based deploy user has passwordless sudo
-# and nix, the session user still nothing.
+# and nix, the session user still nothing. Kernel sysctls (kptr, dmesg, perf, BPF, io_uring,
+# ptrace, protected files) have their hardened values; the session user cannot read dmesg.
 #
 # Profiles (profiles.md "One Unix user per profile", "Device access per seat"; DECISIONS D4, S2):
 # on a schema-2 box in greeter mode (started after the others), every account (p1, p2, the guest)
@@ -134,6 +135,20 @@ in
 
       NIX = "nix --extra-experimental-features nix-command store ping --store daemon"
 
+      KERNEL_SYSCTLS = {
+          "kernel.kptr_restrict": "2",
+          "kernel.dmesg_restrict": "1",
+          "kernel.perf_event_paranoid": "3",
+          "kernel.unprivileged_bpf_disabled": "1",
+          "net.core.bpf_jit_harden": "2",
+          "kernel.io_uring_disabled": "2",
+          "kernel.yama.ptrace_scope": "1",
+          "fs.protected_hardlinks": "1",
+          "fs.protected_symlinks": "1",
+          "fs.protected_fifos": "2",
+          "fs.protected_regular": "2",
+      }
+
       # ---- non-dev: the session user ---------------------------------------------------------
       for m in (machine, quiet):
           assert "wheel" not in m.succeed("id -nG hinteros").split(), "session user in wheel"
@@ -154,6 +169,13 @@ in
           pk = m.succeed("pkaction --action-id org.hinteros.system.ssh --verbose")
           assert "implicit active:" in pk and "auth_admin" in pk, pk
           assert "implicit any:" in pk
+          # Kernel sysctls: what the kernel really has after boot.
+          for key, want in KERNEL_SYSCTLS.items():
+              got = m.succeed(f"sysctl -n {key}").strip()
+              assert got == want, (key, got, want)
+          m.fail("runuser -u hinteros -- dmesg")
+          # kptr_restrict 2: no kernel addresses, also for root.
+          m.fail("grep -qv '^0000000000000000 ' /proc/kallsyms")
 
       # ---- admin account (machine) --------------------------------------------------------------
       assert "wheel" in machine.succeed("id -nG hinteros-admin").split()

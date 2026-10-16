@@ -110,6 +110,45 @@ let
   # lower-numbered rules file that returns NO.
   greeterOn = config.hinteros.profiles.greeter.enable or false;
   keyboardHome = cfg.input.keyboardHome;
+
+  # The play-only sound socket for sandboxed apps (design/sandbox.md, `mic`): a second
+  # pipewire-pulse at $XDG_RUNTIME_DIR/pulse/play that refuses every record stream (the rule
+  # matches every client: a client can set any property it likes, but not remove one), module
+  # loading (a module could open a new, unrestricted socket) and source volume. Apps with `mic`
+  # get the full pulse/native. No WirePlumber rule: the restriction is in this server alone.
+  playPulse = config.hinteros.sandbox.enable && config.services.pipewire.pulse.enable;
+
+  # `lan` (design/sandbox.md): apps without it start in the session daemon's `nolan` cgroup
+  # (Delegate=yes), which hinteros-lan-filter.service keeps off the local network with an
+  # nftables table of its own (`inet hinteros_lan`, `socket cgroupv2`), on whatever firewall
+  # backend. hinteros-system (no CAP_NET_ADMIN, no netlink) only writes the cgroups to
+  # /run/hinteros/lan-filter.json and restarts the unit.
+  lanFilter = config.hinteros.sandbox.enable && config.hinteros.sandbox.lan.enable;
+  lanFilterCmd = "${lib.getExe cfg.system.package} lan-filter-apply --nft ${lib.getExe pkgs.nftables}";
+  playPulseConf = pkgs.writeText "pipewire-pulse-play.conf" ''
+    context.properties = { }
+    context.spa-libs = {
+      audio.convert.* = audioconvert/libspa-audioconvert
+      support.*       = support/libspa-support
+    }
+    context.modules = [
+      { name = libpipewire-module-rt args = { nice.level = -11 rtportal.enabled = false } flags = [ ifexists nofail ] }
+      { name = libpipewire-module-protocol-native }
+      { name = libpipewire-module-client-node }
+      { name = libpipewire-module-adapter }
+      { name = libpipewire-module-metadata }
+      { name = libpipewire-module-protocol-pulse }
+    ]
+    pulse.properties = {
+      server.address = [ "unix:play" ]
+      server.dbus-name = ""
+      pulse.allow-module-loading = false
+    }
+    pulse.rules = [
+      { matches = [ { pulse.server.type = "~.*" } { pulse.server.type = null } ]
+        actions = { quirks = [ block-record-stream block-source-volume ] } }
+    ]
+  '';
   polkitRules = ''
     polkit.addRule(function (action, subject) {
       if (action.id.indexOf("org.hinteros.system.") === 0 &&
@@ -185,6 +224,30 @@ in
           generation containing it is running.
         '';
       };
+    };
+
+    sandbox.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Start apps in the session daemon's bwrap sandbox (session.toml `[sandbox]`,
+        design/sandbox.md): every app with `sandbox = true` (all catalog apps but Steam) gets
+        its own home and sees none of the HinterOS sockets, the D-Bus buses, uinput or the real
+        home. Off: apps run as the profile user, as before.
+      '';
+    };
+
+    sandbox.lan.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Enforce the `lan` app permission (design/sandbox.md): a sandboxed app without it cannot
+        reach the local network (private, link-local, loopback, multicast and on-link addresses,
+        this box's own services), only DNS to the box's nameservers and the internet. The session
+        daemon's user unit gets `Delegate=yes`; `hinteros-lan-filter.service` loads the nftables
+        table `inet hinteros_lan`. Off: `lan` is not listed and every app reaches the network.
+        Needs `hinteros.sandbox.enable`.
+      '';
     };
 
     daemon = {
@@ -325,6 +388,13 @@ in
         wayland_display = lib.mkDefault (
           if config.hinteros.session.compositor == "gamescope" then "gamescope-0" else "wayland-0"
         );
+      }
+      # Each app on an Xwayland of its own, from the third on (session.nix, design/sandbox.md
+      # step 3), away from the home app and the OSK on the first and from each other. Cage has
+      # one Xwayland: apps stay on :0.
+      // lib.optionalAttrs (config.hinteros.session.compositor == "gamescope") {
+        apps_display = lib.mkDefault "auto+2";
+        app_displays = lib.mkDefault config.hinteros.session.gamescope.appDisplays;
       };
       osk = {
         inherit (cfg.osk) enable summon;
@@ -360,6 +430,17 @@ in
         library_debounce_ms = lib.mkDefault 500;
       };
       close.timeout_ms = lib.mkDefault 5000;
+      # The app sandbox (design/sandbox.md). bwrap by absolute store path: unprivileged, it needs
+      # no setuid wrapper, only user namespaces.
+      sandbox = {
+        enable = lib.mkDefault config.hinteros.sandbox.enable;
+        bwrap = lib.mkDefault (lib.getExe pkgs.bubblewrap);
+        lan_filter = lib.mkDefault lanFilter;
+      }
+      // lib.optionalAttrs playPulse {
+        pulse_socket = lib.mkDefault "pulse/play";
+        pulse_record_socket = lib.mkDefault "pulse/native";
+      };
       # Runtime settings (API 0.7): the audio client is pactl (PipeWire's PulseAudio server finds
       # its socket through XDG_RUNTIME_DIR, which the user manager sets). An absolute path: the
       # user unit's PATH is the profile's, which does not carry it.
@@ -384,6 +465,22 @@ in
     ];
 
     security.polkit.enable = true;
+    # The on-link networks are part of the local network (a home network on public addresses,
+    # the ISP's IPv6 prefix): load the table again when NetworkManager changes a connection.
+    networking.networkmanager.dispatcherScripts =
+      lib.mkIf (lanFilter && config.networking.networkmanager.enable)
+        [
+          {
+            type = "basic";
+            source = pkgs.writeShellScript "hinteros-lan-filter-hook" ''
+              case "$2" in
+                up | down | dhcp4-change | dhcp6-change | connectivity-change)
+                  exec ${config.systemd.package}/bin/systemctl --no-block start hinteros-lan-filter.service
+                  ;;
+              esac
+            '';
+          }
+        ];
     environment = {
       # sw/bin/hinteros-session and sw/bin/hinteros-system (hinteros-system compares them across
       # generations for session_restart_required), plus the per-generation files and polkit actions.
@@ -456,6 +553,51 @@ in
         };
       };
 
+      # `lan` (design/sandbox.md): loads the nftables table `inet hinteros_lan` for the cgroups in
+      # /run/hinteros/lan-filter.json (hinteros-system restarts it over D-Bus on lan_filter.*;
+      # the path unit and NetworkManager's hook when the nameservers or the network change). One
+      # nft transaction: when it fails the old table stays. The only HinterOS unit with
+      # CAP_NET_ADMIN; it needs the host's network namespace (no PrivateNetwork).
+      hinteros-lan-filter = lib.mkIf lanFilter {
+        description = "HinterOS: keep apps without lan off the local network";
+        # resolvconf writes /etc/resolv.conf several times at boot: no start limit, else the path
+        # unit gives up and lan_filter.set fails until the limit passes.
+        startLimitIntervalSec = 0;
+        after = [
+          "nftables.service"
+          "firewall.service"
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = lanFilterCmd;
+          User = "root";
+          CapabilityBoundingSet = [ "CAP_NET_ADMIN" ];
+          RestrictAddressFamilies = [
+            "AF_NETLINK"
+            "AF_UNIX"
+          ];
+          ProtectSystem = "strict";
+          ProtectHome = true;
+          PrivateTmp = true;
+          NoNewPrivileges = true;
+          # nft's expressions (socket, fib, reject) still load their modules on first use.
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectKernelLogs = true;
+          ProtectControlGroups = true;
+          ProtectClock = true;
+          ProtectHostname = true;
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          SystemCallArchitectures = "native";
+          SystemCallFilter = [ "@system-service" ];
+          UMask = "0077";
+        };
+      };
+
       # Ctrl+Super+D (`input.keyboardHome`): the only reader of keyboards on the box. A profile
       # account never gets keyboard access (no uaccess rule, no group `input`): a game could log
       # the admin password typed into the launcher's prompt or on the admin console. Each press
@@ -514,10 +656,22 @@ in
     };
 
     systemd = {
+      # The nameservers DNS may go to come from /etc/resolv.conf: load the table again when it
+      # changes (no cgroup filtered: the unit removes the table, which costs nothing).
+      paths.hinteros-lan-filter = lib.mkIf lanFilter {
+        wantedBy = [ "multi-user.target" ];
+        pathConfig.PathModified = "/etc/resolv.conf";
+      };
+
       services.hinteros-system = {
         description = "HinterOS system service";
         wantedBy = [ "multi-user.target" ];
-        environment.RUST_LOG = cfg.logLevel;
+        environment = {
+          RUST_LOG = cfg.logLevel;
+        }
+        # `lan_filter.*` (the local network filter). In the environment, so it stays when a test
+        # replaces ExecStart.
+        // lib.optionalAttrs lanFilter { HINTEROS_LAN_FILTER = "true"; };
         serviceConfig = {
           # --freeze-inactive: a profile whose session is not the active one (a text console, the
           # picker, another session) is frozen until it is again (hinteros-system's freeze.rs):
@@ -599,9 +753,25 @@ in
       # on screen (the hinteros group). The greeter runs its own instance (session.nix).
       # It is wanted by default.target, which the user manager reaches at autologin, i.e. at
       # the same time as the compositor and home app start.
+      user.services.hinteros-pulse-play = lib.mkIf playPulse {
+        description = "HinterOS: play-only PulseAudio socket for apps";
+        wantedBy = [ "default.target" ];
+        unitConfig.ConditionGroup = cfg.group;
+        requires = [ "pipewire.socket" ];
+        after = [ "pipewire.service" ];
+        serviceConfig = {
+          ExecStart = "${lib.getExe' config.services.pipewire.package "pipewire"} -c ${playPulseConf}";
+          Restart = "on-failure";
+          RestartSec = 1;
+        };
+      };
+
       user.services.hinteros-session = {
         description = "HinterOS session daemon";
         wantedBy = [ "default.target" ];
+        # The play-only sound socket is there before the first app starts.
+        wants = lib.optional playPulse "hinteros-pulse-play.service";
+        after = lib.optional playPulse "hinteros-pulse-play.service";
         unitConfig.ConditionGroup = cfg.group;
         environment = {
           RUST_LOG = cfg.logLevel;
@@ -634,8 +804,13 @@ in
           RestartSec = 1;
           NoNewPrivileges = true;
           ProtectKernelModules = true;
-          ProtectKernelTunables = true;
-          ProtectControlGroups = true;
+          # No ProtectKernelTunables: with /proc/sys read-only bind-mounted over, bwrap cannot
+          # mount a new /proc for the app sandbox. bwrap makes /proc/sys read-only inside it.
+          # `lan`: the daemon owns its cgroup subtree (its leaf `daemon`, `nolan` for apps without
+          # lan), so /sys/fs/cgroup stays writable for it. The profile user can write its own
+          # user@<uid>.service subtree from any other process anyway.
+          ProtectControlGroups = !lanFilter;
+          Delegate = lanFilter;
           RestrictRealtime = true;
           LockPersonality = true;
         };

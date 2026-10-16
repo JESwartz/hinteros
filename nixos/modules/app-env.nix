@@ -18,8 +18,11 @@
 #   - /nix/var/nix/profiles/hinteros/{apps/<user>,starter}: root-owned Nix profiles (GC roots),
 #     set by hinteros-system's jobs with `nix-env -p … --set <env>`;
 #   - /run/hinteros/apps/<user>: the link sessions read, published by hinteros-system;
-#   - with `perProfile` (schema 2): session.toml `[apps] profile`, and the session command puts
-#     the profile's env on PATH and XDG_DATA_DIRS;
+#   - with `perProfile` (schema 2): session.toml `[apps] profile`. The env is never on any
+#     unsandboxed process's PATH or XDG_DATA_DIRS (a package is not trusted outside the sandbox:
+#     a Vulkan layer, a font or a `bin/` name of its own would load into gamescope, the launcher
+#     or the daemon). The session daemon reads it by path: the manifest, the commands (absolute
+#     store paths), `share/applications`, `share/icons` and `share/pixmaps` for icons;
 #   - the automatic clean-up (maintenance.nix) trims every app profile to its newest generations.
 {
   config,
@@ -69,11 +72,11 @@ let
           throw "hinteros.appEnv.build: hinteros.forbidUnfree is set but the env needs unfree packages: ${lib.concatStringsSep ", " forbidden}"
         else
           envPkgsFor unfree;
-      # The box's inputs to apps (catalog.md, format 3). Steam is stock pkgs.steam (spike 8):
-      # its drivers come from /run/opengl-driver(-32) at run time.
+      # The box's inputs to apps (catalog.md, format 3). Steam is stock pkgs.steam (spike 8) with
+      # our sockets hidden (lib/steam.nix); its drivers come from /run/opengl-driver(-32) at run time.
       box = {
         firefoxKiosk = config.hinteros.firefoxKiosk.mkWrapper p;
-        inherit (p) steam;
+        steam = import ../lib/steam.nix p.steam;
       };
       apps =
         (lib.evalModules {
@@ -127,9 +130,14 @@ let
     p.buildEnv {
       name = "hinteros-apps";
       paths = packages ++ [ (p.writeTextDir "share/hinteros/apps.json" (builtins.toJSON manifest)) ];
+      # Only what the session daemon reads (icons, the manifest) and `bin` (for a person at the
+      # console). Apps never use the env's share: their wrappers name their own store paths.
       pathsToLink = [
         "/bin"
-        "/share"
+        "/share/applications"
+        "/share/icons"
+        "/share/pixmaps"
+        "/share/hinteros"
       ];
       passthru = { inherit ids manifest; };
     };
@@ -155,8 +163,7 @@ in
       default = false;
       description = ''
         Apps are per profile (state.json schema 2): the session daemon reads each profile's env
-        manifest (`[apps] profile`), and the session command puts the env on `PATH` and
-        `XDG_DATA_DIRS`. Off: the box-wide `hinteros.apps` (schema 1).
+        manifest (`[apps] profile`). Off: the box-wide `hinteros.apps` (schema 1).
       '';
     };
 

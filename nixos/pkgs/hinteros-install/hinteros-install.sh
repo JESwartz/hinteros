@@ -27,7 +27,10 @@
 #   build      (50-66) what is not prebuilt is built: "Building <name> (<i> of <n>)", or
 #              "<done> of <n> built" while nothing runs ("Nothing to build"). These lines also carry
 #              `build` (the newest running build's name, without hash and version; absent when
-#              none runs), `build_index` (1-based) and `build_total`;
+#              none runs), `build_index` (1-based), `build_total` and, with `build`, `build_percent`
+#              (how far that build is, 0..99, from its stdenv phase; absent before its first
+#              standard phase and for builders without phases). step_percent counts the running
+#              builds by their phase too;
 #   bootloader (66-70) nixos-install --system sets the system profile and writes the boot loader.
 # A retry (warn system-retry or bootloader-retry) starts again from `packages`; step_percent
 # never goes back within one run of a stage. The APPS stage then builds the picked apps' env into
@@ -935,26 +938,58 @@ NIX_ERRS=
 #   combined  copies (103) and builds (104) together, "<done> of <expected> steps" (the apps stage);
 #   packages  copies only, "<done> of <total> packages";
 #   build     builds only, "Building <name> (<i> of <n>)" / "<done> of <n> built", with the running
-#             builds (105) for `build`, `build_index` and `build_total`.
+#             builds (105) for `build`, `build_index`, `build_total` and `build_percent`. Each
+#             running build counts by its stdenv phase (result 104; the fractions of
+#             hinteros-system's nixlog.rs: unpack 0, patch .05, updateAutotoolsGnuConfigScripts .08,
+#             configure .1, build .2, check .8, install .88, fixup .94, installCheck .98, dist .99;
+#             an unknown phase keeps the value, never back): done + their fractions. Nix counts a
+#             build done just before its activity stops: the most advanced running builds then
+#             stop counting by fraction (when another one stops first, it was that one); a build
+#             that stops before nix counts it counts as 1.
 # $total (packages, build): the count `nix build --dry-run` gave. nix's own `expected` grows while
 # it works through the closure (it said "1 of 1" long before the end), so it only counts where it
 # is larger. A line is printed when step_percent goes up (and in build mode when the running build
-# changes); step_percent never goes down.
+# changes, or its build_percent); step_percent never goes down.
 # shellcheck disable=SC2016
 progress_filter='
   def pct(d; t): if t > 0 then ((d * 100 / t) | floor) else 0 end;
   def name: sub(".*/"; "") | sub("^[0-9a-z]{32}-"; "") | sub("\\.drv$"; "") | sub("-[0-9][^-]*$"; "");
+  def phasefrac: {unpackPhase: 0, patchPhase: 0.05, updateAutotoolsGnuConfigScriptsPhase: 0.08,
+    configurePhase: 0.1, buildPhase: 0.2, checkPhase: 0.8, installPhase: 0.88, fixupPhase: 0.94,
+    installCheckPhase: 0.98, distPhase: 0.99}[tostring];
   foreach (inputs | select(startswith("@nix ")) | .[5:] | fromjson? | select(. != null)) as $e (
-    {kinds: {}, prog: {}, run: [], last: (if $mode != "combined" and $total > 0 then 0 else -1 end),
-     lastb: null, emit: null, touch: false};
+    {kinds: {}, prog: {}, run: [], stopped: 0,
+     last: (if $mode != "combined" and $total > 0 then 0 else -1 end),
+     lastb: null, lastbp: null, emit: null, touch: false};
     .emit = null | .touch = false
     | ($e.id | tostring) as $id
     | if $e.action == "start" and (($e.type == 103 and $mode != "build") or ($e.type == 104 and $mode != "packages")) then
         .kinds[$id] = $e.type
       elif $mode == "build" and $e.action == "start" and $e.type == 105 then
-        .run += [{id: $id, name: ($e.fields[0] | tostring | name)}] | .touch = true
+        .run += [{id: $id, name: ($e.fields[0] | tostring | name), f: null, c: false}] | .touch = true
       elif $mode == "build" and $e.action == "stop" and any(.run[]; .id == $id) then
-        .run |= map(select(.id != $id)) | .touch = true
+        any(.run[]; .id == $id and .c) as $counted
+        | .run |= map(select(.id != $id))
+        | if $counted then .
+          # Nix counted another one: it was this one.
+          elif any(.run[]; .c) then .run[first(.run | to_entries[] | select(.value.c) | .key)].c = false
+          else .stopped += 1 end
+        | .touch = true
+      elif $mode == "build" and $e.action == "result" and $e.type == 104 and any(.run[]; .id == $id) then
+        ($e.fields[0] | phasefrac) as $f
+        | if $f == null then . else
+            .run |= map(if .id == $id and (.f == null or .f < $f) then .f = $f else . end) | .touch = true
+          end
+      elif $mode == "build" and $e.action == "result" and $e.type == 105 and (.kinds[$id] != null) then
+        ([.prog[] | .[0]] | add // 0) as $old
+        | .prog[$id] = $e.fields
+        | ([([.prog[] | .[0]] | add // 0) - $old, 0] | max) as $k
+        | ([$k, .stopped] | min) as $s
+        | .stopped -= $s
+        | ([.run | to_entries[] | select(.value.c | not) | {i: .key, f: (.value.f // 0)}]
+           | sort_by([-.f, .i]) | .[0:($k - $s)] | map(.i)) as $mark
+        | .run |= [to_entries[] | .key as $i | .value | if any($mark[]; . == $i) then .c = true else . end]
+        | .touch = true
       elif $e.action == "result" and $e.type == 105 and (.kinds[$id] != null) then
         .prog[$id] = $e.fields | .touch = (.run == [])
       else . end
@@ -965,18 +1000,22 @@ progress_filter='
         | if $step > .last then .last = $step | .emit = [$pct, $step, "\($done) of \($exp) steps", {}] else . end
       else
         ([$done, (if $total > 0 then $total else $exp end)] | max) as $t
-        | ([pct($done; $t), .last] | max) as $step
-        | ($lo + (if $t > 0 then ($done / $t) * ($hi - $lo) | floor else 0 end)) as $pct
+        | ([$done + ([.run[] | select(.c | not) | .f // 0] | add // 0) + .stopped, $t] | min) as $d
+        | ([pct($d; $t), .last] | max) as $step
+        | ($lo + (if $t > 0 then ($d / $t) * ($hi - $lo) | floor else 0 end)) as $pct
         | if $mode == "packages" then
             if $step > .last then .last = $step | .emit = [$pct, $step, "\($done) of \($t) packages", {}] else . end
           else
             (.run | last | .name // null) as $b
-            | if .touch and ($step > .last or $b != .lastb) then
-                .last = $step | .lastb = $b
+            | (.run | last | .f // null | if . == null then null else ([. * 100 | floor, 99] | min) end) as $bp
+            | if .touch and ($step > .last or $b != .lastb or $bp != .lastbp) then
+                .last = $step | .lastb = $b | .lastbp = $bp
                 | ([$done + 1, $t] | min) as $i
                 | .emit = [$pct, $step,
                     (if $b == null then "\($done) of \($t) built" else "Building \($b) (\($i) of \($t))" end),
-                    ({build_index: $i, build_total: $t} + (if $b == null then {} else {build: $b} end))]
+                    ({build_index: $i, build_total: $t}
+                     + (if $b == null then {} else {build: $b} end)
+                     + (if $b == null or $bp == null then {} else {build_percent: $bp} end))]
               else . end
           end
       end;

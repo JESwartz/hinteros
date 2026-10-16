@@ -1,5 +1,5 @@
 """A profile switch driven like the launcher's Switching page and its not-responding pop-up
-(session API 0.17), run in the background as the session user:
+(session API 0.18), run in the background as the session user:
 
     switcher.py OUT TARGET [PIN]
 
