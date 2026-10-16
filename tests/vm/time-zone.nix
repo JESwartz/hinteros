@@ -6,7 +6,7 @@
 #     state.json); `date` shows it; hinteros-config-sync leaves state.json alone.
 #   - `time_zone.get` and `time_zone.list` (system API 0.9).
 #   - `time_zone.set` needs the admin PIN: none, p2's own and a wrong one are refused (also through
-#     the session daemon's relay, session API 0.17), and nothing changes; an unknown zone and
+#     the session daemon's relay, session API 0.18), and nothing changes; an unknown zone and
 #     path tricks are refused.
 #   - With the admin PIN (through the relay, as the launcher does it): /etc/localtime and
 #     state.json change at once, with no job, through the helper unit (the service itself cannot

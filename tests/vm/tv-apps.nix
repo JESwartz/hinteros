@@ -1,6 +1,6 @@
 # M4 TV apps under cage (no network in the sandbox): the Firefox kiosk wrapper with a
 # per-app profile, the User-Agent override that only the YouTube profile gets, the app
-# registry as the daemon reports it (apps.list over the session socket, API 0.17) and launching
+# registry as the daemon reports it (apps.list over the session socket, API 0.18) and launching
 # apps through apps.launch (also the Store-only streaming apps Netflix and Spotify). The YouTube,
 # Crunchyroll and Netflix URLs point at local pages. Firefox runs
 # on Xwayland (MOZ_ENABLE_WAYLAND=0), as under gamescope.
@@ -66,6 +66,10 @@ in
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     home = "/home/hinteros"
+    # Apps run in the sandbox (design/sandbox.md): the profile path Firefox gets is under $HOME,
+    # which is the app's sandbox home on disk.
+    def on_disk(app, path):
+        return f"{home}/.local/share/hinteros/sandbox/{app}" + path.removeprefix(home)
 
     # The session user may use uinput (keyboard-driven apps).
     machine.succeed("id -nG hinteros | tr ' ' '\\n' | grep -qx uinput")
@@ -73,7 +77,7 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.17", "client": {"name": "tv-apps-test", "version": "0"}}}
+                 "params": {"api_version": "0.18", "client": {"name": "tv-apps-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
         out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
@@ -112,7 +116,7 @@ in
     machine.wait_until_succeeds("pgrep -u hinteros -f -- '--kiosk'", timeout=60)
     ytprofile = f"{home}/.local/share/hinteros/firefox/youtube"
     machine.wait_until_succeeds(f"pgrep -u hinteros -af firefox | grep -F -- '--profile {ytprofile}'")
-    machine.wait_until_succeeds(f"grep -F 'general.useragent.override' {ytprofile}/user.js")
+    machine.wait_until_succeeds(f"grep -F 'general.useragent.override' {on_disk('youtube', ytprofile)}/user.js")
     machine.wait_for_text("YOUTUBE", timeout=timedelta(seconds=180))
     machine.wait_for_text("PlayStation", timeout=timedelta(seconds=60))
     machine.screenshot("youtube-ua")
@@ -135,9 +139,10 @@ in
     for bad in ("welcome to firefox", "get started", "import"):
         assert bad not in screen, screen
     machine.screenshot("crunchyroll")
-    machine.succeed(f"! grep -q useragent {crprofile}/user.js")
-    # Separate profile directories.
-    machine.succeed(f"test -d {ytprofile} && test -d {crprofile}")
+    machine.succeed(f"! grep -q useragent {on_disk('crunchyroll', crprofile)}/user.js")
+    # Separate profile directories, each in its app's sandbox home.
+    machine.succeed(f"test -d {on_disk('youtube', ytprofile)} && test -d {on_disk('crunchyroll', crprofile)}")
+    machine.succeed(f"test ! -e {ytprofile}")
     ok("apps.close", {"id": "crunchyroll"})
 
     # Netflix (a Store-only streaming app): its own profile, no UA override, no first-run screen.
@@ -149,8 +154,8 @@ in
     assert "playstation" not in screen, screen
     for bad in ("welcome to firefox", "get started", "import"):
         assert bad not in screen, screen
-    machine.succeed(f"! grep -q useragent {nfprofile}/user.js")
-    machine.succeed(f"test -d {nfprofile} && test -d {crprofile}")
+    machine.succeed(f"! grep -q useragent {on_disk('netflix', nfprofile)}/user.js")
+    machine.succeed(f"test -d {on_disk('netflix', nfprofile)}")
     ok("apps.close", {"id": "netflix"})
 
     # Jellyfin: the desktop client starts and stays up (no server to log in to here).

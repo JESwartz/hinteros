@@ -45,6 +45,18 @@ written for the person using the box.
   version older than one it already saw for that channel.
 - Security: SSH, when on, accepts connections only from local networks. The admin password
   must have 8 or more characters.
+- Security: apps from the Store run in a sandbox. Each app sees only its own files, and can
+  use the controller, the microphone, Downloads or the local network only with your
+  permission. You choose the permissions when you install the app and on the app's page.
+- Steam and apps without the sandbox show "has full access" before you install them.
+- Each app runs on its own display, so apps can't read or type into each other. Settings →
+  System → Apps open at once (default 4) sets how many apps can run. When all are in use,
+  HinterOS asks which app to close.
+- Security: apps have a system call filter and see only the GPU's render nodes. App packages
+  can't change the compositor, the launcher or the daemon. Store icons are checked against a
+  pinned hash.
+- New in the Store: OpenRA (Red Alert, Tiberian Dawn and Dune 2000).
+- The security notice: Update now works at once. Only Later and Back wait 5 seconds.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.
 

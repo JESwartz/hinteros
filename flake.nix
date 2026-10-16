@@ -193,6 +193,7 @@
         boot = import ./tests/vm/boot.nix { inherit self pkgs; };
         gamescope = import ./tests/vm/gamescope.nix { inherit self pkgs; };
         gamescope-size = import ./tests/vm/gamescope-size.nix { inherit self pkgs; };
+        gamescope-sandbox = import ./tests/vm/gamescope-sandbox.nix { inherit self pkgs; };
         input-layer = import ./tests/vm/input-layer.nix { inherit self pkgs; };
         fake-steam = import ./tests/vm/fake-steam.nix { inherit self pkgs; };
         config-sync = import ./tests/vm/config-sync.nix { inherit self pkgs; };
@@ -202,6 +203,11 @@
         installer-save-log = import ./tests/vm/installer-save-log.nix { inherit self pkgs; };
         hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
+        sandbox = import ./tests/vm/sandbox.nix { inherit self pkgs; };
+        sandbox-apps = import ./tests/vm/sandbox-apps.nix { inherit self pkgs; };
+        sandbox-pad = import ./tests/vm/sandbox-pad.nix { inherit self pkgs; };
+        sandbox-lan = import ./tests/vm/sandbox-lan.nix { inherit self pkgs; };
+        steam-sockets = import ./tests/vm/steam-sockets.nix { inherit self pkgs; };
         typing = import ./tests/vm/typing.nix { inherit self pkgs; };
         system-escalation = import ./tests/vm/system-escalation.nix { inherit self pkgs; };
         system-authz = import ./tests/vm/system-authz.nix { inherit self pkgs; };

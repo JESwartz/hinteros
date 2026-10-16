@@ -95,7 +95,7 @@ let
           s.ProtectSystem
           c.systemd.services.hinteros-keyboard.wantedBy
           (c.users.groups ? hinteros-keyboard)
-          (lib.hasSuffix "/bin/hinteros-system --freeze-inactive" sys.ExecStart)
+          (lib.hasInfix "/bin/hinteros-system --freeze-inactive" sys.ExecStart)
           (lib.elem "input" c.users.users.tester.extraGroups)
           (off.systemd.services ? hinteros-keyboard)
           (off.users.groups ? hinteros-keyboard)

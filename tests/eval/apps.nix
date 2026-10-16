@@ -355,6 +355,128 @@ let
       );
       expected = false;
     };
+    # design/sandbox.md: every app entry says whether it is sandboxed and carries the catalog's
+    # permissions; session.toml turns the sandbox on with bwrap by store path.
+    testSandboxSettings = {
+      expr = {
+        firefox = {
+          inherit (entry base "firefox") sandbox permissions;
+        };
+        youtube = {
+          inherit (entry base "youtube") sandbox;
+          hasPermissions = (entry base "youtube") ? permissions;
+        };
+        plex = (entry plex "plex-htpc").permissions;
+        enable = (settings base).sandbox.enable;
+        bwrap = lib.hasSuffix "/bin/bwrap" (settings base).sandbox.bwrap;
+        # Apps play through the play-only socket; `mic` gets the full one.
+        pulse = {
+          inherit ((settings base).sandbox) pulse_socket pulse_record_socket;
+          unit = base.config.systemd.user.services ? hinteros-pulse-play;
+        };
+        off =
+          (settings (mk {
+            hinteros.sandbox.enable = false;
+          })).sandbox.enable;
+        protectTunables =
+          base.config.systemd.user.services.hinteros-session.serviceConfig ? ProtectKernelTunables;
+      };
+      expected = {
+        firefox = {
+          sandbox = true;
+          permissions = {
+            downloads = "optional";
+            lan = "optional";
+          };
+        };
+        youtube = {
+          sandbox = true;
+          hasPermissions = false;
+        };
+        plex = {
+          gamepad = "required";
+          lan = "optional";
+        };
+        enable = true;
+        bwrap = true;
+        pulse = {
+          pulse_socket = "pulse/play";
+          pulse_record_socket = "pulse/native";
+          unit = true;
+        };
+        off = false;
+        protectTunables = false;
+      };
+    };
+    # design/sandbox.md `lan`: the daemon owns its cgroup subtree, session.toml turns the filter
+    # on, hinteros-system takes lan_filter.* and the oneshot unit (the only one with
+    # CAP_NET_ADMIN) loads the table; the path unit follows /etc/resolv.conf. Off: none of it.
+    testLanFilter =
+      let
+        units = c: c.config.systemd.services;
+        user = c: c.config.systemd.user.services.hinteros-session.serviceConfig;
+        of = c: {
+          lan_filter = (settings c).sandbox.lan_filter;
+          inherit ((user c)) Delegate ProtectControlGroups;
+          flag = ((units c).hinteros-system.environment.HINTEROS_LAN_FILTER or null) == "true";
+          unit = (units c) ? hinteros-lan-filter;
+          path = c.config.systemd.paths ? hinteros-lan-filter;
+        };
+        on = units base;
+      in
+      {
+        expr = {
+          on = of base;
+          off = of (mk {
+            hinteros.sandbox.lan.enable = false;
+          });
+          noSandbox = of (mk {
+            hinteros.sandbox.enable = false;
+          });
+          caps = on.hinteros-lan-filter.serviceConfig.CapabilityBoundingSet;
+          families = on.hinteros-lan-filter.serviceConfig.RestrictAddressFamilies;
+          systemCaps = on.hinteros-system.serviceConfig.CapabilityBoundingSet;
+          systemFamilies = on.hinteros-system.serviceConfig.RestrictAddressFamilies;
+          exec = lib.hasInfix "lan-filter-apply --nft /nix/store/" on.hinteros-lan-filter.serviceConfig.ExecStart;
+          resolv = base.config.systemd.paths.hinteros-lan-filter.pathConfig.PathModified;
+        };
+        expected = {
+          on = {
+            lan_filter = true;
+            Delegate = true;
+            ProtectControlGroups = false;
+            flag = true;
+            unit = true;
+            path = true;
+          };
+          off = {
+            lan_filter = false;
+            Delegate = false;
+            ProtectControlGroups = true;
+            flag = false;
+            unit = false;
+            path = false;
+          };
+          noSandbox = {
+            lan_filter = false;
+            Delegate = false;
+            ProtectControlGroups = true;
+            flag = false;
+            unit = false;
+            path = false;
+          };
+          caps = [ "CAP_NET_ADMIN" ];
+          families = [
+            "AF_NETLINK"
+            "AF_UNIX"
+          ];
+          # hinteros-system itself still has no network and no CAP_NET_ADMIN.
+          systemCaps = [ "CAP_SYS_PTRACE" ];
+          systemFamilies = [ "AF_UNIX" ];
+          exec = true;
+          resolv = "/etc/resolv.conf";
+        };
+      };
     # Daemon README, "Pointer and on-screen keyboard": plain Firefox gets address_bar, kiosk apps do not.
     testAddressBar = {
       expr = [
@@ -450,12 +572,16 @@ let
         (entry base "youtube").site_url
         (lib.hasPrefix "https://" (entry base "youtube").icon_url)
         (entry crunchy "crunchyroll" ? icon_url)
+        (builtins.match "[0-9a-f]{64}" (entry base "youtube").icon_sha256 != null)
+        (entry crunchy "crunchyroll" ? icon_sha256)
         (lib.any (a: a ? icon) (settings base).apps)
       ];
       expected = [
         "org.jellyfin.JellyfinDesktop"
         "~/.local/share/hinteros/firefox/youtube"
         "https://www.youtube.com"
+        true
+        false
         true
         false
         false
@@ -625,10 +751,35 @@ let
         true
       ];
     };
+    # gamescope's Vulkan loader: only the system's drivers and implicit layers (no profile, home
+    # or app env); a VM's VK_ICD_FILENAMES keeps its driver; cage gets nothing.
+    testGamescopeVulkanSearchPaths = {
+      expr = [
+        (lib.hasInfix "VK_IMPLICIT_LAYER_PATH=/run/opengl-driver/share/vulkan/implicit_layer.d:/run/opengl-driver-32/share/vulkan/implicit_layer.d'" (
+          sessionCmd gs
+        ))
+        (lib.hasInfix "VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d:/run/opengl-driver-32/share/vulkan/icd.d'" (
+          sessionCmd gs
+        ))
+        (lib.hasInfix "VK_DRIVER_FILES" (
+          sessionCmd (mk {
+            hinteros.session.compositor = "gamescope";
+            hinteros.session.environment.VK_ICD_FILENAMES = "/x.json";
+          })
+        ))
+        (lib.hasInfix "VK_" (sessionCmd cage))
+      ];
+      expected = [
+        true
+        true
+        false
+        false
+      ];
+    };
     # gamescope: apps on Xwayland sized to the output (README "Display size"), output logged.
     testGamescopeAppSize = {
       expr = [
-        (lib.hasInfix "--xwayland-count 2 --force-windows-fullscreen" (sessionCmd gs))
+        (lib.hasInfix "--xwayland-count 6 --force-windows-fullscreen" (sessionCmd gs))
         (lib.hasInfix "GDK_BACKEND=x11" (sessionCmd gs))
         gs.config.systemd.user.services.hinteros-session.environment.GDK_BACKEND
         (lib.hasInfix "systemd-cat --identifier hinteros-compositor" (sessionCmd gs))
@@ -642,6 +793,35 @@ let
         true
         "unset"
         "unset"
+      ];
+    };
+    # gamescope: each app on an Xwayland of its own from the third on, patched
+    # (design/sandbox.md step 3), their number read before gamescope starts; cage: one display.
+    testGamescopeAppsDisplay = {
+      expr = [
+        (settings gs).gamescope.apps_display
+        ((settings cage).gamescope.apps_display or "unset")
+        (settings gs).gamescope.app_displays
+        (lib.hasInfix "hinteros-app-displays" (sessionCmd gs))
+        (lib.hasInfix "hinteros-app-displays" (sessionCmd cage))
+        (lib.hasInfix "hinteros-app-displays" gs.config.systemd.user.services.hinteros-session.serviceConfig.ExecStart)
+        (lib.all
+          (p: lib.elem p (map baseNameOf (gs.config.hinteros.session.gamescope.package.patches or [ ])))
+          [
+            "xwayland-no-abstract-socket.patch"
+            "xwayland-size-all.patch"
+            "xwayland-apps-no-input-emulation.patch"
+          ]
+        )
+      ];
+      expected = [
+        "auto+2"
+        "unset"
+        4
+        true
+        false
+        false
+        true
       ];
     };
     testPactl = {

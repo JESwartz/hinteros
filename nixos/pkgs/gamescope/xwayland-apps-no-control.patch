@@ -1,0 +1,86 @@
+diff -ru c/src/steamcompmgr.cpp d/src/steamcompmgr.cpp
+--- c/src/steamcompmgr.cpp	2026-10-15 18:39:59.620131812 -0400
++++ d/src/steamcompmgr.cpp	2026-10-15 18:42:32.358077312 -0400
+@@ -3982,6 +3982,17 @@
+ 	return false;
+ }
+ 
++// HinterOS: Xwayland #2 and later hold the apps the session daemon starts (design/sandbox.md).
++// Nothing set there counts beyond what an ordinary X11 app needs: no Steam or gamescope property
++// of a window (STEAM_GAME, STEAM_OVERLAY, STEAM_INPUT_FOCUS, GAMESCOPE_EXTERNAL_OVERLAY, ...) and
++// no property of the root window (GAMESCOPECTRL_BASELAYER_*, the tunables). An app's windows get
++// their app id from the process tree only, as without STEAM_GAME. #0 (home app, OSK, Steam) and
++// #1 (Steam games) keep everything.
++static bool xwayland_ctx_is_apps( xwayland_ctx_t *ctx )
++{
++	return ctx->xwayland_server && ctx->xwayland_server->get_index() >= 2;
++}
++
+ std::optional<uint64_t> get_u64_prop( xwayland_ctx_t *ctx, Window win, Atom prop )
+ {
+ 	std::vector< uint32_t > values;
+@@ -5811,6 +5822,15 @@
+ 	w->isSteamStreamingClientVideo = get_prop(ctx, w->xwayland().id, ctx->atoms.steamStreamingClientVideoAtom, 0);
+ 	w->steamAppID = get_prop(ctx, w->xwayland().id, ctx->atoms.gameAtom, 0);
+ 
++	if ( xwayland_ctx_is_apps( ctx ) )
++	{
++		w->isSteamLegacyBigPicture = false;
++		w->inputFocusMode = 0;
++		w->isSteamStreamingClient = false;
++		w->isSteamStreamingClientVideo = false;
++		w->steamAppID = 0;
++	}
++
+ 	if ( steamMode == true )
+ 	{
+ 		uint32_t appID = w->steamAppID;
+@@ -5837,12 +5857,22 @@
+ 	w->isExternalOverlay = get_prop(ctx, w->xwayland().id, ctx->atoms.externalOverlayAtom, 0, &w->bHasExternalOverlayProp);
+ 	w->uMangoappMsgType = get_prop(ctx, w->xwayland().id, ctx->atoms.mangoappMsgTypeAtom, 0);
+ 
++	if ( xwayland_ctx_is_apps( ctx ) )
++	{
++		w->isOverlay = false;
++		w->isExternalOverlay = false;
++		w->bHasExternalOverlayProp = false;
++		w->uMangoappMsgType = 0;
++	}
++
+ 	// misyl: Disable appID for overlay types, as parts of the code don't expect that focus-wise.
+ 	// Fixes mangoapp usage when nested, and not in SteamOS.
+ 	if ( w->isExternalOverlay )
+ 		w->appID = 0;
+ 
+ 	w->oulTargetVROverlay = get_u64_prop(ctx, w->xwayland().id, ctx->atoms.steamGamescopeVROverlayTarget);
++	if ( xwayland_ctx_is_apps( ctx ) )
++		w->oulTargetVROverlay = std::nullopt;
+ 	if ( w->oulTargetVROverlay )
+ 	{
+ 		g_bUpdateForwardedVROverlays = true;
+@@ -6875,6 +6905,25 @@
+ static void
+ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+ {
++	// HinterOS: on the apps' Xwaylands only the window properties of ordinary X11 apps.
++	if ( xwayland_ctx_is_apps( ctx ) )
++	{
++		bool bAppProperty =
++			ev->atom == ctx->atoms.opacityAtom ||
++			ev->atom == ctx->atoms.winTypeAtom ||
++			ev->atom == ctx->atoms.sizeHintsAtom ||
++			ev->atom == ctx->atoms.WMTransientForAtom ||
++			ev->atom == XA_WM_NAME ||
++			ev->atom == ctx->atoms.netWMNameAtom ||
++			ev->atom == ctx->atoms.netWMIcon ||
++			ev->atom == ctx->atoms.wineHwndStyle ||
++			ev->atom == ctx->atoms.wineHwndStyleEx;
++		if ( ev->window == ctx->root || !bAppProperty )
++		{
++			xwm_log.debugf( "Ignoring property %lu of window 0x%lx on an app display", ev->atom, ev->window );
++			return;
++		}
++	}
+ 	/* check if Trans property was changed */
+ 	if (ev->atom == ctx->atoms.opacityAtom)
+ 	{

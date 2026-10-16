@@ -144,12 +144,27 @@ for method, params in [
 ]:
     refused(method, params)
 
+# lan_filter.set (system API 0.10): only a cgroup of the caller's own user manager that exists;
+# nothing that leaves it, nothing nftables could read as more than a path.
+import os  # noqa: E402
+
+me = os.getuid()
+mine = f"/user.slice/user-{me}.slice/user@{me}.service"
+for cgroup in ["/user.slice/user-0.slice/user@0.service/x", f"/user.slice/user-{me + 1}.slice/user@{me + 1}.service/x",
+               "/system.slice/hinteros-system.service", "/", "", mine, f"{mine}/../../user-0.slice",
+               f"{mine}/./x", f"{mine}//x", f'{mine}/x" accept', f"{mine}/x y", f"{mine}/" + "a" * 600,
+               f"{mine}/no-such-cgroup", 5, None, ["/"]]:
+    refused("lan_filter.set", {"cgroup": cgroup}, field=None if not isinstance(cgroup, str) else "cgroup")
+for method, params in [("lan_filter.set", {}), ("lan_filter.set", {"cgroup": f"{mine}/x", "uid": 0}),
+                       ("lan_filter.clear", {"uid": 0})]:
+    refused(method, params)
+
 # A hello that lies about the version, and a hello with extra fields.
 c = Conn(hello=False)
 r = c.call("hello", {"api_version": "9.0", "client": {"name": "x", "version": "0"}})
 assert r["error"], r
 c = Conn(hello=False)
-r = c.call("hello", {"api_version": "0.9", "client": {"name": "x", "version": "0"}, "uid": 0})
+r = c.call("hello", {"api_version": "0.10", "client": {"name": "x", "version": "0"}, "uid": 0})
 # NOTE: the daemon (e0f95a2) accepts unknown fields in hello (the schema says closed); the extra
 # field is ignored, never used as an identity. Recorded, not asserted.
 print("hello with an extra field ->", "error" if "error" in r else "accepted, ignored")
@@ -235,7 +250,7 @@ for _ in range(40):
 served = 0
 for h in held:
     try:
-        r = h.call("hello", {"api_version": "0.9", "client": {"name": "flood", "version": "0"}})
+        r = h.call("hello", {"api_version": "0.10", "client": {"name": "flood", "version": "0"}})
         served += 1 if r and "result" in r else 0
     except (OSError, socket.timeout):
         pass

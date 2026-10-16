@@ -44,7 +44,7 @@
 - `installer/`: `default.nix` (installer environment: `hinteros-install`, disko, offline closure and lock following `hinteros.installer.channel` (default `stable`), `hinteros.installer.ui.command` hook) and `iso.nix` (installation-cd base); `pkgs/hinteros-install`, `templates/device-flake.nix.in`. See the repo README, "Installer".
   - `fake-steam.nix`: `hinteros.fakeSteam.enable` (tests only) installs the stub `steam` and a fake Steam home for the session user (`libraryfolders.vdf`, 3 games and 3 tools that `games.list` filters out, `librarycache` artwork) and points the daemon at it with `steam.dir`.
   - `catalog.nix`: the App Store catalog (flake input `hinteros-catalog`, design/catalog.md) as the source of apps. A function of the catalog data (`entries`, `cacheableUnfree`, `index`), imported through flake.nix's keyed `catalogModule`; it sets `hinteros.apps.<id>` for every entry (the entry's `app` settings as `mkDefault` leaves, `name`, `listed`, the icon fields `desktopId`/`iconUrl`/`siteUrl`/`firefoxProfile`; `enable` defaults to the `onIso` apps with the session), applies the entry's restricted `nixos` module while the app is enabled, derives `hinteros.unfreeAllowlist` from the enabled entries' `license.unfreePackages`, turns on `hardware.graphics.enable32Bit` for `requires = [ "graphics32" ]`, and installs the index and vendor terms (`share/hinteros/catalog.json`, `share/hinteros/terms/`). Tombstoned (`removed`) ids are known to state.json and do nothing. `hinteros.catalog.{entries,cacheableUnfree,index}` re-export the data.
-  - `apps.nix`: the app registry options. `hinteros.apps.<id>` = { `enable`, `name`, `order`, `kind`, `listed`, `package`, `command`, `kiosk.{url,userAgent,fullscreenOnly}`, `icon`, `desktopId`, `iconUrl`, `siteUrl`, `firefoxProfile`, `input`, `backKey` } becomes the daemon's `[[apps]]` (id, name, kind, command, input, back_key and `desktop_id`/`icon_url`/`site_url`/`firefox_profile`; the daemon finds the real icons at runtime, nothing generated) and installs the package. Apps that only add system config (Steam) are not listed: the daemon's built-in `steam` tile is theirs. `input` (`gamepad`/`keyboard`) and `backKey` come from the catalog entries; override single settings with `hinteros.apps.<id>.*` (e.g. `backKey = "backspace"`).
+  - `apps.nix`: the app registry options. `hinteros.apps.<id>` = { `enable`, `name`, `order`, `kind`, `listed`, `package`, `command`, `kiosk.{url,userAgent,fullscreenOnly}`, `icon`, `desktopId`, `iconUrl`, `siteUrl`, `firefoxProfile`, `input`, `backKey`, `sandbox`, `permissions` } becomes the daemon's `[[apps]]` (id, name, kind, command, input, back_key, sandbox, permissions and `desktop_id`/`icon_url`/`site_url`/`firefox_profile`; the daemon finds the real icons at runtime, nothing generated) and installs the package. Apps that only add system config (Steam) are not listed: the daemon's built-in `steam` tile is theirs. `input` (`gamepad`/`keyboard`), `backKey`, `sandbox` and `permissions` come from the catalog entries; `hinteros.sandbox.enable` (default on) is session.toml `[sandbox] enable`, with `bwrap` by store path (design/sandbox.md; the session daemon's user unit has no `ProtectKernelTunables`, so bwrap can mount `/proc`). With PipeWire's pulse server on, the user unit `hinteros-pulse-play` is a second pipewire-pulse at `$XDG_RUNTIME_DIR/pulse/play` that refuses record streams, module loading and source volume: sandboxed apps get it as `pulse/native` (`[sandbox] pulse_socket`), apps with `mic` get the real one (`pulse_record_socket`). `hinteros.sandbox.lan.enable` (default on, needs the sandbox) enforces `lan`: session.toml `[sandbox] lan_filter`, the session daemon's user unit gets `Delegate=yes` (and no `ProtectControlGroups`: it creates its leaf `daemon` and the `nolan` cgroup for apps without `lan`), hinteros-system gets `HINTEROS_LAN_FILTER=true` (`--lan-filter`), and the oneshot `hinteros-lan-filter.service` (`hinteros-system lan-filter-apply`, the only unit with `CAP_NET_ADMIN`, netlink only) loads the nftables table `inet hinteros_lan` for the cgroups in `/run/hinteros/lan-filter.json`; `hinteros-lan-filter.path` (`/etc/resolv.conf`) and a NetworkManager dispatcher hook load it again when the nameservers or the network change; override single settings with `hinteros.apps.<id>.*` (e.g. `backKey = "backspace"`).
   - `firefox-kiosk.nix`: `hinteros.firefoxKiosk.enable` (automatic with a kiosk app): `programs.firefox` with enterprise policies for all profiles (no first run or telemetry, no password prompts, Widevine and EME on, VA-API prefs), and `hinteros-firefox-kiosk [--user-agent UA] [--no-kiosk] <name> <url>`: Firefox on Xwayland (`MOZ_ENABLE_WAYLAND=0`), profile in `~/.local/share/hinteros/firefox/<name>`, UA override written to that profile's user.js.
   - `unfree.nix`: `hinteros.unfreeAllowlist` (package names; the only place that sets `allowUnfreePredicate`) and `hinteros.forbidUnfree`, which fails evaluation while the list is non-empty; the future ISO/cache configurations set it. Plex must never be cached or on the ISO.
   - `overlay.nix`: adds `overlays.default` to nixpkgs.
@@ -97,16 +97,39 @@ the middle of a correct 1920x1080 output. From the gamescope 3.16.31 source:
   that size never changes: a later `display.set_mode` or a TV switched on after boot leaves apps
   letterboxed or upscaled, and the `wl_output` the daemon reads as the "current mode" keeps the
   start size, so `display.set_mode` never saw its switch ("gamescope did not switch"). **Fix:**
-  `--xwayland-count 2`: gamescope then sizes Xwayland `:0` (home app, every app the daemon starts)
-  and its `wl_output` to the output at start and on every mode change, and keeps the nested aspect
-  equal to the output's (`steamcompmgr.cpp`, `wlserver_set_xwayland_server_mode(0, ...)`). `:1`
-  (`STEAM_GAME_DISPLAY_0`) keeps the nested size; nothing of ours uses it. No `-W/-H/-w/-h` are
+  `--xwayland-count` 2 + N (N app displays, below): gamescope then sizes Xwayland `:0` (home app, OSK, Steam) and its
+  `wl_output` to the output at start and on every mode change, and keeps the nested aspect equal to
+  the output's (`steamcompmgr.cpp`, `wlserver_set_xwayland_server_mode(0, ...)`). `:1`
+  (`STEAM_GAME_DISPLAY_0`) keeps the nested size (Steam sizes it; our Steam is not given it, so its
+  games run on `:0` today). `:2` and up are the app displays, one per app the daemon starts
+  (`[gamescope] apps_display = "auto+2"`); `xwayland-size-all.patch` makes them follow the output
+  like `:0`. No `-W/-H/-w/-h` are
   passed, so gamescope keeps choosing the mode (save file) and `display.set_mode` stays live.
 
 gamescope's and the home app's stdout/stderr are in the journal: `journalctl -t hinteros-compositor`
 (`wlserver: Updating mode for xwayland server #0: WxH@R` after each mode change). The
 `gamescope-size` test covers this (headless, so no live mode change; `gamescopectl screenshot`
 repaints at the nested size).
+
+Display split (app sandbox, `hinteros-docs/design/sandbox.md` step 3): each running app gets an
+app display of its own (`:2` and up; the daemon picks a free one, README "Own display" there),
+and in the sandbox only that socket file, so it cannot read or type into the home app (PIN
+entry), the OSK on `:0` or another app. Steam and its games use none. Patches (`overlay.nix`):
+no Xwayland listens on an abstract socket `@/tmp/.X11-unix/X<n>` (else reachable from the
+sandbox, which shares the network namespace), and every one from `#2` on starts without
+`LIBEI_SOCKET` (else an app's XTEST goes through gamescope to the focused window on any
+Xwayland). gamescope still syncs the clipboard between its Xwaylands.
+
+How many app displays (N): the profile's setting (Settings, "Apps open at once", 1 to 8, session
+API `apps.displays.set`), one number in `$XDG_STATE_HOME/hinteros/app-displays`, else
+`hinteros.session.gamescope.appDisplays` (default 4). gamescope makes its Xwaylands at start
+only, so `hinteros-app-displays` (`session.nix`, in front of gamescope only, never the daemon)
+reads it at each session start, writes it to `$XDG_RUNTIME_DIR/hinteros/app-displays` for the
+daemon (this session's number; a daemon restart keeps it) and sets `--xwayland-count`. A change
+applies at the next session start (`session.restart`). With every app display in use the
+launcher asks which app to close; nothing closes on its own. The `gamescope-sandbox` test covers
+this (two apps on two displays, a full set, the setting across a restart) and prints the
+Xwaylands' memory.
 
 ## Device config, runtime settings and maintenance (M5/M6 groundwork)
 

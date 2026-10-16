@@ -10,6 +10,7 @@ let
 
   compositorCommand = {
     gamescope = [
+      appDisplaysWrapper
       (lib.getExe cfg.gamescope.package)
     ]
     ++ lib.optionals (cfg.gamescope.backend != null) [
@@ -21,22 +22,28 @@ let
     # Wayland socket in the home app's environment; apps run on Xwayland (GDK_BACKEND below).
     #
     # App size (read from the gamescope 3.16.31 source; README "Display size"):
-    # --xwayland-count 2: with more than one Xwayland, gamescope sizes the first (:0, where the
-    #   home app and everything the daemon starts run) to the *output* mode, at start
+    # --xwayland-count 3: with more than one Xwayland, gamescope sizes the first (:0, the home
+    #   app, the OSK and Steam) to the *output* mode, at start
     #   (wlserver.cpp, gamescope_xwayland_server_t) and after every mode change
     #   (steamcompmgr.cpp: wlserver_set_xwayland_server_mode(0, output size), and the nested
     #   height follows the output's aspect). With a single Xwayland its size is the nested size,
     #   fixed at start (main.cpp: nested = output at start, never updated): a display.set_mode to
     #   another size, or a display that came up after gamescope (a TV switched on after boot:
     #   gamescope starts at 1280x720), left every app letterboxed or upscaled. The second
-    #   Xwayland (:1, STEAM_GAME_DISPLAY_0) is the one SteamOS gives games; our apps do not use it.
+    #   Xwayland (:1, STEAM_GAME_DISPLAY_0) is the one SteamOS gives games. The others (:2 and
+    #   up, the app displays) each hold one app the daemon starts (daemon.nix `apps_display`), so
+    #   that no app can read or type into the home app (PIN entry), the OSK or another app. Their
+    #   number is the profile's setting (`appDisplaysWrapper` sets the count below). Patched
+    #   (nixos/overlay.nix): every Xwayland but :1 follows the output like :0, none listens on an
+    #   abstract socket (a sandboxed app gets only its own display's socket file, but shares the
+    #   network namespace), and none from #2 on gets LIBEI_SOCKET.
     # --force-windows-fullscreen: every focused X11 app window is resized to its Xwayland root
     #   (= the output), also windows that never ask for fullscreen or pin their size.
     ++ [
       "-e"
       "--expose-wayland"
       "--xwayland-count"
-      "2"
+      (toString (2 + cfg.gamescope.appDisplays))
       "--force-windows-fullscreen"
       # The pointer (right stick in keyboard-profile apps) never fades on inactivity (the
       # daemon hides it on the D-pad), and is large enough to see on a TV (`cursor` options).
@@ -140,17 +147,41 @@ let
     exec "$@"
   '';
 
-  # Per-profile apps (apps.md, "The session side"): the profile's app env on PATH and
-  # XDG_DATA_DIRS for the compositor and everything it starts (steam:// handlers, xdg-open).
-  # /run/hinteros/apps/<user> is a symlink chain that hinteros-system repoints, so later installs
-  # show up without a new session.
-  profileEnvWrapper = pkgs.writeShellScript "hinteros-profile-env" ''
-    link=/run/hinteros/apps/''${USER:-$(${pkgs.coreutils}/bin/id -un)}
-    export PATH="$link/bin''${PATH:+:$PATH}"
-    export XDG_DATA_DIRS="$link/share:''${XDG_DATA_DIRS:-/run/current-system/sw/share}"
-    exec "$@"
+  # The profile's app env (app-env.nix) is not on the session's PATH or XDG_DATA_DIRS: its
+  # packages are only trusted inside the app sandbox. The session daemon reads it by path.
+
+  # App displays (daemon README "Own display"): gamescope makes its Xwaylands at start only, so
+  # the profile's number of app displays (`apps.displays.set`, one number in
+  # $XDG_STATE_HOME/hinteros/app-displays; else `gamescope.appDisplays`) is read here, written
+  # for the session daemon as this session's number ($XDG_RUNTIME_DIR/hinteros/app-displays,
+  # hidden from Steam and the sandbox), and becomes `--xwayland-count` 2 + n. Only in front of
+  # gamescope: the daemon (restarted on its own) must keep reading what this gamescope has.
+  appDisplaysWrapper = pkgs.writeShellScript "hinteros-app-displays" ''
+    n=$(${pkgs.coreutils}/bin/cat "''${XDG_STATE_HOME:-$HOME/.local/state}/hinteros/app-displays" 2>/dev/null)
+    n=''${n//[[:space:]]/}
+    case "$n" in
+      [1-8]) ;;
+      *) n=${toString cfg.gamescope.appDisplays} ;;
+    esac
+    if [ -n "''${XDG_RUNTIME_DIR:-}" ]; then
+      ${pkgs.coreutils}/bin/mkdir -p -m 0700 "$XDG_RUNTIME_DIR/hinteros"
+      echo "$n" > "$XDG_RUNTIME_DIR/hinteros/app-displays.new" \
+        && ${pkgs.coreutils}/bin/mv -f "$XDG_RUNTIME_DIR/hinteros/app-displays.new" "$XDG_RUNTIME_DIR/hinteros/app-displays"
+    fi
+    args=()
+    count=
+    for a in "$@"; do
+      if [ "$count" = next ]; then
+        a=$((2 + n))
+        count=done
+      elif [ -z "$count" ] && [ "$a" = --xwayland-count ]; then
+        count=next
+      fi
+      args+=("$a")
+    done
+    exec "''${args[@]}"
   '';
-  perProfile = config.hinteros.appEnv.perProfile or false;
+
   greeterOn = config.hinteros.profiles.greeter.enable or false;
 
   # A new session of the user (greetd restarted, the compositor crashed) may find the previous
@@ -161,6 +192,28 @@ let
     ${lib.getExe' config.systemd.package "systemctl"} --user --no-block try-restart hinteros-session.service || true
     exec "$@"
   '';
+
+  # gamescope's Vulkan loader (and its children's: the home app, Xwayland) reads only the
+  # system's drivers and implicit layers, in /run/opengl-driver(-32) (hardware.graphics; also
+  # where a gamescope WSI layer would be). Not $XDG_DATA_DIRS, $XDG_DATA_HOME or
+  # $XDG_CONFIG_DIRS, so no file in a home or a profile can put a library into the compositor.
+  # Apps and Steam (and its games) are the session daemon's children, not gamescope's: they keep
+  # the loader's defaults. A test VM that picks its driver with VK_ICD_FILENAMES (`environment`)
+  # keeps it.
+  vulkanEnvironment = lib.optionalAttrs (cfg.compositor == "gamescope") (
+    {
+      VK_IMPLICIT_LAYER_PATH = lib.concatStringsSep ":" [
+        "/run/opengl-driver/share/vulkan/implicit_layer.d"
+        "/run/opengl-driver-32/share/vulkan/implicit_layer.d"
+      ];
+    }
+    // lib.optionalAttrs (!(cfg.environment ? VK_ICD_FILENAMES)) {
+      VK_DRIVER_FILES = lib.concatStringsSep ":" [
+        "/run/opengl-driver/share/vulkan/icd.d"
+        "/run/opengl-driver-32/share/vulkan/icd.d"
+      ];
+    }
+  );
 
   # Nothing greetd runs may write to the VT: greetd connects a session's stdout/stderr to it, so a
   # log line would flash on the TV between two compositors (and scribble over the PAM splash).
@@ -175,15 +228,11 @@ let
     "hinteros-compositor"
     (lib.getExe' pkgs.coreutils "env")
   ]
-  ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment
+  ++ lib.mapAttrsToList (name: value: "${name}=${value}") (vulkanEnvironment // cfg.environment)
   ++ lib.optional (cfg.compositor == "gamescope") cfg.displayEnvWrapper;
 
   sessionCommand = lib.escapeShellArgs (
-    [ sessionStart ]
-    ++ compositorPrefix
-    ++ lib.optional perProfile profileEnvWrapper
-    ++ compositorCommand.${cfg.compositor}
-    ++ homeCommand
+    [ sessionStart ] ++ compositorPrefix ++ compositorCommand.${cfg.compositor} ++ homeCommand
   );
 
   # The greeter (profiles.md, "The pieces"). greetd runs `greeterLink` as `hinteros-greeter` at
@@ -374,6 +423,16 @@ in
         description = ''
           gamescope `--backend`. `null` lets gamescope choose (DRM on a bare TTY). `headless`
           renders without a display and is what the `gamescope` VM test uses.
+        '';
+      };
+      appDisplays = lib.mkOption {
+        type = lib.types.ints.between 1 8;
+        default = 4;
+        description = ''
+          How many app displays (Xwaylands :2 and up, one per running app the session daemon
+          starts) a session gets when its profile has not chosen (Settings, `apps.displays.set`,
+          read at each session start). gamescope starts with `--xwayland-count` 2 + that
+          number. Each idle Xwayland costs some memory.
         '';
       };
       extraArgs = lib.mkOption {

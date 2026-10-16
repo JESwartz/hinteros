@@ -3,7 +3,8 @@
 #   - turns every `kind = "app"` entry into a box-wide `hinteros.apps.<id>` with the entry's `app`
 #     settings (as defaults) and its name and icon fields. `app` is called with `{ pkgs, lib,
 #     box }`, `box` being the system's (`box.firefoxKiosk`: the kiosk wrapper; `box.steam`: stock
-#     pkgs.steam, spike 8). Per-profile envs call it with their own pkgs (app-env.nix);
+#     pkgs.steam with our sockets hidden, lib/steam.nix). Per-profile envs call it with their own
+#     pkgs (app-env.nix);
 #   - derives, from the box-wide apps that are on, the unfree packages they need
 #     (`hinteros.unfreeAllowlist`) and the box features they name (`hinteros.boxFeatures`);
 #   - enables the restricted `service` module of every service in `hinteros.catalog.services`
@@ -46,7 +47,7 @@ let
   # The box's inputs to the box-wide apps (catalog.md, format 3).
   box = {
     firefoxKiosk = config.hinteros.firefoxKiosk.wrapper;
-    inherit (pkgs) steam;
+    steam = import ../lib/steam.nix pkgs.steam;
   };
 
   serviceOf =

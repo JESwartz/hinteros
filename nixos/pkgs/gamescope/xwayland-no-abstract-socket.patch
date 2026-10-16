@@ -1,0 +1,77 @@
+--- a/subprojects/wlroots/xwayland/sockets.c	2026-10-14 23:20:30.504763492 -0400
++++ b/subprojects/wlroots/xwayland/sockets.c	2026-10-14 23:20:59.725544675 -0400
+@@ -110,20 +110,25 @@
+ 	}
+ 
+ #ifdef __linux__
+-	addr.sun_path[0] = 0;
+-	path_size = snprintf(addr.sun_path + 1, sizeof(addr.sun_path) - 1, socket_fmt, display);
++	// HinterOS: no abstract socket (@/tmp/.X11-unix/X<n>). Abstract sockets belong to the
++	// network namespace, not the file system: a sandbox that shares the network and binds only
++	// its own display's socket file could still connect to every display through them. Only
++	// the socket file is opened; x_fd[0] stays -1.
++	socks[0] = -1;
+ #else
+ 	path_size = snprintf(addr.sun_path, sizeof(addr.sun_path), socket_fmt2, display);
+-#endif
+ 	socks[0] = open_socket(&addr, path_size);
+ 	if (socks[0] < 0) {
+ 		return false;
+ 	}
++#endif
+ 
+ 	path_size = snprintf(addr.sun_path, sizeof(addr.sun_path), socket_fmt, display);
+ 	socks[1] = open_socket(&addr, path_size);
+ 	if (socks[1] < 0) {
+-		close(socks[0]);
++		if (socks[0] >= 0) {
++			close(socks[0]);
++		}
+ 		socks[0] = -1;
+ 		return false;
+ 	}
+--- a/subprojects/wlroots/xwayland/server.c	2026-10-14 23:20:30.504799179 -0400
++++ b/subprojects/wlroots/xwayland/server.c	2026-10-14 23:21:07.930175181 -0400
+@@ -26,7 +26,8 @@
+ 
+ noreturn static void exec_xwayland(struct wlr_xwayland_server *server,
+ 		int notify_fd) {
+-	if (!set_cloexec(server->x_fd[0], false) ||
++	// x_fd[0] (the abstract socket) is -1 when sockets.c opened none.
++	if ((server->x_fd[0] >= 0 && !set_cloexec(server->x_fd[0], false)) ||
+ 			!set_cloexec(server->x_fd[1], false) ||
+ 			!set_cloexec(server->wl_fd[1], false)) {
+ 		wlr_log(WLR_ERROR, "Failed to unset CLOEXEC on FD");
+@@ -61,13 +62,17 @@
+ #endif
+ 
+ #if HAVE_XWAYLAND_LISTENFD
+-	argv[i++] = "-listenfd";
+-	argv[i++] = listenfd0;
++	if (server->x_fd[0] >= 0) {
++		argv[i++] = "-listenfd";
++		argv[i++] = listenfd0;
++	}
+ 	argv[i++] = "-listenfd";
+ 	argv[i++] = listenfd1;
+ #else
+-	argv[i++] = "-listen";
+-	argv[i++] = listenfd0;
++	if (server->x_fd[0] >= 0) {
++		argv[i++] = "-listen";
++		argv[i++] = listenfd0;
++	}
+ 	argv[i++] = "-listen";
+ 	argv[i++] = listenfd1;
+ #endif
+@@ -425,6 +430,10 @@
+ static bool server_start_lazy(struct wlr_xwayland_server *server) {
+ 	struct wl_event_loop *loop = wl_display_get_event_loop(server->wl_display);
+ 
++	// gamescope never starts lazily; without an abstract socket there is nothing to watch.
++	if (server->x_fd[0] < 0) {
++		return false;
++	}
+ 	if (!(server->x_fd_read_event[0] = wl_event_loop_add_fd(loop, server->x_fd[0],
+ 				WL_EVENT_READABLE, xwayland_socket_connected, server))) {
+ 		return false;

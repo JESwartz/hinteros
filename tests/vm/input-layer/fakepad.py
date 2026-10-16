@@ -1,5 +1,5 @@
 # Creates a fake physical Xbox 360 pad (045e:028e) via uinput and holds it open.
-# Reads commands from a FIFO: "press BTN_SOUTH", "release BTN_SOUTH", "axis ABS_X 20000"
+# Reads commands from a FIFO (argument 1, default /tmp/fakepad.fifo): "press BTN_SOUTH", "release BTN_SOUTH", "axis ABS_X 20000"
 import evdev, sys, os, time
 from evdev import UInput, ecodes as e, AbsInfo
 caps = {
@@ -12,7 +12,7 @@ caps = {
 }
 ui = UInput(caps, name="Sunshine X-Box One (virtual) pad", vendor=0x045e, product=0x028e, version=0x110, bustype=e.BUS_USB)
 print("created", ui.device.path, flush=True)
-fifo = "/tmp/fakepad.fifo"
+fifo = sys.argv[1] if len(sys.argv) > 1 else "/tmp/fakepad.fifo"
 if not os.path.exists(fifo): os.mkfifo(fifo)
 while True:
     with open(fifo) as f:
