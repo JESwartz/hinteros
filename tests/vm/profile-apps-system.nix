@@ -71,41 +71,43 @@ in
         self.nixosModules.catalog
         ../../nixos/vm
       ];
-      hinteros.state = {
-        schemaVersion = 2;
-        profiles = [
-          {
-            id = "p1";
-            user = "hinteros";
-          }
-          {
-            id = "p2";
-            user = "hinteros-p2";
-          }
-        ];
-        requirements = [ ];
-        services = [ ];
-        settings = {
-          guest.enable = true;
-          cleanup = {
-            frequency = "daily";
-            keepSystem = 2;
-            keepProfiles = 3;
+      hinteros = {
+        state = {
+          schemaVersion = 2;
+          profiles = [
+            {
+              id = "p1";
+              user = "hinteros";
+            }
+            {
+              id = "p2";
+              user = "hinteros-p2";
+            }
+          ];
+          requirements = [ ];
+          services = [ ];
+          settings = {
+            guest.enable = true;
+            cleanup = {
+              frequency = "daily";
+              keepSystem = 2;
+              keepProfiles = 3;
+            };
           };
         };
+        # Moonlight's entry with the test package (only the `trust` env has it).
+        appEnv.overrides.moonlight = {
+          package = trustApp;
+          desktopId = "hinteros-trust";
+        };
+        # Apps, not the picker: autologin of p1 (greeter mode: profiles-greeter).
+        profiles.greeter.enable = false;
       };
       system.extraDependencies = lib.attrValues envs;
       environment.etc."hinteros-test/envs.json".text = builtins.toJSON (
         lib.mapAttrs (_: e: e.outPath) envs
       );
-      # Moonlight's entry with the test package (only the `trust` env has it).
-      hinteros.appEnv.overrides.moonlight = {
-        package = trustApp;
-        desktopId = "hinteros-trust";
-      };
       environment.systemPackages = [ pkgs.socat ];
-      # Apps, not the picker: autologin of p1 (greeter mode: profiles-greeter).
-      hinteros.profiles.greeter.enable = false;
       virtualisation.memorySize = lib.mkForce 2048;
     };
 

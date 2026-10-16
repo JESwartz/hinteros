@@ -85,28 +85,30 @@ in
       networking = {
         firewall.enable = false;
         # Routed to it by the box (special-purpose ranges, not on-link).
-        interfaces.eth1.ipv4.addresses = [
-          {
-            address = "198.18.0.1";
-            prefixLength = 32;
-          }
-        ];
-        interfaces.eth1.ipv6.addresses = [
-          {
-            address = "64:ff9b::c0a8:103";
-            prefixLength = 128;
-          }
-          {
-            address = "64:ff9b::cb00:7102";
-            prefixLength = 128;
-          }
-        ];
-        interfaces.eth2.ipv4.addresses = pkgs.lib.mkForce [
-          {
-            address = "203.0.113.1";
-            prefixLength = 24;
-          }
-        ];
+        interfaces = {
+          eth1.ipv4.addresses = [
+            {
+              address = "198.18.0.1";
+              prefixLength = 32;
+            }
+          ];
+          eth1.ipv6.addresses = [
+            {
+              address = "64:ff9b::c0a8:103";
+              prefixLength = 128;
+            }
+            {
+              address = "64:ff9b::cb00:7102";
+              prefixLength = 128;
+            }
+          ];
+          eth2.ipv4.addresses = pkgs.lib.mkForce [
+            {
+              address = "203.0.113.1";
+              prefixLength = 24;
+            }
+          ];
+        };
       };
       boot.kernel.sysctl."net.ipv4.ip_forward" = 1;
       services.dnsmasq = {
