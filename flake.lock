@@ -62,11 +62,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792115056,
-        "narHash": "sha256-WqnJMFuamC8QuTgedwShrAhB7Ve2cLb8uZyPYmI6B3o=",
+        "lastModified": 1792302179,
+        "narHash": "sha256-Mkga8VEyORgsx8arnn167KNOQA6FWBsKzoSc+NA9PUQ=",
         "ref": "refs/heads/main",
-        "rev": "1c76580dc6ccf80373e8ad194ac13c94eba1deec",
-        "revCount": 36,
+        "rev": "ddd4a38c41ff7c8dd3bebf75c58d7bba7e15b5df",
+        "revCount": 38,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git"
       },
@@ -86,11 +86,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792115056,
-        "narHash": "sha256-aZw8SKcSK9e0l45l3Zuvhs7thG3RnElczoQBTDTZWT8=",
+        "lastModified": 1792302179,
+        "narHash": "sha256-8iyj/jgCFGH9z6AR54LsT7UcaCalpEZggUoiInE/6eI=",
         "ref": "refs/heads/main",
-        "rev": "72b391cabf059792cf67b2396e42d354a058a9b0",
-        "revCount": 171,
+        "rev": "78a09ff07305e62e31fff276ded3a7e69405648c",
+        "revCount": 173,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git"
       },
@@ -112,11 +112,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792115080,
-        "narHash": "sha256-w1rHcxQbjF/O226EnEkcLX+wm1aZIK4plaZ98fEQ4kM=",
+        "lastModified": 1792302197,
+        "narHash": "sha256-358e2mTMQN2Ev+7o7o7hPr6pr7zQQrjQXCjB263KP50=",
         "ref": "refs/heads/main",
-        "rev": "b42c080d295f3ba5aad08bf5dd6a8dee296c1a98",
-        "revCount": 180,
+        "rev": "6594525d7468cfb461e51e7aafbb0ab02c82113f",
+        "revCount": 183,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git"
       },

@@ -55,7 +55,12 @@ written for the person using the box.
 - Security: apps have a system call filter and see only the GPU's render nodes. App packages
   can't change the compositor, the launcher or the daemon. Store icons are checked against a
   pinned hash.
-- New in the Store: OpenRA (Red Alert, Tiberian Dawn and Dune 2000).
+- New in the Store: three OpenRA games: Red Alert, Tiberian Dawn and Dune 2000.
+- Sound plays on the TV (HDMI or DisplayPort) by default. Settings → Audio also lists the
+  outputs of the sound card's other modes, and picking one switches to it.
+- Fixed: a Bluetooth controller showed as connected and did nothing when it was the first
+  one after a restart.
+- Fixed: on a box without Wi-Fi, Right on Network in Settings did not go to Bluetooth.
 - The security notice: Update now works at once. Only Later and Back wait 5 seconds.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.
