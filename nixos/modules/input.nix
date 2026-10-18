@@ -42,6 +42,19 @@ in
     # games see two pads, the physical one silent (InputPlumber grabs it).
     systemd.services.inputplumber.path = [ pkgs.acl ];
 
+    # The HID drivers of Bluetooth pads load at boot. Loaded on demand, the first pad after boot
+    # gets hid-generic, then its own driver takes it over and its device nodes come again in the
+    # same second. InputPlumber 0.81.0 adds the new hidraw node twice, the second open fails
+    # (EBUSY), and it stops the virtual pad but keeps the physical one hidden: the pad shows as
+    # connected and does nothing.
+    boot.kernelModules = [
+      "hid_microsoft"
+      "hid_nintendo"
+      "hid_playstation"
+      "hid_sony"
+      "hid_steam"
+    ];
+
     # Every InputPlumber DBus call, even reading a property, goes through polkit.
     security.polkit.enable = true;
 
