@@ -31,7 +31,7 @@
     machine.succeed("systemctl cat bluetooth.service | grep -q bluetoothd")
     machine.succeed("test -e /etc/systemd/system/bluetooth.target.wants/bluetooth.service || systemctl is-enabled bluetooth.service")
     machine.succeed("grep -q '^Experimental *= *true' /etc/bluetooth/main.conf")
-    machine.succeed("grep -q '^UserspaceHID *= *true' /etc/bluetooth/main.conf")
+    machine.succeed("grep -q '^UserspaceHID *= *true' /etc/bluetooth/input.conf")
     machine.wait_for_unit("pipewire.socket", "hinteros")  # socket-activated
     machine.succeed("systemctl cat wireplumber.service | grep -q wireplumber")
 

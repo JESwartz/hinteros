@@ -137,14 +137,18 @@ in
             General = {
               # Needed for newer controllers (battery reporting, LE features) and pairing flows.
               Experimental = true;
-              # Game controllers over HID-over-GATT/classic HID are handled by uhid in BlueZ.
-              UserspaceHID = true;
-              # Keep true: false re-opens CVE-2023-45866 (unpaired devices in range inject
-              # keystrokes). Set it to false only for a specific controller that needs it.
-              ClassicBondedOnly = true;
               FastConnectable = true;
             };
             Policy.AutoEnable = true;
+          };
+          # The input plugin's settings go in input.conf: in main.conf BlueZ ignores them
+          # ("Unknown key").
+          input.General = {
+            # Game controllers over HID-over-GATT/classic HID are handled by uhid in BlueZ.
+            UserspaceHID = true;
+            # Keep true: false re-opens CVE-2023-45866 (unpaired devices in range inject
+            # keystrokes). Set it to false only for a specific controller that needs it.
+            ClassicBondedOnly = true;
           };
         };
       })

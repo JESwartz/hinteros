@@ -169,7 +169,7 @@ let
     };
     testSecurityHardening = {
       expr = [
-        c.hardware.bluetooth.settings.General.ClassicBondedOnly
+        c.hardware.bluetooth.input.General.ClassicBondedOnly
         c.networking.networkmanager.plugins
         c.boot.loader.systemd-boot.editor
         devbox.boot.loader.systemd-boot.editor
