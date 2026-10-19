@@ -61,6 +61,14 @@ written for the person using the box.
 - Fixed: a Bluetooth controller showed as connected and did nothing when it was the first
   one after a restart.
 - Fixed: on a box without Wi-Fi, Right on Network in Settings did not go to Bluetooth.
+- Screen saver: Settings → Display and sound → Screen saver. It starts after 1 to 30 minutes
+  without input on the HinterOS screen (10 by default, or Off), never over an app or a game.
+  Styles: clock, drifting logo or black screen. Show now shows it. The first press only closes
+  it.
+- Select your profile at the top right to go to the profile picker at once. Profile settings
+  and End guest session are in Settings → Profiles.
+- Fixed: the selection did not move while Wi-Fi searched for networks.
+- Fixed: Steam's on-screen keyboard stayed on screen after Home.
 - The security notice: Update now works at once. Only Later and Back wait 5 seconds.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.
