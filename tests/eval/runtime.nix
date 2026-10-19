@@ -110,6 +110,27 @@ let
         true
       ];
     };
+    # The TV first: HDMI/DP stereo profiles before analog (WirePlumber's preferred profiles).
+    testHdmiProfilesFirst = {
+      expr =
+        let
+          conf = c.services.pipewire.wireplumber.extraConfig."60-hinteros-hdmi-first";
+          rule = builtins.head conf."device.profile.priority.rules";
+          inherit (rule.actions.update-props) priorities;
+        in
+        [
+          (lib.take 3 priorities)
+          (builtins.length priorities)
+        ];
+      expected = [
+        [
+          "output:hdmi-stereo+input:analog-stereo"
+          "output:hdmi-stereo"
+          "output:hdmi-stereo-extra1+input:analog-stereo"
+        ]
+        16
+      ];
+    };
     testRuntimeOffWithoutSession = {
       expr = [
         off.networking.networkmanager.enable
@@ -148,7 +169,7 @@ let
     };
     testSecurityHardening = {
       expr = [
-        c.hardware.bluetooth.settings.General.ClassicBondedOnly
+        c.hardware.bluetooth.input.General.ClassicBondedOnly
         c.networking.networkmanager.plugins
         c.boot.loader.systemd-boot.editor
         devbox.boot.loader.systemd-boot.editor

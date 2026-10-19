@@ -137,14 +137,18 @@ in
             General = {
               # Needed for newer controllers (battery reporting, LE features) and pairing flows.
               Experimental = true;
-              # Game controllers over HID-over-GATT/classic HID are handled by uhid in BlueZ.
-              UserspaceHID = true;
-              # Keep true: false re-opens CVE-2023-45866 (unpaired devices in range inject
-              # keystrokes). Set it to false only for a specific controller that needs it.
-              ClassicBondedOnly = true;
               FastConnectable = true;
             };
             Policy.AutoEnable = true;
+          };
+          # The input plugin's settings go in input.conf: in main.conf BlueZ ignores them
+          # ("Unknown key").
+          input.General = {
+            # Game controllers over HID-over-GATT/classic HID are handled by uhid in BlueZ.
+            UserspaceHID = true;
+            # Keep true: false re-opens CVE-2023-45866 (unpaired devices in range inject
+            # keystrokes). Set it to false only for a specific controller that needs it.
+            ClassicBondedOnly = true;
           };
         };
       })
@@ -157,9 +161,25 @@ in
           pulse.enable = true;
           wireplumber.enable = true;
         };
-        # HDMI/DisplayPort outputs show up as ALSA card profiles; WirePlumber exposes every
-        # profile unless a rule hides it, so the Settings audio screen can list them.
+        # A sound card has one profile at a time, and only its outputs are sinks. WirePlumber
+        # picks the highest-priority available profile, and on most boxes that is analog: a
+        # speaker or line-out jack without detection always counts as available, so the TV on
+        # HDMI or DisplayPort got no sound. A TV box plays on the TV: the HDMI/DP stereo
+        # profiles come first whenever their output is available (a display with audio is
+        # plugged in), keeping the analog input where the card has one. A profile the user
+        # picks (Settings, through the session daemon) is stored by WirePlumber and still wins.
         # alsa-utils is there for debugging.
+        services.pipewire.wireplumber.extraConfig."60-hinteros-hdmi-first" = {
+          "device.profile.priority.rules" = [
+            {
+              matches = [ { "device.name" = "~alsa_card.*"; } ];
+              actions.update-props.priorities = lib.concatMap (out: [
+                "output:${out}+input:analog-stereo"
+                "output:${out}"
+              ]) ([ "hdmi-stereo" ] ++ map (n: "hdmi-stereo-extra${toString n}") (lib.range 1 7));
+            }
+          ];
+        };
         environment.systemPackages = [ pkgs.alsa-utils ];
       })
 

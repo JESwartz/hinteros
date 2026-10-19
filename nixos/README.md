@@ -149,7 +149,7 @@ Xwaylands' memory.
   `hinteros-time-zone-apply` (daemon.nix; root, `ReadWritePaths` /etc and /run/hinteros, no
   network), so hinteros-system itself never writes /etc.
 - `runtime.nix`: `hinteros.runtime.{enable,network,bluetooth,audio,power}`, on with the session.
-  NetworkManager (no VPN plugins), BlueZ (`Experimental`, `UserspaceHID`, `ClassicBondedOnly`
+  NetworkManager (no VPN plugins), BlueZ (`Experimental`; in input.conf `UserspaceHID` and `ClassicBondedOnly`, which
   stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules
   scoped to the session user's active local session: suspend/reboot/power-off and the Wi-Fi
   actions. `settings.modify.system` is granted (accepted: the session user can read Wi-Fi PSKs; see the module comment and threat-model.md).
