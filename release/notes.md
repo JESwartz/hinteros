@@ -69,8 +69,10 @@ written for the person using the box.
   and End guest session are in Settings → Profiles.
 - Fixed: the selection did not move while Wi-Fi searched for networks.
 - Fixed: Steam's on-screen keyboard stayed on screen after Home.
-- Fixed: controllers did not stay connected to RTL8761B Bluetooth dongles (TP-Link UB500 and
-  others). HinterOS uses the older Realtek firmware for these dongles.
+- Fixed: Xbox controllers over Bluetooth reacted up to 30 seconds late.
+- Fixed: Xbox controllers paired but did not connect, or lost the pairing, on some Bluetooth
+  dongles. HinterOS also uses the older Realtek firmware for RTL8761B dongles (TP-Link UB500
+  and others).
 - The screen saver uses much less power.
 - The security notice: Update now works at once. Only Later and Back wait 5 seconds.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a

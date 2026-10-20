@@ -138,6 +138,11 @@ in
               # Needed for newer controllers (battery reporting, LE features) and pairing flows.
               Experimental = true;
               FastConnectable = true;
+              # Xbox pads over LE: without privacy the pad answered nothing after pairing, the
+              # link timed out and the pad dropped the bond (seen with an RTL8761B dongle; xpadneo
+              # reports the same). A pad that lost its key may pair again by itself.
+              Privacy = "device";
+              JustWorksRepairing = "always";
             };
             Policy.AutoEnable = true;
           };
