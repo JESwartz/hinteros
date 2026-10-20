@@ -10,7 +10,7 @@
 # or drop on Realtek and Intel I225/I226 NICs, and Wi-Fi power saving drops packets on some
 # cards. NetworkManager has no global default for EEE, only a per-profile `ethtool.eee-enabled`,
 # so the wired profile below (it matches every Ethernet device, DHCP) turns it off; Wi-Fi power
-# saving is off globally.
+# saving is off globally (NetworkManager and iwd).
 { config, lib, ... }:
 {
   config = lib.mkMerge [
@@ -29,7 +29,18 @@
         dhcpcd.enable = lib.mkForce false;
       };
 
+      # iwd, not wpa_supplicant, under NetworkManager: much less code (no Wi-Fi Direct, WPS or
+      # the long tail of EAP methods). NetworkManager still owns the connections; iwd does not
+      # set up IP. NetworkManager's wifi.powersave does not reach iwd, so iwd turns power saving
+      # off itself, on every driver.
+      networking.wireless.iwd.settings =
+        lib.mkIf (config.networking.networkmanager.wifi.backend == "iwd")
+          {
+            DriverQuirks.PowerSaveDisable = "*";
+          };
+
       networking.networkmanager = {
+        wifi.backend = lib.mkDefault "iwd";
         wifi.powersave = lib.mkDefault false;
         ensureProfiles.profiles.hinteros-wired = {
           connection = {

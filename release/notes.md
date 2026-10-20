@@ -78,6 +78,8 @@ written for the person using the box.
 - The screen saver uses much less power.
 - Less software on the box: no text to speech, no modem service, fewer setuid programs, and
   no Perl, rsync, strace or man pages for the command line. The system is about 0.8 GiB smaller.
+- Smaller, safer replacements: sudo-rs instead of sudo (boxes with an admin account), iwd
+  instead of wpa_supplicant for Wi-Fi, and an nftables firewall instead of iptables.
 - The security notice: Update now works at once. Only Later and Back wait 5 seconds.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.

@@ -216,13 +216,13 @@ in
       # ---- SSH only from the local networks --------------------------------------------------------
       # Port 22 is open only to RFC 1918, link-local and ULA sources: the test network's IPv4
       # (192.168.1.0/24) logs in above, its IPv6 (2001:db8::/32, global) is refused.
-      fw = "${nodes.machine.networking.firewall.package}/bin"
-      rules = machine.succeed(f"{fw}/iptables -S nixos-fw; {fw}/ip6tables -S nixos-fw")
-      ssh_rules = [l for l in rules.splitlines() if " --dport 22 " in l + " "]
-      assert ssh_rules and all(" -s " in l for l in ssh_rules), rules
+      # The firewall is nftables (table inet nixos-fw).
+      rules = machine.succeed("nft list table inet nixos-fw")
+      ssh_rules = [l for l in rules.splitlines() if "dport 22 " in l]
+      assert ssh_rules and all("saddr" in l for l in ssh_rules), rules
       local_nets = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10")
       for net in local_nets:
-          assert any(f"-s {net} " in l for l in ssh_rules), (net, rules)
+          assert any(net in l for l in ssh_rules), (net, rules)
       lan.succeed(f"ping -6 -c1 -W3 {MACHINE6}")
       lan.succeed(f"nc -z -w3 {MACHINE} 22")
       lan.fail(f"nc -z -w3 {MACHINE6} 22")
