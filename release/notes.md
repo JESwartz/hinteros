@@ -79,7 +79,7 @@ written for the person using the box.
 - Fixed: Xbox controllers paired but did not connect, or lost the pairing, on some Bluetooth
   dongles. HinterOS also uses the older Realtek firmware for RTL8761B dongles (TP-Link UB500
   and others).
-- The screen saver uses much less power.
+- The screen saver uses much less power, and its logo and clock move smoothly.
 - Less software on the box: no text to speech, no modem service, fewer setuid programs, and
   no Perl, rsync, strace or man pages for the command line. The system is about 0.8 GiB smaller.
 - Smaller, safer replacements: sudo-rs instead of sudo (boxes with an admin account), iwd
