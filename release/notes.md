@@ -69,6 +69,23 @@ written for the person using the box.
   and End guest session are in Settings → Profiles.
 - Fixed: the selection did not move while Wi-Fi searched for networks.
 - Fixed: Steam's on-screen keyboard stayed on screen after Home.
+- Fixed: Xbox controllers over Bluetooth reacted up to 30 seconds late.
+- Fixed: after a Steam game ended, Steam showed on screen but the controller worked the hidden
+  launcher, so A started another app.
+- Fixed: Home in a Steam game kept the game on screen while the controller worked the hidden
+  launcher.
+- Fixed: in a game, a short press of Home sometimes counted as a long press and did not go
+  back to the launcher.
+- Fixed: Xbox controllers paired but did not connect, or lost the pairing, on some Bluetooth
+  dongles. HinterOS also uses the older Realtek firmware for RTL8761B dongles (TP-Link UB500
+  and others).
+- The screen saver uses much less power, and its logo and clock move smoothly.
+- Less software on the box: no text to speech, no modem service, fewer setuid programs, and
+  no Perl, rsync, strace or man pages for the command line. The system is about 0.8 GiB smaller.
+- Smaller, safer replacements: sudo-rs instead of sudo (boxes with an admin account), iwd
+  instead of wpa_supplicant for Wi-Fi, and an nftables firewall instead of iptables.
+- Boxes with an Intel GPU decode video in hardware (H.264 and HEVC; on newer GPUs also VP9 and
+  AV1): streaming from a PC (Moonlight, Steam Remote Play) and media apps use less power.
 - The security notice: Update now works at once. Only Later and Back wait 5 seconds.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.

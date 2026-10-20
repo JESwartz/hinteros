@@ -56,9 +56,11 @@ let
     builtins.match "[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}" s != null
     || builtins.match "[0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3}" s != null;
 
-  sudoRuleOptions = lib.concatMap (
-    r: lib.concatMap (c: c.options or [ ]) r.commands
-  ) config.security.sudo.extraRules;
+  # sudo-rs, and classic sudo should a device module turn it back on.
+  sudoRuleOptions = lib.concatMap (r: lib.concatMap (c: c.options or [ ]) r.commands) (
+    config.security.sudo.extraRules ++ config.security.sudo-rs.extraRules
+  );
+  sudoExtraConfig = config.security.sudo.extraConfig + config.security.sudo-rs.extraConfig;
 in
 {
   options.hinteros = {
@@ -147,16 +149,18 @@ in
             message = "hinteros hardening: the admin account must not be a profile's account.";
           }
           {
-            assertion = dev || config.security.sudo.wheelNeedsPassword;
+            assertion =
+              dev || (config.security.sudo.wheelNeedsPassword && config.security.sudo-rs.wheelNeedsPassword);
             message = "hinteros hardening: passwordless wheel sudo without hinteros.dev.enable.";
           }
           {
             assertion =
-              dev
-              || !(
-                lib.elem "NOPASSWD" sudoRuleOptions || lib.hasInfix "NOPASSWD" config.security.sudo.extraConfig
-              );
+              dev || !(lib.elem "NOPASSWD" sudoRuleOptions || lib.hasInfix "NOPASSWD" sudoExtraConfig);
             message = "hinteros hardening: NOPASSWD sudo rule without hinteros.dev.enable.";
+          }
+          {
+            assertion = !config.security.sudo.enable;
+            message = "hinteros hardening: classic sudo is on; HinterOS uses sudo-rs (security.sudo-rs).";
           }
           {
             assertion = dev || lib.unique config.nix.settings.trusted-users == [ "root" ];
@@ -203,8 +207,13 @@ in
         # 0.8) answers the prompt: it only talks to the launcher, only for requests it relayed.
         security.polkit.adminIdentities = [ "unix-user:0" ] ++ lib.optional admin "unix-user:${adminUser}";
 
-        # No setuid sudo at all unless dev.
-        security.sudo.enable = lib.mkDefault admin;
+        # No setuid sudo at all without the admin (or dev). sudo-rs, never classic sudo (on by
+        # default in NixOS): memory safe, far fewer features, the same `sudo` command and
+        # SUDO_USER (the audit log reads it).
+        security = {
+          sudo.enable = lib.mkDefault false;
+          sudo-rs.enable = lib.mkDefault admin;
+        };
 
         # Kernel attack surface for code running as a profile user (games, web pages, apps; the app
         # sandbox's seccomp filter also blocks most of these). Checked against what the box runs:
@@ -239,6 +248,52 @@ in
           SystemKeepFree = "1G";
           MaxRetentionSec = "3month";
         };
+      }
+
+      # Less code on the box.
+      {
+        # setuid helpers nothing here uses (pkexec: PwnKit). sudo stays for the admin, passwd and
+        # unix_chkpwd for PAM, mount and umount for users. Root still has the plain `su` on PATH.
+        security.wrappers =
+          lib.genAttrs
+            [
+              "pkexec"
+              "su"
+              "chsh"
+              "newgrp"
+              "sg"
+              "newuidmap"
+              "newgidmap"
+            ]
+            (_: {
+              enable = lib.mkDefault false;
+            });
+
+        services = {
+          # NixOS turns speech-dispatcher on for every graphical system: a socket every app and
+          # web page (Firefox Web Speech) can reach, with espeak-ng, mbrola, flite and a full
+          # ffmpeg behind it. HinterOS has no text to speech. Set with mkDefault there, so plain
+          # false.
+          speechd.enable = false;
+          # No installer layout uses LVM.
+          lvm.enable = lib.mkDefault false;
+        };
+
+        # NixOS defaults a TV box does not use: perl, rsync and strace on PATH, man pages, bcache,
+        # nixos-build-vms and nixos-option (man-db), and channels (flakes only).
+        environment.defaultPackages = lib.mkDefault [ ];
+        documentation.man.enable = lib.mkDefault false;
+        boot.bcache.enable = lib.mkDefault false;
+        system.tools = {
+          nixos-build-vms.enable = lib.mkDefault false;
+          nixos-option.enable = lib.mkDefault false;
+        };
+        nix.channel.enable = lib.mkDefault false;
+
+        # The firewall on nftables, not iptables (the LAN filter's table already is): no iptables
+        # tools or legacy rule path. NixOS deletes only its own tables on reload, so the LAN
+        # filter's `inet hinteros_lan` stays.
+        networking.nftables.enable = lib.mkDefault true;
       }
 
       (lib.mkIf cfg.ssh.enable { services.openssh.enable = true; })
@@ -309,7 +364,7 @@ in
           extraGroups = [ "wheel" ];
           inherit (adminCfg) hashedPasswordFile;
         };
-        security.sudo.enable = true;
+        security.sudo-rs.enable = true;
       })
 
       (lib.mkIf dev {
@@ -327,7 +382,7 @@ in
           openssh.authorizedKeys.keys = cfg.dev.deployKeys;
         };
 
-        security.sudo = {
+        security.sudo-rs = {
           enable = true;
           wheelNeedsPassword = false;
         };

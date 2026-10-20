@@ -201,9 +201,10 @@ let
         (lib.hasSuffix " job %i" job.serviceConfig.ExecStart)
         job.serviceConfig.KillMode
         job.serviceConfig.Type
+        (job.serviceConfig ? StateDirectory)
         (lib.all (n: lib.elem n (map lib.getName job.path)) [
           "nix"
-          "git"
+          "git-minimal"
           "openssh"
           "nixos-facter"
           "coreutils"
@@ -217,6 +218,7 @@ let
         true
         "control-group"
         "exec"
+        false
         true
       ];
     };
@@ -308,6 +310,7 @@ let
         [
           "send-event-no-blocking-send.patch"
           "pointer-response-curve.patch"
+          "xpad-uhid-poll-rate.patch"
         ]
         "0.81.0"
         true

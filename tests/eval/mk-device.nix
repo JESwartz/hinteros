@@ -319,6 +319,36 @@ let
       expr = noDhcp (self + "/tests/vm/fixtures/facter-intel-minipc.json");
       expected = noDhcpExpected;
     };
+    # VA-API: Intel's driver when the report shows an Intel GPU (video-hardware.nix); the generic
+    # system (no report) and a report without one go without.
+    testIntelVideoFromReport =
+      let
+        vaDrivers = cfg: map lib.getName cfg.hardware.graphics.extraPackages;
+        noGpu = builtins.toFile "facter-no-gpu.json" (
+          builtins.toJSON (
+            lib.recursiveUpdate (lib.importJSON (self + "/tests/vm/fixtures/facter-lenovo-m900.json")) {
+              hardware.graphics_card = [ ];
+            }
+          )
+        );
+        generic =
+          (self.lib.mkDevice {
+            state = good;
+            extraModules = [ { system.stateVersion = "25.11"; } ];
+          }).config;
+      in
+      {
+        expr = [
+          (vaDrivers (withFixture (self + "/tests/vm/fixtures/facter-lenovo-m900.json")))
+          (vaDrivers (withFixture noGpu))
+          (vaDrivers generic)
+        ];
+        expected = [
+          [ "intel-media-driver" ]
+          [ ]
+          [ ]
+        ];
+      };
     testGoodHasNoFailures = {
       expr = failures good;
       expected = "";

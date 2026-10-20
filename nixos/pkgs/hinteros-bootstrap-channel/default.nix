@@ -2,7 +2,7 @@
 # (daemon.nix) for the admin account (sudo).
 {
   writeShellApplication,
-  git,
+  gitMinimal,
   openssh,
   jq,
   coreutils,
@@ -13,7 +13,7 @@
 writeShellApplication {
   name = "hinteros-bootstrap-channel";
   runtimeInputs = [
-    git
+    gitMinimal
     openssh
     jq
     coreutils

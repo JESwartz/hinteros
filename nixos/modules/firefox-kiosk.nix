@@ -209,7 +209,8 @@ in
           "media.gmp-widevinecdm.enabled" = lock true;
           "media.gmp-widevinecdm.visible" = lock true;
           "browser.eme.ui.enabled" = lock false; # no DRM info bar
-          # Hardware video decoding (VA-API); the Intel driver comes from hardware.graphics.
+          # Hardware video decoding (VA-API); the Intel driver comes from video-hardware.nix
+          # (hardware.graphics, when the hardware report shows an Intel GPU).
           "media.ffmpeg.vaapi.enabled" = lock true;
           "media.hardware-video-decoding.force-enabled" = lock true;
           "media.rdd-ffmpeg.enabled" = lock true;

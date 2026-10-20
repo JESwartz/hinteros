@@ -238,6 +238,11 @@ in
         print(outcomes)
         assert any(j == j3 for j, _ in outcomes) and any(j == j4 for j, _ in outcomes), outcomes
 
+    with subtest("jobs leave /var/lib/hinteros to hinteros-system"):
+        # Jobs ran after the service restarted (base.set's switch); none took the tree back to
+        # root:root, which made systemd chown all of it and race the service's file writes.
+        assert machine.succeed("stat -c %U:%G /var/lib/hinteros").strip() == "root:hinteros"
+
     machine.succeed("pkill -f '[e]vents.py' || true")
   '';
 }

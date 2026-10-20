@@ -1,0 +1,23 @@
+XpadUhid: poll rate 0, so the hidraw queue drains
+
+The source loop reads one HID report per pass (read_timeout, 10 ms) and
+then sleeps for the rest of the driver's poll rate. XpadUhid (Bluetooth
+LE Xbox pads through BlueZ's uhid) had 500 ms: two reports a second, while
+the pad sends one about every 30 ms. The reports queued in the hidraw
+buffer (64 of them) and input came up to ~30 s late. Upstream commit
+6d08364 ("Use blocking read mechanism only for hidraw source polling")
+set every event-driven hidraw driver to 0 ms for this reason, but left
+XpadUhid at 500 ms (still so on master, 2026-10). The 10 ms read timeout
+paces the loop.
+
+--- a/src/input/source/hidraw.rs
++++ b/src/input/source/hidraw.rs
+@@ -515,7 +515,7 @@
+             }
+             DriverType::XpadUhid => {
+                 let options = SourceDriverOptions {
+-                    poll_rate: Duration::from_millis(500),
++                    poll_rate: Duration::from_millis(0),
+                     buffer_size: 1024,
+                 };
+                 let device = XpadUhid::new(device_info.clone())?;

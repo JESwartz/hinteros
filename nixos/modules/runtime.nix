@@ -104,6 +104,9 @@ in
           # No VPN plugins: the session user may create connections (threat-model.md B3).
           plugins = lib.mkForce [ ];
         };
+        # NetworkManager turns ModemManager on: a root daemon that probes USB and serial devices
+        # for modems. A TV box has none. NetworkManager sets it with mkDefault, so plain false.
+        networking.modemmanager.enable = false;
         # The scoped rule below is what lets the session user manage connections; no netdev
         # group membership, which would also cover non-session logins.
         security.polkit.extraConfig = rule networkActions;
@@ -138,6 +141,11 @@ in
               # Needed for newer controllers (battery reporting, LE features) and pairing flows.
               Experimental = true;
               FastConnectable = true;
+              # Xbox pads over LE: without privacy the pad answered nothing after pairing, the
+              # link timed out and the pad dropped the bond (seen with an RTL8761B dongle; xpadneo
+              # reports the same). A pad that lost its key may pair again by itself.
+              Privacy = "device";
+              JustWorksRepairing = "always";
             };
             Policy.AutoEnable = true;
           };
@@ -151,6 +159,22 @@ in
             ClassicBondedOnly = true;
           };
         };
+        # RTL8761B USB dongles (TP-Link UB500 and many more): linux-firmware's 0xDFC6_D922
+        # (commit 1de22a39) drops LE links. An Xbox controller pairs, then its link times out
+        # before the services are read and it forgets the bond; about half of the connections fail
+        # at once (0x3E). Known bad (xpadneo, hardware notes). The file from before that commit
+        # works. The first package in the list wins.
+        hardware.firmware = lib.mkBefore [
+          (pkgs.runCommand "rtl8761bu-firmware" { } ''
+            install -Dm444 ${
+              pkgs.fetchurl {
+                url = "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtl_bt/rtl8761bu_fw.bin?id=dee0d4cdf195d3294c1ed2be07a1745be0084ba6";
+                name = "rtl8761bu_fw.bin";
+                hash = "sha256-FIuqJcPbFxSAR+LKlwtisKenW5YLR2LqIPBFt5d8/3Y=";
+              }
+            } $out/lib/firmware/rtl_bt/rtl8761bu_fw.bin
+          '')
+        ];
       })
 
       (lib.mkIf cfg.audio.enable {
@@ -168,7 +192,6 @@ in
         # profiles come first whenever their output is available (a display with audio is
         # plugged in), keeping the analog input where the card has one. A profile the user
         # picks (Settings, through the session daemon) is stored by WirePlumber and still wins.
-        # alsa-utils is there for debugging.
         services.pipewire.wireplumber.extraConfig."60-hinteros-hdmi-first" = {
           "device.profile.priority.rules" = [
             {
@@ -180,7 +203,6 @@ in
             }
           ];
         };
-        environment.systemPackages = [ pkgs.alsa-utils ];
       })
 
       (lib.mkIf cfg.power.enable {

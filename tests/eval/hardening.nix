@@ -109,7 +109,7 @@ let
     testNopasswdRuleFails = {
       expr = failed (mk [
         {
-          security.sudo.extraRules = [
+          security.sudo-rs.extraRules = [
             {
               users = [ "tester" ];
               commands = [
@@ -125,12 +125,25 @@ let
       expected = true;
     };
     testNopasswdExtraConfigFails = {
-      expr = failed (mk [ { security.sudo.extraConfig = "tester ALL=(ALL) NOPASSWD: ALL"; } ]);
+      expr = failed (mk [ { security.sudo-rs.extraConfig = "tester ALL=(ALL) NOPASSWD: ALL"; } ]);
       expected = true;
     };
     testPasswordlessWheelFails = {
-      expr = failed (mk [ { security.sudo.wheelNeedsPassword = false; } ]);
+      expr = failed (mk [ { security.sudo-rs.wheelNeedsPassword = false; } ]);
       expected = true;
+    };
+    testClassicSudoFails = {
+      expr = [
+        (failed (mk [ { security.sudo.enable = true; } ]))
+        (failed (mk [
+          adminOn
+          { security.sudo.extraConfig = "tester ALL=(ALL) NOPASSWD: ALL"; }
+        ]))
+      ];
+      expected = [
+        true
+        true
+      ];
     };
     testExtraTrustedUserFails = {
       expr = failed (mk [ { nix.settings.trusted-users = [ "@wheel" ]; } ]);
@@ -158,8 +171,8 @@ let
           a = mk [ adminOn ];
         in
         [
-          a.security.sudo.enable
-          a.security.sudo.wheelNeedsPassword
+          a.security.sudo-rs.enable
+          a.security.sudo-rs.wheelNeedsPassword
           a.users.users.hinteros-admin.extraGroups
           a.security.polkit.adminIdentities
           (lib.elem "hinteros-admin" a.nix.settings.trusted-users)
@@ -180,7 +193,7 @@ let
     testAdminNopasswdStillFails = {
       expr = failed (mk [
         adminOn
-        { security.sudo.wheelNeedsPassword = false; }
+        { security.sudo-rs.wheelNeedsPassword = false; }
       ]);
       expected = true;
     };
@@ -220,7 +233,7 @@ let
         c.nix.settings.allowed-users
         c.boot.loader.systemd-boot.editor
         c.security.polkit.adminIdentities
-        c.security.sudo.enable
+        c.security.sudo-rs.enable
         (c.users.users ? deploy)
         (c.warnings == [ ])
       ];
@@ -324,16 +337,16 @@ let
       expr =
         lib.hasInfix
           "iptables -w -A nixos-fw -p tcp --dport 22 -s 192.168.0.0/16 -m comment --comment hinteros-ssh -j nixos-fw-accept"
-          (mkS sshState [ adminOn ]).networking.firewall.extraCommands;
+          (mkS sshState [
+            adminOn
+            { networking.nftables.enable = false; }
+          ]).networking.firewall.extraCommands;
       expected = true;
     };
     testSshFirewallNftablesRule = {
       expr =
         lib.hasInfix "ip6 saddr { fc00::/7, fe80::/10 } tcp dport { 22 } accept"
-          (mkS sshState [
-            adminOn
-            { networking.nftables.enable = true; }
-          ]).networking.firewall.extraInputRules;
+          (mkS sshState [ adminOn ]).networking.firewall.extraInputRules;
       expected = true;
     };
     testSshFirewallNoRuleWhenOff = {
@@ -344,7 +357,7 @@ let
     };
     testSshAllowFromOverride = {
       expr =
-        lib.hasInfix "-s 0.0.0.0/0 "
+        lib.hasInfix "ip saddr { 0.0.0.0/0 } tcp dport"
           (mkS sshState [
             adminOn
             {
@@ -353,7 +366,7 @@ let
                 "::/0"
               ];
             }
-          ]).networking.firewall.extraCommands;
+          ]).networking.firewall.extraInputRules;
       expected = true;
     };
     testSshAllowFromBadFails = {
@@ -365,6 +378,37 @@ let
       );
       expected = true;
     };
+    testLessSoftware = {
+      expr = [
+        c.security.sudo.enable
+        c.networking.nftables.enable
+        c.networking.networkmanager.wifi.backend
+        c.networking.networkmanager.settings.device."wifi.iwd.autoconnect"
+        c.networking.modemmanager.enable
+        c.services.speechd.enable
+        c.programs.nano.enable
+        (lib.sort (a: b: a < b) (
+          lib.attrNames (lib.filterAttrs (_: w: w.enable) (mk [ adminOn ]).security.wrappers)
+        ))
+      ];
+      expected = [
+        false
+        true
+        "iwd"
+        false
+        false
+        false
+        true
+        [
+          "mount"
+          "passwd"
+          "sudo"
+          "sudoedit"
+          "umount"
+          "unix_chkpwd"
+        ]
+      ];
+    };
     testSshOffByDefault = {
       expr = c.services.openssh.enable;
       expected = false;
@@ -373,8 +417,8 @@ let
     testDevDeployUser = {
       expr = [
         dev.users.users.deploy.extraGroups
-        dev.security.sudo.wheelNeedsPassword
-        dev.security.sudo.enable
+        dev.security.sudo-rs.wheelNeedsPassword
+        dev.security.sudo-rs.enable
         (lib.sort (a: b: a < b) (lib.unique dev.nix.settings.trusted-users))
         dev.services.openssh.settings.AllowUsers
         (lib.sort (a: b: a < b) dev.users.users.tester.extraGroups)
