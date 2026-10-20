@@ -1,8 +1,6 @@
 # HinterOS release notes
 
-Newest first. Changes since the last stable release go under `## Unreleased` - Fixed: Home in a Steam game kept the game on screen while the controller worked the hidden
-  launcher.
-on top: `promote`
+Newest first. Changes since the last stable release go under `## Unreleased` on top: `promote`
 puts that section into the release commit's message, which is what a box shows as the update's
 notes, and `promote stable` renames it to the version the promoter picks. Start a new
 `## Unreleased` section after merging a stable release into `main`. Keep each section short and
@@ -74,6 +72,8 @@ written for the person using the box.
 - Fixed: Xbox controllers over Bluetooth reacted up to 30 seconds late.
 - Fixed: after a Steam game ended, Steam showed on screen but the controller worked the hidden
   launcher, so A started another app.
+- Fixed: Home in a Steam game kept the game on screen while the controller worked the hidden
+  launcher.
 - Fixed: Xbox controllers paired but did not connect, or lost the pairing, on some Bluetooth
   dongles. HinterOS also uses the older Realtek firmware for RTL8761B dongles (TP-Link UB500
   and others).
