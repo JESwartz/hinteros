@@ -241,6 +241,47 @@ in
         };
       }
 
+      # Less code on the box.
+      {
+        # setuid helpers nothing here uses (pkexec: PwnKit). sudo stays for the admin, passwd and
+        # unix_chkpwd for PAM, mount and umount for users. Root still has the plain `su` on PATH.
+        security.wrappers =
+          lib.genAttrs
+            [
+              "pkexec"
+              "su"
+              "chsh"
+              "newgrp"
+              "sg"
+              "newuidmap"
+              "newgidmap"
+            ]
+            (_: {
+              enable = lib.mkDefault false;
+            });
+
+        services = {
+          # NixOS turns speech-dispatcher on for every graphical system: a socket every app and
+          # web page (Firefox Web Speech) can reach, with espeak-ng, mbrola, flite and a full
+          # ffmpeg behind it. HinterOS has no text to speech. Set with mkDefault there, so plain
+          # false.
+          speechd.enable = false;
+          # No installer layout uses LVM.
+          lvm.enable = lib.mkDefault false;
+        };
+
+        # NixOS defaults a TV box does not use: perl, rsync and strace on PATH, man pages, bcache,
+        # nixos-build-vms and nixos-option (man-db), and channels (flakes only).
+        environment.defaultPackages = lib.mkDefault [ ];
+        documentation.man.enable = lib.mkDefault false;
+        boot.bcache.enable = lib.mkDefault false;
+        system.tools = {
+          nixos-build-vms.enable = lib.mkDefault false;
+          nixos-option.enable = lib.mkDefault false;
+        };
+        nix.channel.enable = lib.mkDefault false;
+      }
+
       (lib.mkIf cfg.ssh.enable { services.openssh.enable = true; })
 
       # SSH, whoever enabled it (state.json, the installer plan, or dev). Plain username + password

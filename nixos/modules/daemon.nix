@@ -176,7 +176,7 @@ let
   # What the job unit needs on PATH (hinteros-system job runs nix, git, ssh-keygen, nixos-facter).
   jobPath = [
     config.nix.package
-    pkgs.git
+    pkgs.gitMinimal
     pkgs.openssh
     pkgs.nixos-facter
     pkgs.coreutils

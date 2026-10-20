@@ -104,6 +104,9 @@ in
           # No VPN plugins: the session user may create connections (threat-model.md B3).
           plugins = lib.mkForce [ ];
         };
+        # NetworkManager turns ModemManager on: a root daemon that probes USB and serial devices
+        # for modems. A TV box has none. NetworkManager sets it with mkDefault, so plain false.
+        networking.modemmanager.enable = false;
         # The scoped rule below is what lets the session user manage connections; no netdev
         # group membership, which would also cover non-session logins.
         security.polkit.extraConfig = rule networkActions;
@@ -189,7 +192,6 @@ in
         # profiles come first whenever their output is available (a display with audio is
         # plugged in), keeping the analog input where the card has one. A profile the user
         # picks (Settings, through the session daemon) is stored by WirePlumber and still wins.
-        # alsa-utils is there for debugging.
         services.pipewire.wireplumber.extraConfig."60-hinteros-hdmi-first" = {
           "device.profile.priority.rules" = [
             {
@@ -201,7 +203,6 @@ in
             }
           ];
         };
-        environment.systemPackages = [ pkgs.alsa-utils ];
       })
 
       (lib.mkIf cfg.power.enable {

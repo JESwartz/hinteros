@@ -203,7 +203,7 @@ let
         job.serviceConfig.Type
         (lib.all (n: lib.elem n (map lib.getName job.path)) [
           "nix"
-          "git"
+          "git-minimal"
           "openssh"
           "nixos-facter"
           "coreutils"
@@ -308,6 +308,7 @@ let
         [
           "send-event-no-blocking-send.patch"
           "pointer-response-curve.patch"
+          "xpad-uhid-poll-rate.patch"
         ]
         "0.81.0"
         true

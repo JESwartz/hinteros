@@ -76,6 +76,8 @@ written for the person using the box.
   dongles. HinterOS also uses the older Realtek firmware for RTL8761B dongles (TP-Link UB500
   and others).
 - The screen saver uses much less power.
+- Less software on the box: no text to speech, no modem service, fewer setuid programs, and
+  no Perl, rsync, strace or man pages for the command line. The system is about 0.8 GiB smaller.
 - The security notice: Update now works at once. Only Later and Back wait 5 seconds.
 - Fixed: a profile without apps after moving to profiles; "another job is running" just after a
   job ended; an offline install with Steam picked.
