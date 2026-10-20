@@ -74,6 +74,8 @@ written for the person using the box.
   launcher, so A started another app.
 - Fixed: Home in a Steam game kept the game on screen while the controller worked the hidden
   launcher.
+- Fixed: in a game, a short press of Home sometimes counted as a long press and did not go
+  back to the launcher.
 - Fixed: Xbox controllers paired but did not connect, or lost the pairing, on some Bluetooth
   dongles. HinterOS also uses the older Realtek firmware for RTL8761B dongles (TP-Link UB500
   and others).
