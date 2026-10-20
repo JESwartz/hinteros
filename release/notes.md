@@ -70,6 +70,8 @@ written for the person using the box.
 - Fixed: the selection did not move while Wi-Fi searched for networks.
 - Fixed: Steam's on-screen keyboard stayed on screen after Home.
 - Fixed: Xbox controllers over Bluetooth reacted up to 30 seconds late.
+- Fixed: after a Steam game ended, Steam showed on screen but the controller worked the hidden
+  launcher, so A started another app.
 - Fixed: Xbox controllers paired but did not connect, or lost the pairing, on some Bluetooth
   dongles. HinterOS also uses the older Realtek firmware for RTL8761B dongles (TP-Link UB500
   and others).
