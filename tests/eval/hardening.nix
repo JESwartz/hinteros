@@ -383,6 +383,7 @@ let
         c.security.sudo.enable
         c.networking.nftables.enable
         c.networking.networkmanager.wifi.backend
+        c.networking.networkmanager.settings.device."wifi.iwd.autoconnect"
         c.networking.modemmanager.enable
         c.services.speechd.enable
         c.programs.nano.enable
@@ -394,6 +395,7 @@ let
         false
         true
         "iwd"
+        false
         false
         false
         true

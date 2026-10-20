@@ -38,6 +38,13 @@
           {
             DriverQuirks.PowerSaveDisable = "*";
           };
+      # NetworkManager starts the connections, not iwd. With iwd's autoconnect (the default)
+      # NetworkManager never connects by itself, and it copies a profile to iwd only when the
+      # profile is new or changed: a box updated from wpa_supplicant kept its Wi-Fi profile but
+      # never connected (seen on the dev box). This also keeps autoconnect-priority working.
+      networking.networkmanager.settings.device."wifi.iwd.autoconnect" = lib.mkIf (
+        config.networking.networkmanager.wifi.backend == "iwd"
+      ) false;
 
       networking.networkmanager = {
         wifi.backend = lib.mkDefault "iwd";
