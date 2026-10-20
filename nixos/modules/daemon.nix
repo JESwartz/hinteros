@@ -744,8 +744,10 @@ in
           Nice = 10;
           IOSchedulingClass = "idle";
           KillMode = "control-group";
-          StateDirectory = "hinteros";
-          StateDirectoryMode = "0700";
+          # No StateDirectory: /var/lib/hinteros is hinteros-system's (root:hinteros), which starts
+          # every job. With its own (root:root) each job after a restart of hinteros-system had
+          # systemd chown the whole tree back, and failed (STATE_DIRECTORY, ENOENT) when the
+          # service replaced a file during the walk (an update check during a switch).
         };
       };
 

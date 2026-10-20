@@ -212,11 +212,21 @@ in
     jobs_idle("hinteros-p2")
 
     def held():
-        # Everything root keeps per profile: metadata, PINs, app profiles.
+        # Everything root keeps per profile: metadata, PINs, app profiles. Not the wrong-try
+        # counters (pins/*.state, and pins/*.tries for the admin PIN since system API 0.9): a
+        # refused wrong PIN counts by design.
         return machine.succeed(
-            "cd /var/lib/hinteros && find profiles.json pins -type f ! -name '*.state' | sort | xargs sha256sum; "
+            "cd /var/lib/hinteros && find profiles.json pins -type f ! -name '*.state' ! -name '*.tries' | sort | xargs sha256sum; "
             "ls -l /nix/var/nix/profiles/hinteros/apps"
         )
+
+    def admin_tries_reset():
+        # The admin PIN locks after 10 wrong tries until a reboot (system API 0.9): pins/p1.tries
+        # counts them for one boot id. These subtests send more on purpose; first the lock holds
+        # (also for the right PIN), then the counter goes as a reboot makes it go.
+        r = sess("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Mallory", "pin": "2468"})
+        assert r["error"]["code"] == 3016 and r["error"]["data"].get("reboot_required") is True, r
+        machine.succeed("rm /var/lib/hinteros/pins/p1.tries")
 
     def admin_refused(user, method, params):
         r = sess(user, "system." + method, params)
@@ -249,8 +259,10 @@ in
         e = sys_err("hinteros-p2", "apps.install", {"ids": ["moonlight"], "revision": "0" * 64}, 3007)
         assert e["data"]["reason"] == "revision", e
         assert [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"] == []
-        assert held() == before
+        now = held()
+        assert now == before, f"held state changed:\n{before}\n---\n{now}"
         # With the admin PIN it works (from p2's session).
+        admin_tries_reset()
         assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Alexis", "pin": "2468"}) == {}
         assert profiles_file()["profiles"]["p3"]["name"] == "Alexis"
 
@@ -266,6 +278,8 @@ in
             ("update.apply", {"rev": UPDATE_REV}),
         ]
         for method, params in guarded:
+            # Two wrong PINs per action: below the lock (that is the first two-profile subtest's).
+            machine.succeed("rm -f /var/lib/hinteros/pins/p1.tries")
             for extra in [{}, {"admin_pin": "1357"}, {"admin_pin": P3_PIN}]:
                 e = sys_err("hinteros-p2", method, {**params, **extra}, 3016)
                 assert e["data"] == {"pin": "admin"}, (method, extra, e)

@@ -201,6 +201,7 @@ let
         (lib.hasSuffix " job %i" job.serviceConfig.ExecStart)
         job.serviceConfig.KillMode
         job.serviceConfig.Type
+        (job.serviceConfig ? StateDirectory)
         (lib.all (n: lib.elem n (map lib.getName job.path)) [
           "nix"
           "git-minimal"
@@ -217,6 +218,7 @@ let
         true
         "control-group"
         "exec"
+        false
         true
       ];
     };
