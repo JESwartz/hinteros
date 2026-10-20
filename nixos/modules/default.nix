@@ -22,5 +22,6 @@
     ./branding.nix
     ./diagnostics.nix
     ./network-hardware.nix
+    ./video-hardware.nix
   ];
 }
