@@ -156,7 +156,9 @@ let
           echo "Jellyfin stopped during setup" >&2
           exit 1
         fi
-        if curl -fsS -m 5 "$api/System/Info/Public" 2>/dev/null | jq -e '.Id' >/dev/null 2>&1; then
+        # While it starts, Jellyfin runs a stand-in server on the same port that says "Degraded"
+        # (and answers /System/Info/Public too); only the real server says "Healthy".
+        if [ "$(curl -fsS -m 5 "$api/health" 2>/dev/null)" = Healthy ]; then
           ready=1
           break
         fi
