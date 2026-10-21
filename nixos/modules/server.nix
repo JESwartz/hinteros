@@ -210,6 +210,27 @@ let
     '';
   };
 
+  # The Jellyfin app's sign-in page (spike S1): jellyfin-web with `hinteros/signin.html` and
+  # `signin.js` added, bound read-only over the web directory the server is started with
+  # (`--webdir` in the package's wrapper), so Jellyfin serves it at /web/hinteros/signin.html
+  # without a rebuild of the server. The session daemon starts the app there with the profile's
+  # token in the fragment; the page stores jellyfin-web's login and opens /web/index.html.
+  jfWebDir =
+    let
+      flag = lib.findFirst (lib.hasPrefix "--webdir=") null (jf.package.makeWrapperArgs or [ ]);
+    in
+    if flag == null then
+      "${pkgs.jellyfin-web}/share/jellyfin-web"
+    else
+      lib.removePrefix "--webdir=" flag;
+  jfWeb = pkgs.runCommand "jellyfin-web-hinteros" { } ''
+    # A copy, not links: inside the unit the links would point at the bound directory itself.
+    cp -r --no-preserve=mode ${jfWebDir} $out
+    mkdir $out/hinteros
+    cp ${./jellyfin-signin.html} $out/hinteros/signin.html
+    cp ${./jellyfin-signin.js} $out/hinteros/signin.js
+  '';
+
   # The tunnel may reach the box's own addresses (a private-network route to the box points at
   # its LAN address, and loopback) only on the servers' ports: whatever else listens on the box
   # (sshd, the session, a game's server) stays off the route. Replies to connections others
@@ -335,6 +356,8 @@ in
           vp8 = true;
         };
       };
+
+      systemd.services.jellyfin.serviceConfig.BindReadOnlyPaths = [ "${jfWeb}:${jfWebDir}" ];
 
       systemd.services.hinteros-jellyfin-setup = {
         description = "HinterOS: set up Jellyfin in a private network";

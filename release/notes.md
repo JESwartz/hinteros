@@ -11,6 +11,9 @@ written for the person using the box.
 - Servers: the box can run a Jellyfin server, a Plex Media Server, Tailscale and Cloudflare
   Tunnel. Put your movies, series and music in /srv/media. HinterOS sets up Jellyfin for you.
   Only your home network and your Tailscale network can connect to Jellyfin.
+- Jellyfin: the Jellyfin app signs in to the box's own Jellyfin server by itself, with your
+  profile's account. Before an update changes the Jellyfin version, HinterOS keeps a copy of
+  the Jellyfin data.
 - Settings → Storage: a ring shows what uses the disk (the system, apps, each profile and its
   Steam games, Guest, free space). Your own profile opens; another profile needs the admin PIN.
 - Clean up the system and clean up profiles, each keeping as many versions as the admin

@@ -20,6 +20,7 @@
 #                                    #   hinteros-system starts, if the profile does not exist
 #     starter ? null;                # <env key>: the starter env, set the same way
 #     specialisations ? { };         # { <name> = <state>; } systems the stub "builds"
+#                                    #   (or { state; module; }: with more config)
 #     overrides ? { };               # hinteros.appEnv.overrides (merged into every env)
 #     extraModule ? { };             # more config for the node
 #   }
@@ -68,6 +69,7 @@ rec {
       ],
       requirements ? [ ],
       guest ? true,
+      services ? [ ],
     }:
     {
       schemaVersion = 2;
@@ -80,8 +82,7 @@ rec {
         inherit id;
         user = userOf id;
       }) accounts;
-      inherit requirements;
-      services = [ ];
+      inherit requirements services;
     };
 
   # profiles.json (DECISIONS D4) for `profiles`; `next` is one past the highest account.
@@ -228,9 +229,18 @@ rec {
       };
       boot.loader.grub.enable = lib.mkForce false;
 
-      specialisation = lib.mapAttrs (_: st: {
-        configuration.hinteros.state = lib.mkOverride 40 st;
-      }) specialisations;
+      specialisation = lib.mapAttrs (
+        _: s:
+        let
+          withModule = s ? state;
+        in
+        {
+          configuration = {
+            imports = lib.optional withModule (s.module or { });
+            hinteros.state = lib.mkOverride 40 (if withModule then s.state else s);
+          };
+        }
+      ) specialisations;
 
       system.extraDependencies = lib.mapAttrsToList (_: e: e.env) (
         lib.filterAttrs (_: e: e.rooted) built
