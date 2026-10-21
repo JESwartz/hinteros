@@ -256,6 +256,9 @@
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
         hardening-eval = import ./tests/eval/hardening.nix { inherit self pkgs; };
+        server-eval = import ./tests/eval/server.nix { inherit self pkgs; };
+        server-jellyfin = import ./tests/vm/server-jellyfin.nix { inherit self pkgs; };
+        server-network = import ./tests/vm/server-network.nix { inherit self pkgs; };
         daemon-eval = import ./tests/eval/daemon.nix { inherit self pkgs; };
         installer-iso-eval = import ./tests/eval/installer-iso.nix { inherit self pkgs; };
         offline-inputs = import ./tests/eval/offline-inputs.nix { inherit self pkgs; };

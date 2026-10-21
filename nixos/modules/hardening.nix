@@ -47,14 +47,14 @@ let
     lib.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users)
   );
 
-  # The networks that may reach sshd (hinteros.ssh.allowFrom), split by family.
-  sshFrom6 = lib.filter (lib.hasInfix ":") cfg.ssh.allowFrom;
-  sshFrom4 = lib.filter (s: !lib.hasInfix ":" s) cfg.ssh.allowFrom;
-  sshPorts = map toString config.services.openssh.ports;
-  isCidr =
-    s:
-    builtins.match "[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}" s != null
-    || builtins.match "[0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3}" s != null;
+  # The networks that may reach sshd (hinteros.ssh.allowFrom).
+  localNets = import ../lib/local-networks.nix { inherit lib; };
+  sshRule = {
+    from = cfg.ssh.allowFrom;
+    proto = "tcp";
+    ports = config.services.openssh.ports;
+    comment = "hinteros-ssh";
+  };
 
   # sudo-rs, and classic sudo should a device module turn it back on.
   sudoRuleOptions = lib.concatMap (r: lib.concatMap (c: c.options or [ ]) r.commands) (
@@ -102,8 +102,9 @@ in
         "::/0"
       ];
       description = ''
-        Source networks (IPv4 and IPv6 CIDR) the firewall lets reach sshd. Default: the local
-        networks only (RFC 1918, IPv4 link-local, IPv6 ULA and link-local). sshd's own
+        Source networks (IPv4 and IPv6 CIDR) the firewall lets reach sshd, and the servers'
+        `lan` ports (server.nix). Default: the local networks only (RFC 1918, IPv4 link-local,
+        IPv6 ULA and link-local). sshd's own
         `openFirewall` stays off, so nothing else opens its port. `[ "0.0.0.0/0" "::/0" ]` opens
         it to all networks.
       '';
@@ -304,7 +305,7 @@ in
       (lib.mkIf config.services.openssh.enable {
         assertions = [
           {
-            assertion = lib.all isCidr cfg.ssh.allowFrom;
+            assertion = lib.all localNets.isCidr cfg.ssh.allowFrom;
             message = "hinteros hardening: hinteros.ssh.allowFrom: every entry must be an IPv4 or IPv6 CIDR (e.g. 192.168.0.0/16, fe80::/10).";
           }
         ];
@@ -312,31 +313,10 @@ in
         # The port is open only to hinteros.ssh.allowFrom, never to all sources.
         networking.firewall = lib.mkMerge [
           (lib.mkIf config.networking.nftables.enable {
-            extraInputRules = lib.concatStrings [
-              (lib.optionalString (sshFrom4 != [ ]) ''
-                ip saddr { ${lib.concatStringsSep ", " sshFrom4} } tcp dport { ${lib.concatStringsSep ", " sshPorts} } accept comment "hinteros-ssh"
-              '')
-              (lib.optionalString (sshFrom6 != [ ]) ''
-                ip6 saddr { ${lib.concatStringsSep ", " sshFrom6} } tcp dport { ${lib.concatStringsSep ", " sshPorts} } accept comment "hinteros-ssh"
-              '')
-            ];
+            extraInputRules = localNets.nftRules sshRule;
           })
           (lib.mkIf (!config.networking.nftables.enable) {
-            extraCommands = lib.concatStrings (
-              lib.concatMap (
-                port:
-                map (
-                  src:
-                  "iptables -w -A nixos-fw -p tcp --dport ${port} -s ${src} -m comment --comment hinteros-ssh -j nixos-fw-accept\n"
-                ) sshFrom4
-                ++ lib.optionals config.networking.enableIPv6 (
-                  map (
-                    src:
-                    "ip6tables -w -A nixos-fw -p tcp --dport ${port} -s ${src} -m comment --comment hinteros-ssh -j nixos-fw-accept\n"
-                  ) sshFrom6
-                )
-              ) sshPorts
-            );
+            extraCommands = localNets.iptablesRules (sshRule // { ipv6 = config.networking.enableIPv6; });
           })
         ];
 

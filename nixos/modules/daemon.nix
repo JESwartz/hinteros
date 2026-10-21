@@ -705,7 +705,8 @@ in
           ProtectKernelModules = true;
           ProtectKernelTunables = true;
           ProtectControlGroups = true;
-          # D-Bus (logind, polkit, systemd), the journal and its own socket; no network.
+          # D-Bus (logind, polkit, systemd), the journal and its own socket; no network. With a
+          # server on, server.nix adds IP to loopback only (the servers' status).
           RestrictAddressFamilies = [ "AF_UNIX" ];
           RestrictRealtime = true;
           LockPersonality = true;

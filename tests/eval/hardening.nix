@@ -181,7 +181,11 @@ let
       expected = [
         true
         true
-        [ "wheel" ]
+        # hinteros-media: the admin copies media into /srv/media (server.nix).
+        [
+          "wheel"
+          "hinteros-media"
+        ]
         [
           "unix-user:0"
           "unix-user:hinteros-admin"

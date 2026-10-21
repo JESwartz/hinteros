@@ -23,5 +23,6 @@
     ./diagnostics.nix
     ./network-hardware.nix
     ./video-hardware.nix
+    ./server.nix
   ];
 }

@@ -6,7 +6,8 @@
 #     pkgs.steam with our sockets hidden, lib/steam.nix). Per-profile envs call it with their own
 #     pkgs (app-env.nix);
 #   - derives, from the box-wide apps that are on, the unfree packages they need
-#     (`hinteros.unfreeAllowlist`) and the box features they name (`hinteros.boxFeatures`);
+#     (`hinteros.unfreeAllowlist`, the enabled services' too) and the box features they name
+#     (`hinteros.boxFeatures`);
 #   - enables the restricted `service` module of every service in `hinteros.catalog.services`
 #     (state.json `services`, M10);
 #   - installs the generated index and vendor terms at `share/hinteros/catalog.json` and
@@ -133,11 +134,14 @@ in
       };
     }
 
-    # The unfree packages the box-wide apps need, by name (nixpkgs.config must not depend on pkgs).
-    # App envs allow their own in a separate nixpkgs instance (app-env.nix).
+    # The unfree packages the box-wide apps and the enabled services need, by name (nixpkgs.config
+    # must not depend on pkgs): Plex Media Server is allowed only while it is on. App envs allow
+    # their own in a separate nixpkgs instance (app-env.nix).
     {
       hinteros.unfreeAllowlist = lib.unique (
-        lib.concatMap (e: e.license.unfreePackages) (lib.attrValues enabled)
+        lib.concatMap (e: e.license.unfreePackages or [ ]) (
+          lib.attrValues enabled ++ map (id: liveServices.${id}) cfg.services
+        )
       );
     }
 
