@@ -187,7 +187,7 @@ in
           machine.wait_until_succeeds("pgrep -u jellyfin", timeout=120)
           machine.wait_until_succeeds("test -e /var/lib/jellyfin/config/system.xml", timeout=600)
           machine.succeed("systemctl stop hinteros-jellyfin-setup.service")
-          machine.fail("pgrep -u jellyfin")
+          machine.wait_until_fails("pgrep -u jellyfin", timeout=30)
           machine.succeed(f"test -e {S}/setup-started")
           machine.succeed("touch /var/lib/jellyfin/leftover")
           machine.succeed("systemctl start --no-block jellyfin.service")

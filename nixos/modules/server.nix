@@ -381,6 +381,8 @@ in
           ''}";
           ExecStart = lib.getExe jfSetup;
           TimeoutStartSec = "20min";
+          # Jellyfin ignores SIGTERM while it starts; a stopped setup starts again from scratch.
+          TimeoutStopSec = "15s";
           User = "root";
           PrivateNetwork = true;
           ProtectSystem = "strict";
