@@ -60,7 +60,10 @@
         machine.execute(f"(su {USER} -s /bin/sh -c 'timeout 60 gdbus monitor --system --dest {IP}' > /tmp/m.txt 2>&1 &)")
         machine.sleep(2)
         for a in actions:
-            pad(a)
+            if callable(a):
+                a()
+            else:
+                pad(a)
             machine.sleep(1)
         machine.sleep(3)
         evdev_out = machine.succeed("cat /tmp/r.txt; pkill -f '[r]eader.py'; pkill -f '[g]dbus monitor'; true")
@@ -103,6 +106,15 @@
     assert "BTN_SOUTH 1" in r and "BTN_EAST" not in r, r
     assert "ui_guide" in sig and "ui_back" in sig, sig
     assert bc(f"get-property {IP} {CD} {CDI} InterceptMode").split()[-1] == "2"
+
+    # Back to PASS while Guide is still held (the session daemon does this to tap Guide for
+    # Steam on a long press): the release goes to the gamepad, and the next Guide press must
+    # still reach D-Bus (dbus-clear-on-pass.patch; unpatched, the DBus target keeps Guide
+    # "pressed" and drops the press as a duplicate).
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+    to_pass = lambda: bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+    r, sig = window("Microsoft X-Box 360", ["press BTN_MODE", to_pass, "release BTN_MODE", "press BTN_MODE", "release BTN_MODE"])
+    assert sig.count("'ui_guide', 1.0") == 2, sig
 
     # Xbox X/Y (real-hardware report: Y acted as "action", X as "context"). xpad sends BTN_Y for
     # the top Y button and BTN_X for the left X button; the kernel defines BTN_Y = BTN_WEST (0x134)

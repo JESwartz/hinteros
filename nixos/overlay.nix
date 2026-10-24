@@ -54,11 +54,16 @@ final: prev: {
   # xpad-uhid-poll-rate.patch: Bluetooth LE Xbox pads (XpadUhid) were read two reports a second,
   # one about every 30 ms came in, and input queued up to ~30 s late. 0 ms as upstream has for the
   # other event-driven hidraw drivers (commit 6d08364); not fixed upstream as of 2026-10.
+  # dbus-clear-on-pass.patch: a button held while InputPlumber went from intercepting back to Pass
+  # stayed "pressed" in the DBus target, which then dropped its next presses (Guide after a long
+  # press for Steam). Leaving intercept mode now releases what the DBus targets hold; not fixed
+  # upstream as of v0.83.0.
   inputplumber = prev.inputplumber.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./pkgs/inputplumber/send-event-no-blocking-send.patch
       ./pkgs/inputplumber/pointer-response-curve.patch
       ./pkgs/inputplumber/xpad-uhid-poll-rate.patch
+      ./pkgs/inputplumber/dbus-clear-on-pass.patch
     ];
   });
 }

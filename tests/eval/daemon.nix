@@ -311,6 +311,7 @@ let
           "send-event-no-blocking-send.patch"
           "pointer-response-curve.patch"
           "xpad-uhid-poll-rate.patch"
+          "dbus-clear-on-pass.patch"
         ]
         "0.81.0"
         true
