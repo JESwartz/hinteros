@@ -1,4 +1,4 @@
-# usage: reader.py <name-substring> <seconds>  -> prints key/abs events seen on every matching evdev node
+# usage: reader.py <name-substring> <seconds>  -> prints key/abs/rel events seen on every matching evdev node
 import evdev, sys, select, time
 from evdev import ecodes as e
 sub, secs = sys.argv[1], float(sys.argv[2])
@@ -13,5 +13,5 @@ while time.time() < end:
     r, _, _ = select.select(devs, [], [], 0.2)
     for d in r:
         for ev in d.read():
-            if ev.type in (e.EV_KEY, e.EV_ABS):
+            if ev.type in (e.EV_KEY, e.EV_ABS, e.EV_REL):
                 print("EVENT", d.name, "|", nm(ev.type, ev.code), ev.value, flush=True)

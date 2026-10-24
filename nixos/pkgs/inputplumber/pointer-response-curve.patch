@@ -1,15 +1,17 @@
-Stick -> mouse motion: apply a response curve (speed = speed_pps * m^k)
+Stick -> mouse motion: an optional response curve per mapping
 
 InputPlumber 0.81.0 maps a stick to mouse motion linearly: a per-axis 0.20
 deadzone, then speed_pps * deflection. That makes small pointer adjustments
-hard. This replaces it with a radial deadzone (0.20 of the vector magnitude),
-the magnitude rescaled past it to m in [0, 1], and speed_pps * m^k with the
+hard. This adds an optional `curve` (exponent k) to a mapping's mouse motion
+target. With it: a radial deadzone (0.20 of the vector magnitude), the
+magnitude rescaled past it to m in [0, 1], and speed_pps * m^k with the
 direction kept. Full deflection is still exactly speed_pps (the magnitude is
 clamped to 1, so square-gate diagonals are not faster); k = 1 is linear.
-
-k comes from the environment variable INPUTPLUMBER_POINTER_CURVE, read once
-at first use (default 2.5; invalid or non-positive values are ignored with a
-warning). The math is the pure function pointer_curve(), with unit tests.
+Without it (or with a non-positive value) nothing changes: the per-axis
+deadzone and linear speed as before. So only a profile that asks for it
+gets the curve (HinterOS: its right-stick pointer for keyboard-profile
+apps); other profiles that map a stick to the mouse keep upstream's feel.
+The math is the pure function pointer_curve(), with unit tests.
 
 Slow speeds stay smooth without a change: MouseDevice::poll already
 accumulates the sub-pixel remainder (MouseMotionState::mouse_remainder) and
@@ -17,37 +19,28 @@ only emits whole-pixel REL_X/REL_Y deltas.
 
 Not upstream: HinterOS-specific behaviour.
 
+--- a/src/config/capability_map.rs
++++ b/src/config/capability_map.rs
+@@ -296,6 +296,11 @@
+     pub direction: Option<String>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub speed_pps: Option<u64>,
++    /// Response curve exponent k for stick axes: radial deadzone, then speed_pps * m^k with m
++    /// the deflection past the deadzone rescaled to [0, 1]. Unset: per-axis deadzone and
++    /// linear speed.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub curve: Option<f64>,
+ }
+ 
+ #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema, PartialEq)]
 --- a/src/input/event/value.rs
 +++ b/src/input/event/value.rs
-@@ -20,6 +20,85 @@
+@@ -20,6 +20,62 @@
      InvalidTargetConfig(String),
  }
  
 +/// Deadzone applied to stick axes that drive mouse motion.
 +const MOUSE_MOTION_DEADZONE: f64 = 0.20;
-+
-+/// Exponent of the stick->mouse speed curve when `INPUTPLUMBER_POINTER_CURVE` is unset or
-+/// invalid. 1.0 is linear.
-+const DEFAULT_POINTER_CURVE: f64 = 2.5;
-+
-+/// The pointer curve exponent: `INPUTPLUMBER_POINTER_CURVE`, read once at first use.
-+fn pointer_curve_exponent() -> f64 {
-+    static EXPONENT: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-+    *EXPONENT.get_or_init(|| {
-+        let exponent = match std::env::var("INPUTPLUMBER_POINTER_CURVE") {
-+            Ok(raw) => match raw.trim().parse::<f64>() {
-+                Ok(k) if k.is_finite() && k > 0.0 => k,
-+                _ => {
-+                    log::warn!("Ignoring invalid INPUTPLUMBER_POINTER_CURVE {raw:?}");
-+                    DEFAULT_POINTER_CURVE
-+                }
-+            },
-+            Err(_) => DEFAULT_POINTER_CURVE,
-+        };
-+        log::info!("Pointer response curve exponent: {exponent}");
-+        exponent
-+    })
-+}
 +
 +/// Map a stick deflection to a mouse speed factor in [0, 1] per axis (still to be multiplied
 +/// by the full-deflection speed). The magnitude is rescaled past the deadzone to m in [0, 1]
@@ -105,7 +98,7 @@ Not upstream: HinterOS-specific behaviour.
  /// InputValue represents different ways to represent a value from an input event.
  #[derive(Debug, Clone)]
  pub enum InputValue {
-@@ -710,25 +789,15 @@
+@@ -710,25 +766,39 @@
                      _ => (None, None),
                  };
  
@@ -114,28 +107,50 @@ Not upstream: HinterOS-specific behaviour.
 -                if let Some(value) = x {
 -                    if value.abs() < 0.20 {
 -                        x = Some(0.0);
--                    }
++                // A response curve only where the mapping asks for one (speed grows with
++                // deflection^curve, full deflection is still full speed); otherwise the
++                // per-axis deadzone and linear speed as before.
++                let curve = mouse_motion.curve.filter(|k| k.is_finite() && *k > 0.0);
++                if let Some(exponent) = curve {
++                    let (cx, cy) = pointer_curve(x.unwrap_or(0.0), y.unwrap_or(0.0), exponent);
++                    if x.is_some() {
++                        x = Some(cx * speed_pps as f64);
+                     }
 -                }
 -                if let Some(value) = y {
 -                    if value.abs() < 0.20 {
 -                        y = Some(0.0);
--                    }
++                    if y.is_some() {
++                        y = Some(cy * speed_pps as f64);
++                    }
++                } else {
++                    // Check to see if the value is below a given threshold to prevent
++                    // mouse movements for axes that don't recenter to 0.
++                    if let Some(value) = x {
++                        if value.abs() < MOUSE_MOTION_DEADZONE {
++                            x = Some(0.0);
++                        }
++                    }
++                    if let Some(value) = y {
++                        if value.abs() < MOUSE_MOTION_DEADZONE {
++                            y = Some(0.0);
++                        }
+                     }
 -                }
--
+ 
 -                // Multiply the value by the speed
 -                if let Some(value) = x {
 -                    x = Some(value * speed_pps as f64);
-+                // Apply the deadzone and response curve (speed grows with deflection^k,
-+                // full deflection is still full speed), then scale by the speed.
-+                let (cx, cy) =
-+                    pointer_curve(x.unwrap_or(0.0), y.unwrap_or(0.0), pointer_curve_exponent());
-+                if x.is_some() {
-+                    x = Some(cx * speed_pps as f64);
-                 }
+-                }
 -                if let Some(value) = y {
 -                    y = Some(value * speed_pps as f64);
-+                if y.is_some() {
-+                    y = Some(cy * speed_pps as f64);
++                    // Multiply the value by the speed
++                    if let Some(value) = x {
++                        x = Some(value * speed_pps as f64);
++                    }
++                    if let Some(value) = y {
++                        y = Some(value * speed_pps as f64);
++                    }
                  }
  
                  // If a direction is defined, map only the selected directions to

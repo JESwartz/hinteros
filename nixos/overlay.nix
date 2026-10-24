@@ -49,8 +49,9 @@ final: prev: {
   # it). Not fixed upstream (https://github.com/ShadowBlip/InputPlumber, master = v0.81.0 as of
   # 2026-10); drop the patch once a release awaits the command instead. Checked by `input-layer`
   # (the click answers and reaches the virtual mouse) and `daemon-eval` (the patch is applied).
-  # pointer-response-curve.patch (HinterOS-only) makes stick->mouse speed = speed_pps * m^k, k from
-  # INPUTPLUMBER_POINTER_CURVE (`hinteros.input.pointerCurve`).
+  # pointer-response-curve.patch (HinterOS-only): a mapping's mouse motion target may set `curve`
+  # (k), and only then is stick->mouse speed = speed_pps * m^k; without it, upstream's linear
+  # mapping. The session daemon's pointer profile sets it; games never get it.
   # xpad-uhid-poll-rate.patch: Bluetooth LE Xbox pads (XpadUhid) were read two reports a second,
   # one about every 30 ms came in, and input queued up to ~30 s late. 0 ms as upstream has for the
   # other event-driven hidraw drivers (commit 6d08364); not fixed upstream as of 2026-10.

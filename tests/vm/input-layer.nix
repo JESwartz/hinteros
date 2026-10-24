@@ -162,6 +162,34 @@
     r = machine.succeed("cat /tmp/r.txt; pkill -f '[r]eader.py'; true")
     assert "InputPlumber Mouse" in r.splitlines()[0], r
     assert "BTN_MOUSE 1" in r and "BTN_MOUSE 0" in r, r
+
+    # The right stick as the pointer: the response curve applies only where the profile's mouse
+    # motion sets `curve` (pointer-response-curve.patch); without it, upstream's linear mapping
+    # (any other profile, so never a game). Half deflection for 2 s at 1000 px/s: linear moves
+    # about 1000 px, curve 2.5 about (0.3/0.8)^2.5 = 9 % of that.
+    def pointer_px(curve):
+        target = "speed_pps: 1000" + (f"\n            curve: {curve}" if curve else "")
+        profile = (
+            "version: 1\nkind: DeviceProfile\nname: HinterOS pointer\nmapping:\n"
+            "  - name: Right stick pointer\n    source_event:\n      gamepad:\n        axis:\n"
+            "          name: RightStick\n    target_events:\n      - mouse:\n          motion:\n"
+            f"            {target}\n"
+        )
+        bc(f"--timeout=5 call {IP} {CD} {CDI} LoadProfileFromYaml s {shlex.quote(profile)}")
+        machine.execute("rm -f /tmp/r.txt")
+        machine.execute("(python3 /etc/reader.py 'InputPlumber Mouse' 10 > /tmp/r.txt 2>&1 &)")
+        machine.sleep(2)
+        pad("axis ABS_RX 16384")
+        machine.sleep(2)
+        pad("axis ABS_RX 0")
+        machine.sleep(1)
+        r = machine.succeed("cat /tmp/r.txt; pkill -f '[r]eader.py'; true")
+        return sum(int(l.split()[-1]) for l in r.splitlines() if "| REL_X " in l)
+    linear, curved = pointer_px(None), pointer_px(2.5)
+    print(f"pointer: linear {linear} px, curve 2.5 {curved} px")
+    assert 500 < linear < 1500, linear
+    assert 0 < curved < linear / 4, (linear, curved)
+
     # Still alive and answering: the profile goes back, ALL again, Guide still a signal.
     bc(f"--timeout=5 call {IP} {CD} {CDI} LoadProfileFromYaml s {shlex.quote(yaml.replace('HinterOS pointer', 'Default'))}")
     bc(f"set-property {IP} {CD} {CDI} InterceptMode u 2")
