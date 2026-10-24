@@ -116,6 +116,19 @@
     r, sig = window("Microsoft X-Box 360", ["press BTN_MODE", to_pass, "release BTN_MODE", "press BTN_MODE", "release BTN_MODE"])
     assert sig.count("'ui_guide', 1.0") == 2, sig
 
+    # The whole long press as the session daemon does it: Guide held, PASS, a Guide tap for Steam
+    # through SendEvent, then the physical release. The tap reaches the virtual pad and the next
+    # Guide press still reaches D-Bus (send-event-keep-active-inputs.patch; unpatched, the tap's
+    # release makes InputPlumber drop the physical release and then the next press).
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+    def tap():
+        bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+        bc(f"--timeout=5 call {IP} {CD} {CDI} SendEvent sv Gamepad:Button:Guide b true")
+        bc(f"--timeout=5 call {IP} {CD} {CDI} SendEvent sv Gamepad:Button:Guide b false")
+    r, sig = window("Microsoft X-Box 360", ["press BTN_MODE", tap, "release BTN_MODE", "press BTN_MODE", "release BTN_MODE"])
+    assert "BTN_MODE 1" in r, r
+    assert sig.count("'ui_guide', 1.0") == 2, sig
+
     # Xbox X/Y (real-hardware report: Y acted as "action", X as "context"). xpad sends BTN_Y for
     # the top Y button and BTN_X for the left X button; the kernel defines BTN_Y = BTN_WEST (0x134)
     # and BTN_X = BTN_NORTH (0x133). InputPlumber 0.81 (and upstream main) reads the codes

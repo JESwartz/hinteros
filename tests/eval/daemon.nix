@@ -312,6 +312,7 @@ let
           "pointer-response-curve.patch"
           "xpad-uhid-poll-rate.patch"
           "dbus-clear-on-pass.patch"
+          "send-event-keep-active-inputs.patch"
         ]
         "0.81.0"
         true

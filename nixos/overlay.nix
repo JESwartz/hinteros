@@ -58,12 +58,17 @@ final: prev: {
   # stayed "pressed" in the DBus target, which then dropped its next presses (Guide after a long
   # press for Steam). Leaving intercept mode now releases what the DBus targets hold; not fixed
   # upstream as of v0.83.0.
+  # send-event-keep-active-inputs.patch: a SendEvent tap of a button that was physically held
+  # (our Guide tap for Steam) made InputPlumber drop the physical release, and then the next
+  # press: every other long press was lost. SendEvent no longer changes the source devices'
+  # active inputs; not fixed upstream as of v0.83.0.
   inputplumber = prev.inputplumber.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./pkgs/inputplumber/send-event-no-blocking-send.patch
       ./pkgs/inputplumber/pointer-response-curve.patch
       ./pkgs/inputplumber/xpad-uhid-poll-rate.patch
       ./pkgs/inputplumber/dbus-clear-on-pass.patch
+      ./pkgs/inputplumber/send-event-keep-active-inputs.patch
     ];
   });
 }

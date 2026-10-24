@@ -1,0 +1,35 @@
+SendEvent: leave the source devices' active inputs alone
+
+write_send_event (the D-Bus method SendEvent) calls is_new_active_event,
+which adds the event's capability to active_inputs on a press and removes
+it on a release. active_inputs tracks the source devices: handle_event
+drops a physical release whose capability is not in it ("Blocked up
+event") before the intercept logic runs.
+
+So an injected tap of a button that is physically held breaks the
+intercept bookkeeping. HinterOS hit this with Guide in Pass mode: the
+physical press switches to Always and puts Guide in
+intercept_active_inputs; the session daemon sets Pass and taps Guide for
+Steam through SendEvent; the tap's release takes Guide off active_inputs;
+the physical release is then blocked, Guide stays in
+intercept_active_inputs, and the next physical Guide press is dropped as
+"already in the list". Its release clears that, so every other long press
+was lost. Same in v0.83.0 and master (2026-10).
+Upstream: https://github.com/ShadowBlip/InputPlumber
+(src/input/composite_device/mod.rs, fn write_send_event).
+
+--- a/src/input/composite_device/mod.rs
++++ b/src/input/composite_device/mod.rs
+@@ -1134,8 +1134,10 @@
+ 
+     /// Handles writing events that come from the dbus send_event interface
+     async fn write_send_event(&mut self, event: NativeEvent) -> Result<(), Box<dyn Error>> {
+-        let cap = event.as_capability();
+-        self.is_new_active_event(&cap, event.pressed());
++        // Not is_new_active_event: active_inputs tracks the source devices, and an
++        // injected event must not change it. An injected release of a button that is
++        // still physically held would take it off the list, and the physical release
++        // would then be dropped ("Blocked up event") before the intercept logic sees it.
+         // Check to see if the event is in recently translated.
+         // If it is, spawn a task to delay emit the event.
+         let sleep_time = Duration::from_millis(4);
