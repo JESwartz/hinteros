@@ -62,11 +62,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792912723,
-        "narHash": "sha256-slcaAl6o5KZ+99dU3u2hjwOzkfcylf1pwhIovC0+2qk=",
+        "lastModified": 1792984458,
+        "narHash": "sha256-Uic5yMFwOor8o7JVEdvGyphM/4d7jkHqVjtE0lurxv8=",
         "ref": "m10-server",
-        "rev": "aeaca4ce84d151b84703a6c868ce9aa4c804f647",
-        "revCount": 40,
+        "rev": "929f2599c2271b5df5fce3d7fd587476b5860ab6",
+        "revCount": 42,
         "type": "git",
         "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git"
       },

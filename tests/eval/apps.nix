@@ -614,10 +614,12 @@ let
         true
       ];
     };
-    # Unfree for the cache job: only the catalog's cacheable names (Steam), never Plex.
-    testCacheableIsSteamOnly = {
+    # Unfree for the cache job: only the catalog's cacheable names (Steam, Modrinth), never Plex.
+    testCacheableIsSteamAndModrinth = {
       expr = cacheable;
       expected = [
+        "modrinth-app"
+        "modrinth-app-unwrapped"
         "steam"
         "steam-unwrapped"
       ];
