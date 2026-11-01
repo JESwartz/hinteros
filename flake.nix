@@ -12,7 +12,7 @@
     # Component repos. Their packages come in through their overlays (see overlays.default).
     # scripts/dev-override picks these up by input name.
     hinteros-launcher = {
-      url = "git+https://git.hinteros.org/hinteros-launcher.git";
+      url = "git+https://git.hinteros.org/hinteros-launcher.git?ref=pre-1.0";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";

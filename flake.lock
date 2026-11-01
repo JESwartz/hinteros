@@ -113,15 +113,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1793539105,
-        "narHash": "sha256-U8Y67XFGwCNEUcyqglEFK1ojY/PypauTP75cLPNGqog=",
-        "ref": "refs/heads/main",
-        "rev": "30c6279f7253b1faf4a7beb3d6212589b5afc98a",
-        "revCount": 217,
+        "lastModified": 1793576168,
+        "narHash": "sha256-lq5GJ0P0IdbGWaCBwKe1vVifiDwA1LIsvsiwBRI68RQ=",
+        "ref": "pre-1.0",
+        "rev": "57f205d7c7068dc8e90bfe72c4201930248656c0",
+        "revCount": 220,
         "type": "git",
         "url": "https://git.hinteros.org/hinteros-launcher.git"
       },
       "original": {
+        "ref": "pre-1.0",
         "type": "git",
         "url": "https://git.hinteros.org/hinteros-launcher.git"
       }
