@@ -14,13 +14,6 @@ let
   greeterUser = config.hinteros.profiles.greeter.user or "hinteros-greeter";
 in
 {
-  imports = [
-    (lib.mkRemovedOptionModule [ "hinteros" "input" "pointerCurve" ] ''
-      The right-stick pointer's curve is part of its InputPlumber profile now: `curve` under
-      [pointer] in the session daemon's config.
-    '')
-  ];
-
   options.hinteros.input = {
     enable = lib.mkOption {
       type = lib.types.bool;

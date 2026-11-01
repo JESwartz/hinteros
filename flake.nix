@@ -202,7 +202,7 @@
         installer-ui = import ./tests/vm/installer-ui.nix { inherit self pkgs; };
         installer-save-log = import ./tests/vm/installer-save-log.nix { inherit self pkgs; };
         hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
-        wifi-iwd-migration = import ./tests/vm/wifi-iwd-migration.nix { inherit self pkgs; };
+        wifi-iwd = import ./tests/vm/wifi-iwd.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         sandbox = import ./tests/vm/sandbox.nix { inherit self pkgs; };
         sandbox-apps = import ./tests/vm/sandbox-apps.nix { inherit self pkgs; };
