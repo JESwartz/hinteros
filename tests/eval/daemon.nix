@@ -403,9 +403,10 @@ pkgs.runCommand "hinteros-daemon-eval"
     cd $share/share
     [ "$(jq -c . hinteros/release.json)" = "{\"dev\":false,\"stateSchema\":2,\"version\":\"$releaseVersion\"}" ]
     [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://justsomeshed.com/JSwartz/HinterOS/hinteros.git"}' ]
-    # The vendor's release key (release/allowed_signers, through release.nix), namespace pinned,
+    # The vendor's release and backup keys (release/allowed_signers, through release.nix), namespace pinned,
     # and nothing else.
-    [ "$(grep -v '^#' hinteros/update/allowed_signers | grep -c .)" = 1 ]
+    [ "$(grep -v '^#' hinteros/update/allowed_signers | grep -c .)" = 2 ]
+    grep -qx 'backup namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAk10EKzqLAzjITxmiUbyzae4iweuOqVpnTqqf4y7TiF hinteros-backup' hinteros/update/allowed_signers
     grep -qx 'release namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtzB3OuVIbG4WhjiNynpKPiTEJKdD5vicRouH8CQsrk hinteros-release' hinteros/update/allowed_signers
     # Signers replaced by an empty list: only comments, so nothing verifies.
     ! grep -v '^#' $shareNoKey/share/hinteros/update/allowed_signers | grep -q .
