@@ -68,7 +68,7 @@ profiles.mkTest {
         return json.loads(machine.succeed(f"python3 /etc/hinteros-test/greetd.py {user} {' '.join(answers)}"))
 
     def pin_state(pid):
-        return json.loads(machine.succeed(f"cat /var/lib/hinteros/pins/{pid}.state"))
+        return json.loads(machine.succeed(f"cat /var/lib/hinteros/pins/{pid}.state"))["data"]
 
     def try_pin(target, pin):
         g = greeter(target, pin)
@@ -189,7 +189,7 @@ profiles.mkTest {
         assert pam_verify("0000") == "hinteros:wrong"
         enter("p2", "hinteros-p2", "1357")
         assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "James", "pin": "2468"}) == {}
-        assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p1.tries"))["failures"] == 0
+        assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p1.tries"))["data"]["failures"] == 0
 
     with subtest("admin actions need the admin PIN, from any profile"):
         # Rename another profile: no PIN, its own PIN, the admin PIN.

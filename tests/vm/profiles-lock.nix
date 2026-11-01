@@ -114,7 +114,7 @@ profiles.mkTest {
         r = sess("hinteros-p2", "session.unlock", {"pin": "2468"})
         assert r["error"]["code"] == 3016, r
         assert sess_ok("hinteros-p2", "session.lock_state") == {"locked": True}
-        state = json.loads(machine.succeed("cat /var/lib/hinteros/pins/p2.state"))
+        state = json.loads(machine.succeed("cat /var/lib/hinteros/pins/p2.state"))["data"]
         while int(machine.succeed("date +%s").strip()) <= state["locked_until"]:
             machine.sleep(1)
         assert sess_ok("hinteros-p2", "session.unlock", {"pin": "1357"}) == {}
@@ -122,7 +122,7 @@ profiles.mkTest {
         assert [e["locked"] for e in lock_events(W)] == [True, False], lock_events(W)
         cur = sess_ok("hinteros-p2", "profile.current")
         assert not cur["screen_locked"], cur
-        assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p2.state"))["failures"] == 0
+        assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p2.state"))["data"]["failures"] == 0
 
     with subtest("an unlocked profile is not locked by a sleep"):
         switch("hinteros-p2", "p3", "hinteros-p3")

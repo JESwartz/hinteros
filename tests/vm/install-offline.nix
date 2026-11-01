@@ -300,7 +300,7 @@ in
     }
     with subtest("accepted terms are recorded (none for these apps)"):
         assert target.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
-        assert json.loads(target.succeed("cat /var/lib/hinteros/terms-accepted.json")) == {}
+        assert json.loads(target.succeed("cat /var/lib/hinteros/terms-accepted.json")) == {"version": 1, "accepted": {}}
 
     with subtest("/etc/hinteros and its snapshot"):
         files = target.succeed("ls /etc/hinteros").split()

@@ -117,7 +117,7 @@ profiles.mkTest {
         m = json.loads(machine.succeed("cat /run/hinteros/apps/hinteros-p1/share/hinteros/apps.json"))
         assert m["box"] == FEATURES and m["steam"] is not None, m
         assert sys_ok("hinteros-p1", "apps.list")["box"] == FEATURES
-        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))
+        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert "steam" in json.dumps(terms) and version in json.dumps(terms), terms
 
     with subtest("p2 installs Steam too: no rebuild"):

@@ -919,7 +919,7 @@ write_terms() { # JSON array of installed app ids
       --slurpfile idx "$CATALOG_INDEX" '
       [$apps[] as $a | $idx[0].apps[] | select(.id == $a and .terms != null)
          | {key: .id, value: [{version: .terms.version, accepted_at: $now, by: "installer"}]}]
-      | from_entries' >"$MNT/var/lib/hinteros/terms-accepted.json"
+      | {version: 1, accepted: from_entries}' >"$MNT/var/lib/hinteros/terms-accepted.json"
   )
   chmod 0600 "$MNT/var/lib/hinteros/terms-accepted.json"
 }

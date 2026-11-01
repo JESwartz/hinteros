@@ -228,7 +228,7 @@ in
         unchanged_box()
         # The record: root only, {id: [{version, accepted_at, by, profile}]}.
         assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
-        rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))
+        rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert list(rec) == ["plex-htpc"] and len(rec["plex-htpc"]) == 1, rec
         e = rec["plex-htpc"][0]
         assert sorted(e) == ["accepted_at", "by", "profile", "version"], e

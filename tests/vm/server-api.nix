@@ -354,7 +354,7 @@ profiles.mkTest {
         assert s["tailscale"]["detail"]["state"] == "needs_login", s["tailscale"]
         c = s["cloudflare-tunnel"]["detail"]
         assert c == {"token_set": False, "connected": False, "local_ip": MACHINE}, c
-        rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))
+        rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert rec["plex-media-server"][0]["profile"] == "p1", rec
 
     with subtest("Plex: Preferences.xml, the claim code's format"):

@@ -102,13 +102,13 @@ profiles.mkTest {
         # What the wipe must remove beside the home: the guest's terms acceptances (a record of
         # p1's stays), its usage entry, its files in /tmp and /dev/shm (root's stay).
         machine.succeed(
-            "f=/var/lib/hinteros/terms-accepted.json; [ -e $f ] || echo '{}' > $f; "
-            "jq '.steam = [{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-guest\"}, "
+            "f=/var/lib/hinteros/terms-accepted.json; [ -e $f ] || echo '{\"version\": 1, \"accepted\": {}}' > $f; "
+            "jq '.accepted.steam = [{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-guest\"}, "
             "{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-p1\", \"profile\": \"p1\"}]' "
             "$f > $f.new && mv $f.new $f && chmod 0600 $f"
         )
         machine.succeed("systemctl start hinteros-usage.service")
-        assert "guest" in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json")), machine.succeed("cat /var/lib/hinteros/usage.json")
+        assert "guest" in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json"))["data"], machine.succeed("cat /var/lib/hinteros/usage.json")
         machine.succeed("runuser -u hinteros-guest -- sh -c 'echo x > /tmp/guest-left && echo x > /dev/shm/guest-shm'")
         machine.succeed("echo keep > /tmp/root-keeps")
         # Only the guest may end the guest session.
@@ -131,9 +131,9 @@ profiles.mkTest {
         machine.fail("test -e /tmp/guest-left")
         machine.fail("test -e /dev/shm/guest-shm")
         assert machine.succeed("cat /tmp/root-keeps") == "keep\n"
-        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))
+        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert [r["by"] for r in terms.get("steam", [])] == ["hinteros-p1"], terms
-        assert "guest" not in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json"))
+        assert "guest" not in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json"))["data"]
         machine.fail("test -e /run/hinteros/guest-ending")
         assert public()["guest"]["enabled"] is True, public()
         assert greeter_call("greeter.list")["result"]["guest"], greeter_call("greeter.list")
