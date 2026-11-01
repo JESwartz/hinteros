@@ -156,7 +156,7 @@ profiles.mkTest {
         assert system_generations() == gens
         # The rest of state.json is as it was.
         st = state_json()
-        assert st["profiles"] == [{"id": "p1", "user": "hinteros"}, {"id": "p2", "user": "hinteros-p2"}], st
+        assert st["profiles"] == [{"id": "p1"}, {"id": "p2"}], st
         assert st["settings"]["guest"] == {"enable": False}, st
         # Nothing left behind next to either file.
         machine.fail("ls -a /etc | grep -v '^localtime$' | grep -i localtime")
@@ -192,7 +192,7 @@ profiles.mkTest {
         assert date("%Z") == "JST", date("%Z")
         # The snapshot still says Chicago; the live zone won.
         assert json.loads(machine.succeed("cat /run/current-system/hinteros/state.json"))["settings"]["timeZone"] == "America/Chicago"
-        assert sys_ok("hinteros", "time_zone.get")["zone"] == "Asia/Tokyo"
+        assert sys_ok("hinteros-p1", "time_zone.get")["zone"] == "Asia/Tokyo"
 
     with subtest("activation: an unknown or absent zone is UTC; a valid one comes back"):
         for bad in ["Mars/Olympus_Mons", "../../etc/shadow", "posix/Asia/Tokyo", 5]:

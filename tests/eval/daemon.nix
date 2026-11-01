@@ -7,21 +7,19 @@ let
   inherit (pkgs) lib;
 
   state = {
-    schemaVersion = 1;
-    profiles = [
-      {
-        id = "p1";
-        name = "T";
-        user = "tester";
-      }
-    ];
+    schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
+    profiles = [ { id = "p1"; } ];
+    requirements = [ ];
+    services = [ ];
   };
 
   mk =
     extra:
     (self.lib.mkDevice {
       inherit state;
-      extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
+      extraModules = extra;
     }).config;
 
   key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
@@ -70,9 +68,12 @@ let
         true
         "read-only"
         true
-        false
-        # keyboard.sock's group (chgrp without CAP_CHOWN).
-        [ "hinteros-keyboard" ]
+        true
+        # greeter.sock's and keyboard.sock's groups (chgrp without CAP_CHOWN).
+        [
+          "hinteros-greeter"
+          "hinteros-keyboard"
+        ]
       ];
     };
     # Ctrl+Super+D: the only reader of keyboards is its own sandboxed unit (no profile account
@@ -96,7 +97,7 @@ let
           c.systemd.services.hinteros-keyboard.wantedBy
           (c.users.groups ? hinteros-keyboard)
           (lib.hasInfix "/bin/hinteros-system --freeze-inactive" sys.ExecStart)
-          (lib.elem "input" c.users.users.tester.extraGroups)
+          (lib.elem "input" c.users.users.hinteros-p1.extraGroups)
           (off.systemd.services ? hinteros-keyboard)
           (off.users.groups ? hinteros-keyboard)
           off.systemd.services.hinteros-system.serviceConfig.SupplementaryGroups
@@ -121,7 +122,7 @@ let
           false
           false
           false
-          [ ]
+          [ "hinteros-greeter" ]
           false
         ];
       };
@@ -401,7 +402,7 @@ pkgs.runCommand "hinteros-daemon-eval"
   ''
     if [ -n "$failures" ]; then echo "$failures" >&2; exit 1; fi
     cd $share/share
-    [ "$(jq -c . hinteros/release.json)" = "{\"dev\":false,\"stateSchema\":2,\"version\":\"$releaseVersion\"}" ]
+    [ "$(jq -c . hinteros/release.json)" = "{\"dev\":false,\"version\":\"$releaseVersion\"}" ]
     [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://justsomeshed.com/JSwartz/HinterOS/hinteros.git"}' ]
     # The vendor's release and backup keys (release/allowed_signers, through release.nix), namespace pinned,
     # and nothing else.

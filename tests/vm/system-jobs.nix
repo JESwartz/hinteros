@@ -46,10 +46,10 @@ in
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_for_unit("greetd.service")
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
 
-    def rpc(method, params=None, user="hinteros"):
+    def rpc(method, params=None, user="hinteros-p1"):
         rc, out = machine.execute(f"runuser -u {user} -- python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
         try:
             return json.loads(out)
@@ -115,7 +115,7 @@ in
     machine.succeed("mkdir -p /run/stub")
     machine.succeed(f"nix-env -p /nix/var/nix/profiles/system --set {orig}")
     machine.succeed(f"echo {variant} > /run/stub/toplevel")
-    machine.succeed("(runuser -u hinteros -- python3 /etc/hinteros-test/events.py /tmp/events.ndjson >/dev/null 2>&1 &)")
+    machine.succeed("(runuser -u hinteros-p1 -- python3 /etc/hinteros-test/events.py /tmp/events.ndjson >/dev/null 2>&1 &)")
     machine.wait_until_succeeds("grep -q subscribed /tmp/events.ndjson")
 
     with subtest("generations and the settings round trip"):

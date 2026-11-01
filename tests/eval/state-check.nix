@@ -4,7 +4,7 @@
 # or IO); the check fails if it rejects any of
 #   (a) devices/*/state.json,
 #   (b) the state.json files hinteros-install writes (`--state-dir`, the real installer code path
-#       and plan validation) for representative plans (schema 2: the picks are the starter set,
+#       and plan validation) for representative plans (the picks are the starter set,
 #       not state; their box features are `requirements`),
 #   (c) the VM test fixtures (tests/vm/fixtures/*/state.json).
 # Builds a few text files; no VM.
@@ -109,9 +109,9 @@ pkgs.runCommand "hinteros-state-check"
         hinteros-install --plan plan.json --state-dir states/${n} > progress.log || { cat progress.log; exit 1; }
       '') planFiles
     )}
-    # Schema 2: the spare p1, no apps; the picks are the starter set and their box features the
+    # The spare p1, no apps; the picks are the starter set and their box features the
     # requirements.
-    test "$(jq -c '[.schemaVersion, .profiles, has("apps"), .requirements, .services]' states/minimal/system/state.json)" = '[2,[{"id":"p1","user":"hinteros"}],false,[],[]]'
+    test "$(jq -c '[.schemaVersion, .profiles, has("apps"), .requirements, .services]' states/minimal/system/state.json)" = '[2,[{"id":"p1"}],false,[],[]]'
     test "$(jq -c .requirements states/online-one/apps/state.json)" = '["graphics32","steam-devices"]'
     test "$(jq -c .requirements states/offline-all-on-iso/apps/state.json)" = '[]'
     test "$(jq -c '[.version, .ids, .by]' states/online-one/apps/starter.json)" = '[1,["steam"],"installer"]'
@@ -127,14 +127,27 @@ pkgs.runCommand "hinteros-state-check"
     test "$rc" = 2 || { cat short.log; echo "a short admin password: exit $rc, not 2" >&2; exit 1; }
     grep -q '"code":"admin-password-short"' short.log || { cat short.log; exit 1; }
 
+    # A profile's account name is no admin's.
+    jq --argjson t "$terms" '. + {acceptedTerms: $t} | .admin.user = "hinteros-p1"' ${planFiles.minimal} > reserved.json
+    rc=0
+    hinteros-install --plan reserved.json --state-dir states-reserved > reserved.log || rc=$?
+    test "$rc" = 2 || { cat reserved.log; echo "admin user hinteros-p1: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"admin-user-reserved"' reserved.log || { cat reserved.log; exit 1; }
+
     find states -name state.json | sort
     hinteros-system check-state ${
       lib.concatStringsSep " " (map toString (deviceStates ++ fixtureStates))
     } $(find states -name state.json | sort)
 
-    # The guard guards: a state with a field the daemon does not know is rejected (exit 1).
-    echo '{"schemaVersion":1,"nonsense":true}' > bad.json
-    if hinteros-system check-state bad.json; then echo "check-state accepted a bad state" >&2; exit 1; fi
+    # The guard guards: another schema (exit 1) and a state without a required field are rejected.
+    jq '.schemaVersion = 1' states/minimal/system/state.json > bad.json
+    if hinteros-system check-state bad.json; then echo "check-state accepted schema 1" >&2; exit 1; fi
+    jq 'del(.stateVersion)' states/minimal/system/state.json > bad.json
+    if hinteros-system check-state bad.json; then echo "check-state accepted a state without stateVersion" >&2; exit 1; fi
+
+    # A field the daemon does not know is ignored (a box on an older channel reads a newer state).
+    jq '. + {nonsense: true}' states/minimal/system/state.json > unknown.json
+    hinteros-system check-state unknown.json
 
     # settings.timeZone (time-zone.md): absent in every state above; a zone name is accepted, a
     # value that is not a string is not.

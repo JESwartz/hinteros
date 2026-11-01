@@ -19,7 +19,7 @@
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_for_unit("greetd.service")
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
 
     def pid():
@@ -66,12 +66,12 @@
         assert sorted(rw) == ["/etc", "/run/hinteros"], rw
 
     def jobs():
-        return rpc("hinteros", "jobs.list")["response"]["result"]["jobs"]
+        return rpc("hinteros-p1", "jobs.list")["response"]["result"]["jobs"]
 
     # The launcher (a client of the same uid, via the session daemon) may start a job of its own
     # at startup (an update check); let it finish and take the baseline afterwards.
     for _ in range(60):
-        if not [j for j in rpc("hinteros", "jobs.list")["response"]["result"]["jobs"] if j["state"] == "running"]:
+        if not [j for j in rpc("hinteros-p1", "jobs.list")["response"]["result"]["jobs"] if j["state"] == "running"]:
             break
         machine.sleep(1)
     machine.sleep(5)
@@ -81,7 +81,7 @@
     before_tree = tree_hash()
 
     with subtest("hostile input at the socket, as the session user"):
-        out = machine.succeed("runuser -u hinteros -- python3 /etc/hinteros-test/hostile.py 2>&1")
+        out = machine.succeed("runuser -u hinteros-p1 -- python3 /etc/hinteros-test/hostile.py 2>&1")
         print(out)
         assert out.rstrip().endswith("hostile: all refused, service alive")
 
@@ -98,17 +98,17 @@
 
     with subtest("the service stayed up and nothing changed"):
         assert_untouched()
-        assert rpc("hinteros", "system.info")["response"]["result"]["dev"] is False
+        assert rpc("hinteros-p1", "system.info")["response"]["result"]["dev"] is False
 
     with subtest("rate limiting: a burst of mutating requests is cut off"):
         # Valid in shape, unknown job: not_found when let through, rate_limited when not.
-        codes = [rpc("hinteros", "jobs.cancel", {"job_id": "0123456789abcdef"})["response"]["error"]["code"] for _ in range(15)]
+        codes = [rpc("hinteros-p1", "jobs.cancel", {"job_id": "0123456789abcdef"})["response"]["error"]["code"] for _ in range(15)]
         print(codes)
         assert 3006 in codes and 3010 in codes, codes
         assert set(codes) <= {3006, 3010}, codes
-        r = rpc("hinteros", "jobs.cancel", {"job_id": "0123456789abcdef"})["response"]
+        r = rpc("hinteros-p1", "jobs.cancel", {"job_id": "0123456789abcdef"})["response"]
         # Reads are never rate limited.
-        assert "result" in rpc("hinteros", "settings.get")["response"]
+        assert "result" in rpc("hinteros-p1", "settings.get")["response"]
         assert_untouched()
 
     with subtest("the audit trail has the refusals, and the session user cannot read it"):
@@ -124,6 +124,6 @@
         assert all(e.get("HINTEROS_UID") for e in entries)
         # The caller's executable comes from its pidfd.
         assert any("python3" in e.get("HINTEROS_EXE", "") for e in entries), entries[-3:]
-        machine.fail("runuser -u hinteros -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
+        machine.fail("runuser -u hinteros-p1 -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
   '';
 }

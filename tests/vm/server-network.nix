@@ -43,16 +43,15 @@ in
       ];
       hinteros = {
         state = {
-          schemaVersion = 1;
+          schemaVersion = 2;
+          base = "unstable";
+          stateVersion = "25.11";
           settings.ssh.enable = true;
-          profiles = [
-            {
-              id = "p1";
-              name = "T";
-              user = "hinteros";
-            }
-          ];
+          profiles = [ { id = "p1"; } ];
+          requirements = [ ];
+          services = [ ];
         };
+        profiles.greeter.enable = false;
         catalog.services = [
           "plex-media-server"
           "tailscale"

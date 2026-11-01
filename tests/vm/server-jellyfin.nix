@@ -35,15 +35,14 @@ in
       ];
       hinteros = {
         state = {
-          schemaVersion = 1;
-          profiles = [
-            {
-              id = "p1";
-              name = "T";
-              user = "hinteros";
-            }
-          ];
+          schemaVersion = 2;
+          base = "unstable";
+          stateVersion = "25.11";
+          profiles = [ { id = "p1"; } ];
+          requirements = [ ];
+          services = [ ];
         };
+        profiles.greeter.enable = false;
         catalog.services = [ "jellyfin-server" ];
         admin = {
           enable = true;
@@ -155,7 +154,7 @@ in
           machine.succeed("runuser -u hinteros-admin -- sh -c 'umask 077; echo film > /srv/media/Movies/a.mkv'")
           assert machine.succeed("stat -c %G /srv/media/Movies/a.mkv").strip() == "hinteros-media"
           assert machine.succeed("runuser -u jellyfin -- cat /srv/media/Movies/a.mkv").strip() == "film"
-          machine.fail("runuser -u hinteros -- touch /srv/media/c")
+          machine.fail("runuser -u hinteros-p1 -- touch /srv/media/c")
 
       def start_probes():
           # Every 0.3 s: what the host namespace and the LAN see on 8096.

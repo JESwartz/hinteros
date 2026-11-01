@@ -283,7 +283,7 @@ in
 
     user = lib.mkOption {
       type = lib.types.str;
-      default = "hinteros";
+      default = "hinteros-p1";
       description = "User that is logged in automatically and owns the session.";
     };
 

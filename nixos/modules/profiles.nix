@@ -2,19 +2,20 @@
 # greeter mode with the PAM stack that enforces PINs and the kill on switch, plus device access
 # per seat (uaccess) instead of static groups.
 #
-# Accounts come from state.json `profiles` (state.nix): `p1` is `hinteros`, `p<N>` is
-# `hinteros-p<N>` with uid 20000+N. Each is a normal user in the `hinteros` group and nothing
-# else, home 0700, no password. Whether an account is a *profile* (name, PIN, lock flag) is
+# Accounts come from state.json `profiles` (state.nix): `p<N>` is `hinteros-p<N>` with uid
+# 20000+N. Each is a normal user in the `hinteros` group and nothing else, home 0700, no
+# password. Whether an account is a *profile* (name, PIN, lock flag) is
 # hinteros-system's business (/var/lib/hinteros/profiles.json); nothing here depends on it, and
 # nothing generated from the account list changes greetd's, gamescope's or the session daemon's
 # units, so creating or removing an account does not restart the running session.
 #
 # Two session modes:
-#   - `greeter.enable = false` (the default on schema 1, i.e. until the box has migrated):
-#     autologin of the first account, which keeps the static device groups;
-#   - `greeter.enable = true` (the default on schema 2): greetd runs the greeter (`hinteros-greeter`) at boot and whenever a
-#     profile's session ends; profile sessions go through the PAM stack below; devices follow the
-#     active session (logind uaccess), and every per-user grant is written against the group.
+#   - `greeter.enable = true` (the default with a state): greetd runs the greeter
+#     (`hinteros-greeter`) at boot and whenever a profile's session ends; profile sessions go
+#     through the PAM stack below; devices follow the active session (logind uaccess), and every
+#     per-user grant is written against the group;
+#   - `greeter.enable = false` (test VMs): autologin of the first account, which keeps the static
+#     device groups.
 {
   config,
   lib,
@@ -28,9 +29,9 @@ let
   greeterOn = cfg.greeter.enable;
   systemdPkg = config.systemd.package;
 
-  # p1 keeps its auto-allocated uid (existing boxes); every later account and the guest get a
-  # fixed one (stable across rollbacks and export/restore).
-  uidFor = id: if id == "p1" then null else 20000 + lib.toInt (lib.removePrefix "p" id);
+  # Fixed, like the guest's (stable across rollbacks and export/restore).
+  userFor = id: "hinteros-${id}";
+  uidFor = id: 20000 + lib.toInt (lib.removePrefix "p" id);
 
   # The PAM helper (profiles.md, "PAM: where the PIN and the kill are enforced"): a subcommand of
   # hinteros-system. pam_exec runs it with an empty PATH.
@@ -50,7 +51,7 @@ let
     session  optional   ${systemdPkg}/lib/security/pam_systemd.so
   '';
 
-  accountUsers = map (a: a.user) cfg.accounts;
+  accountUsers = map (a: userFor a.id) cfg.accounts;
 in
 {
   options.hinteros.profiles = {
@@ -62,20 +63,11 @@ in
               type = lib.types.strMatching "p[1-9][0-9]{0,2}";
               description = "Profile id.";
             };
-            user = lib.mkOption {
-              type = lib.types.str;
-              description = "Unix user: `hinteros` for p1, `hinteros-p<N>` otherwise.";
-            };
           };
         }
       );
-      default = [
-        {
-          id = "p1";
-          user = "hinteros";
-        }
-      ];
-      description = "The profile accounts (state.json `profiles`; schema 1: p1 only).";
+      default = [ { id = "p1"; } ];
+      description = "The profile accounts (state.json `profiles`); `p<N>` is the Unix user `hinteros-p<N>`.";
     };
 
     users = lib.mkOption {
@@ -90,7 +82,7 @@ in
       enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
-        description = "The guest account (state.json schema 2 `settings.guest.enable`, default true there): a temporary profile whose home is emptied at every boot.";
+        description = "The guest account (state.json `settings.guest.enable`, default true there): a temporary profile whose home is emptied at every boot.";
       };
       user = lib.mkOption {
         type = lib.types.str;
@@ -103,15 +95,12 @@ in
     greeter = {
       enable = lib.mkOption {
         type = lib.types.bool;
-        default = config.hinteros.appEnv.perProfile or false;
-        defaultText = lib.literalExpression "config.hinteros.appEnv.perProfile";
+        default = config.hinteros.state != null;
+        defaultText = lib.literalExpression "config.hinteros.state != null";
         description = ''
           The greeter session (the profile picker) instead of autologin, with the PIN and
-          end-others PAM stack and uaccess device access. On by default on schema 2 (profiles);
-          a schema-1 box keeps autologin until its migration switches it to schema 2. The
-          migration's switch does not restart greetd (nixpkgs: restartIfChanged = false), so
-          the running session stays; the picker comes at the next boot or session end, where
-          the migrated p1 (unlocked, no PIN yet) is entered without a PIN.
+          end-others PAM stack and uaccess device access. On for every device; test VMs without
+          a state keep autologin.
         '';
       };
       user = lib.mkOption {
@@ -131,12 +120,6 @@ in
             assertion = lib.unique (map (a: a.id) cfg.accounts) == map (a: a.id) cfg.accounts;
             message = "hinteros.profiles.accounts: duplicate ids";
           }
-          {
-            assertion = lib.all (a: a.user == (if a.id == "p1" then "hinteros" else "hinteros-${a.id}")) (
-              lib.filter (a: a.id != "p1") cfg.accounts
-            );
-            message = "hinteros.profiles.accounts: p<N> (N > 1) must be user hinteros-p<N>";
-          }
         ];
 
         # The text console: the handover splash no longer uses it (it draws on the framebuffer), but
@@ -155,20 +138,18 @@ in
 
         # Autologin (and the boot-health check) use the first account.
         hinteros.session.user = lib.mkDefault (
-          if cfg.accounts == [ ] then "hinteros" else (builtins.head cfg.accounts).user
+          if cfg.accounts == [ ] then "hinteros-p1" else userFor (builtins.head cfg.accounts).id
         );
 
         users.users = lib.listToAttrs (
           map (
             a:
-            lib.nameValuePair a.user (
-              {
-                isNormalUser = true;
-                homeMode = "700";
-                extraGroups = [ group ];
-              }
-              // lib.optionalAttrs (uidFor a.id != null) { uid = uidFor a.id; }
-            )
+            lib.nameValuePair (userFor a.id) {
+              isNormalUser = true;
+              uid = uidFor a.id;
+              homeMode = "700";
+              extraGroups = [ group ];
+            }
           ) cfg.accounts
         );
       }

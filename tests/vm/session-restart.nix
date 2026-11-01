@@ -21,29 +21,29 @@
         """(session id, launcher pid, session daemon invocation id) of the running session."""
         sid = machine.succeed("loginctl show-seat seat0 -p ActiveSession --value").strip()
         assert sid, "no active session on seat0"
-        assert machine.succeed(f"loginctl show-session {sid} -p Name --value").strip() == "hinteros"
-        launcher = machine.succeed("pgrep -u hinteros -o -f hinteros-launcher").strip()
-        uid = machine.succeed("id -u hinteros").strip()
-        inv = machine.succeed(f"runuser -u hinteros -- env XDG_RUNTIME_DIR=/run/user/{uid} systemctl --user show -p InvocationID --value hinteros-session.service").strip()
+        assert machine.succeed(f"loginctl show-session {sid} -p Name --value").strip() == "hinteros-p1"
+        launcher = machine.succeed("pgrep -u hinteros-p1 -o -f hinteros-launcher").strip()
+        uid = machine.succeed("id -u hinteros-p1").strip()
+        inv = machine.succeed(f"runuser -u hinteros-p1 -- env XDG_RUNTIME_DIR=/run/user/{uid} systemctl --user show -p InvocationID --value hinteros-session.service").strip()
         assert inv, "the session daemon is not running"
         return sid, launcher, inv
 
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
-    machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
-    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock")
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher")
+    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros-p1)/hinteros/session.sock")
     machine.sleep(5)
     before = session()
     print("before", before)
 
     with subtest("session.restart answers and the session is replaced"):
-        out = machine.succeed("runuser -u hinteros -- python3 /etc/hinteros-test/session.py session.restart")
+        out = machine.succeed("runuser -u hinteros-p1 -- python3 /etc/hinteros-test/session.py session.restart")
         assert json.loads(out)["response"].get("result") == {}, out
         machine.wait_until_fails(f"loginctl show-session {before[0]} -p State --value | grep -qx active", timeout=60)
-        machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros", timeout=120)
+        machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1", timeout=120)
         machine.wait_until_succeeds(f"test \"$(loginctl show-seat seat0 -p ActiveSession --value)\" != '{before[0]}' -a -n \"$(loginctl show-seat seat0 -p ActiveSession --value)\"", timeout=120)
-        machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '", timeout=120)
-        machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher", timeout=120)
-        machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock", timeout=120)
+        machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '", timeout=120)
+        machine.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher", timeout=120)
+        machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros-p1)/hinteros/session.sock", timeout=120)
         machine.sleep(5)
         after = session()
         print("after", after)
@@ -53,12 +53,12 @@
         machine.succeed("systemctl is-active greetd.service")
 
     with subtest("the new daemon serves the launcher again, and a second restart works too"):
-        out = machine.succeed("runuser -u hinteros -- python3 /etc/hinteros-test/session.py ping '{\"nonce\":\"x\"}'")
+        out = machine.succeed("runuser -u hinteros-p1 -- python3 /etc/hinteros-test/session.py ping '{\"nonce\":\"x\"}'")
         assert json.loads(out)["response"]["result"] == {"nonce": "x"}, out
-        out = machine.succeed("runuser -u hinteros -- python3 /etc/hinteros-test/session.py session.restart")
+        out = machine.succeed("runuser -u hinteros-p1 -- python3 /etc/hinteros-test/session.py session.restart")
         assert json.loads(out)["response"].get("result") == {}, out
         machine.wait_until_succeeds(f"test \"$(loginctl show-seat seat0 -p ActiveSession --value)\" != '{after[0]}' -a -n \"$(loginctl show-seat seat0 -p ActiveSession --value)\"", timeout=120)
-        machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher", timeout=120)
-        machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock", timeout=120)
+        machine.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher", timeout=120)
+        machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros-p1)/hinteros/session.sock", timeout=120)
   '';
 }

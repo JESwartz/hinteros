@@ -279,12 +279,12 @@ in
 
     with subtest("the session comes up"):
         target.wait_for_unit("greetd.service")
-        target.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
-        target.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-        target.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
+        target.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
+        target.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+        target.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher")
         target.wait_for_unit("hinteros-system.service")
         target.sleep(duration=timedelta(seconds=5))
-        target.succeed("pgrep -u hinteros -f hinteros-launcher")
+        target.succeed("pgrep -u hinteros-p1 -f hinteros-launcher")
         target.screenshot("installed-session")
 
     ${
@@ -313,9 +313,9 @@ in
             "pass"
         }
         state = json.loads(target.succeed("cat /etc/hinteros/state.json"))
-        # Schema 2: the spare p1 and no apps (the picks are the starter set, below).
+        # The spare p1 and no apps (the picks are the starter set, below).
         assert state["schemaVersion"] == 2 and "apps" not in state, state
-        assert state["profiles"] == [{"id": "p1", "user": "hinteros"}], state
+        assert state["profiles"] == [{"id": "p1"}], state
         assert state["services"] == [] and state["settings"]["guest"] == {"enable": True}, state
         # Offline: only the box features of apps on the medium (none; not Steam's graphics32).
         assert state["requirements"] == [], state
@@ -348,23 +348,23 @@ in
 
     with subtest("the privileged service answers (system API 0.10) and knows its channel"):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.10", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "0.12", "client": {"name": "install-test", "version": "0"}}}
         info = {"jsonrpc": "2.0", "id": 1, "method": "system.info", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, info))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:/run/hinteros/system.sock"
-        out = target.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = target.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         res = next(json.loads(l) for l in out.splitlines() if '"id":1' in l.replace(" ", ""))
         print(res)
         assert res["result"]["channel"] == "stable" and res["result"]["dev"] is False, res
 
     with subtest("accounts: admin with a password, the session user and root without"):
-        assert target.succeed("passwd -S hinteros").split()[1] == "L", "session user has a password"
+        assert target.succeed("passwd -S hinteros-p1").split()[1] == "L", "session user has a password"
         assert target.succeed("passwd -S root").split()[1] == "L", "root has a password"
         assert target.succeed("getent shadow james").split(":")[1].startswith("$6$")
         assert target.succeed("stat -c '%a %U' /var/lib/hinteros/admin-password-hash").strip() == "600 root"
         target.succeed("test \"$(id -nG james | tr ' ' '\\n' | grep -cx wheel)\" = 1")
-        target.fail("id -nG hinteros | tr ' ' '\\n' | grep -qx wheel")
-        target.fail("runuser -u hinteros -- sudo -n true")
+        target.fail("id -nG hinteros-p1 | tr ' ' '\\n' | grep -qx wheel")
+        target.fail("runuser -u hinteros-p1 -- sudo -n true")
         target.succeed("printf 'hunter22\\n' | runuser -u james -- sudo -S -k true")
         target.fail("printf 'wrong\\n' | runuser -u james -- sudo -S -k true")
         # The hash is not in the config the generation embeds.
@@ -379,7 +379,7 @@ in
             return f"sshpass -p {password} ssh {opts} {user}@localhost {cmd}"
         target.succeed(pw("james", cmd="id -un"))
         target.fail(pw("james", "wrong"))
-        target.fail(pw("hinteros"))
+        target.fail(pw("hinteros-p1"))
         target.fail(pw("root"))
 
     with subtest("the starter set: the installed apps, as the starter env"):

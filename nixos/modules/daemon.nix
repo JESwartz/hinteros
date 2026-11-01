@@ -94,9 +94,6 @@ let
         builtins.toJSON {
           inherit (config.hinteros.release) version;
           dev = (config.hinteros.dev or { enable = false; }).enable;
-          # The highest state.json schema this generation's state.nix reads (DECISIONS D5): the
-          # service migrates schema 1 only when the running generation says 2.
-          stateSchema = 2;
         }
       )
     } $out/share/hinteros/release.json

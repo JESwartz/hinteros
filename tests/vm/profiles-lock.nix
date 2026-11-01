@@ -1,5 +1,5 @@
 # Locked profiles at the picker and after sleep (profiles.md "PINs and locking", "Boot, sleep and
-# other entries"; VM `profiles-lock`). Greeter mode; p1 = `hinteros` (James, admin, unlocked, PIN
+# other entries"; VM `profiles-lock`). Greeter mode; p1 = `hinteros-p1` (James, admin, unlocked, PIN
 # 2468), p2 = `hinteros-p2` (Sam, locked, PIN 1357), p3 = `hinteros-p3` (Alex, unlocked, PIN 3690).
 #   - The picker asks a locked profile for its PIN (a wrong one is refused) and opens an unlocked
 #     one without asking.
@@ -138,8 +138,8 @@ profiles.mkTest {
         assert not sess_ok("hinteros-p3", "profile.current")["screen_locked"]
 
     with subtest("after the locked profile is left, the picker asks for its PIN again"):
-        switch("hinteros-p3", "p1", "hinteros")
-        r = sess("hinteros", "session.switch_profile", {"id": "p2"})
+        switch("hinteros-p3", "p1", "hinteros-p1")
+        r = sess("hinteros-p1", "session.switch_profile", {"id": "p2"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "target", r
   '';
 }

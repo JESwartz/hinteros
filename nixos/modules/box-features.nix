@@ -3,8 +3,8 @@
 # on when any owner (a profile, the guest, the starter set) has an app that needs it.
 #
 # Who sets `hinteros.boxFeatures`:
-#   - schema 2: state.json `requirements` (maintained by hinteros-system, state.nix),
-#   - schema 1 and the test VMs: the union over the box-wide apps that are on (catalog.nix).
+#   - devices: state.json `requirements` (maintained by hinteros-system, state.nix),
+#   - test VMs: the union over the box-wide apps that are on (catalog.nix).
 # A new feature is a system-repo change here and in hinteros-catalog's validator (`features`).
 {
   config,

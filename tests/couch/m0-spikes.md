@@ -8,13 +8,13 @@ spike 4 (InputPlumber) and spike 5 (on-screen keyboard). Background: `hinteros-d
 ## 0. Deploy to the dev box
 
 1. Put your SSH public key in `hinteros.dev.deployKeys` in `devices/devbox/default.nix` (the `deploy`
-   user; empty by default). The session user `hinteros` has no SSH login and no sudo. Never commit keys that are not yours.
+   user; empty by default). The session user `hinteros-p1` has no SSH login and no sudo. Never commit keys that are not yours.
 2. First install: NixOS from any ISO on the box, then copy its
    `hardware-configuration.nix` ideas into `devices/devbox/hardware.nix`
    (the `fileSystems` entries there are placeholders). Generate the facter report on the box
    with `nixos-facter -o facter.json` and pass it as `facterReport` in `devices/devbox/default.nix` (M1).
 3. Deploy from the desktop as the separate `deploy` user (key-only SSH, wheel, passwordless sudo, nix
-   trusted; the session user `hinteros` has no sudo, not even here):
+   trusted; the session user `hinteros-p1` has no sudo, not even here):
    `nixos-rebuild switch --flake .#devbox --target-host deploy@<box> --sudo`
    (older nixos-rebuild: `--use-remote-sudo`). Undo a bad deploy with
    `ssh deploy@<box> sudo nixos-rebuild switch --rollback` or pick the previous generation at boot.

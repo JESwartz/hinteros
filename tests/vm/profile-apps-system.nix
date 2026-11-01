@@ -1,7 +1,7 @@
 # The system side of per-profile apps and accounts (apps.md build plan steps 3, 6, 9; profiles.md),
 # without the M7 daemon: hinteros-system's part (setting a profile's Nix profile, publishing
 # /run/hinteros/apps/<user>) is done by hand here, the way its jobs do it (DECISIONS D4). Checks:
-#   - schema-2 accounts: p1 = hinteros, p2 = hinteros-p2 (uid 20002), the guest (uid 20000), all in
+#   - accounts: p1 = hinteros-p1, p2 = hinteros-p2 (uid 20002), the guest (uid 20000), all in
 #     `hinteros`, homes 0700, no static device groups needed for the checks below;
 #   - /nix/var/nix/profiles/hinteros{,/apps} root 0755; a profile user cannot repoint its link;
 #   - an env built by `config.hinteros.appEnv.build` works as a profile: its manifest, its kiosk
@@ -74,15 +74,11 @@ in
       hinteros = {
         state = {
           schemaVersion = 2;
+          base = "unstable";
+          stateVersion = "25.11";
           profiles = [
-            {
-              id = "p1";
-              user = "hinteros";
-            }
-            {
-              id = "p2";
-              user = "hinteros-p2";
-            }
+            { id = "p1"; }
+            { id = "p2"; }
           ];
           requirements = [ ];
           services = [ ];
@@ -116,35 +112,35 @@ in
     import shlex
 
     envs = json.loads(machine.succeed("cat /etc/hinteros-test/envs.json"))
-    P = "/nix/var/nix/profiles/hinteros/apps/hinteros"
-    LINK = "/run/hinteros/apps/hinteros"
+    P = "/nix/var/nix/profiles/hinteros/apps/hinteros-p1"
+    LINK = "/run/hinteros/apps/hinteros-p1"
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("greetd.service")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
 
     with subtest("accounts"):
         assert machine.succeed("id -u hinteros-p2").strip() == "20002"
         assert machine.succeed("id -u hinteros-guest").strip() == "20000"
-        for u in ["hinteros", "hinteros-p2", "hinteros-guest"]:
+        for u in ["hinteros-p1", "hinteros-p2", "hinteros-guest"]:
             assert "hinteros" in machine.succeed(f"id -nG {u}").split(), u
             assert machine.succeed(f"stat -c %a /home/{u}").strip() == "700", u
-        machine.fail("runuser -u hinteros-p2 -- ls /home/hinteros")
+        machine.fail("runuser -u hinteros-p2 -- ls /home/hinteros-p1")
 
     with subtest("root-owned app profiles"):
         assert machine.succeed("stat -c '%U %a' /nix/var/nix/profiles/hinteros/apps").strip() == "root 755"
         machine.succeed(f"nix-env -p {P} --set {envs['firefox']}")
         machine.succeed(f"mkdir -p /run/hinteros/apps && ln -sfn {P} {LINK}")
-        machine.fail(f"runuser -u hinteros -- ln -sfn /tmp {P}")
-        machine.fail(f"runuser -u hinteros -- rm {P}")
-        machine.fail("runuser -u hinteros -- touch /nix/var/nix/profiles/hinteros/apps/x")
+        machine.fail(f"runuser -u hinteros-p1 -- ln -sfn /tmp {P}")
+        machine.fail(f"runuser -u hinteros-p1 -- rm {P}")
+        machine.fail("runuser -u hinteros-p1 -- touch /nix/var/nix/profiles/hinteros/apps/x")
 
     with subtest("the env as a profile: manifest, wrapper"):
-        m = json.loads(machine.succeed(f"runuser -u hinteros -- cat {LINK}/share/hinteros/apps.json"))
+        m = json.loads(machine.succeed(f"runuser -u hinteros-p1 -- cat {LINK}/share/hinteros/apps.json"))
         assert m["version"] == 1 and m["ids"] == ["firefox"] and m["steam"] is None and m["box"] == [], m
         assert [a["id"] for a in m["apps"]] == ["firefox"], m
         assert m["apps"][0]["command"][0].endswith("/bin/hinteros-firefox-kiosk"), m
-        machine.succeed(f"runuser -u hinteros -- test -x {LINK}/bin/hinteros-firefox-kiosk")
+        machine.succeed(f"runuser -u hinteros-p1 -- test -x {LINK}/bin/hinteros-firefox-kiosk")
         e = json.loads(machine.succeed(f"cat {envs['empty']}/share/hinteros/apps.json"))
         assert e["ids"] == [] and e["apps"] == [], e
 
@@ -162,17 +158,17 @@ in
             machine.fail(f"test -e {LINK}/{d}")
             machine.succeed(f"test -e {app_pkg}/{d}")
 
-        uid = machine.succeed("id -u hinteros").strip()
+        uid = machine.succeed("id -u hinteros-p1").strip()
         sock = f"/run/user/{uid}/hinteros/session.sock"
-        machine.wait_for_unit("hinteros-session.service", "hinteros")
+        machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
         machine.wait_until_succeeds(f"test -S {sock}")
 
         def rpc(*msgs, wait=2):
             hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                     "params": {"api_version": "0.18", "client": {"name": "trust-test", "version": "0"}}}
+                     "params": {"api_version": "0.21", "client": {"name": "trust-test", "version": "0"}}}
             payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
             cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
-            out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+            out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
             replies = [json.loads(line) for line in out.splitlines() if line.strip()]
             assert "error" not in replies[0], replies[0]
             return replies
@@ -195,7 +191,7 @@ in
         assert m and m.get("icon", "").endswith("/hicolor/256x256/apps/hinteros-trust.png"), m
         machine.succeed(f"test -f {m['icon']}")
 
-        box = "/home/hinteros/.local/share/hinteros/sandbox/moonlight"
+        box = "/home/hinteros-p1/.local/share/hinteros/sandbox/moonlight"
         ok("apps.launch", {"id": "moonlight"})
         machine.wait_until_succeeds(f"test -s {box}/trust-started", timeout=60)
 
@@ -206,12 +202,12 @@ in
         # Every process of the console session (the compositor, its Xwayland, the home loop and
         # the home app: all in the login session's scope), and the session daemon.
         session = machine.succeed(
-            "for p in $(pgrep -u hinteros); do grep -qs '/session-' /proc/$p/cgroup && echo $p:$(cat /proc/$p/comm); done; true"
+            "for p in $(pgrep -u hinteros-p1); do grep -qs '/session-' /proc/$p/cgroup && echo $p:$(cat /proc/$p/comm); done; true"
         ).split()
         procs = {f"session {s.split(':', 1)[1]} {s.split(':', 1)[0]}": s.split(":", 1)[0] for s in session}
         assert any("cage" in k for k in procs) and len(procs) >= 3, procs
         procs["session daemon"] = machine.succeed(
-            f"runuser -u hinteros -- env XDG_RUNTIME_DIR=/run/user/{uid} systemctl --user show -p MainPID --value hinteros-session.service"
+            f"runuser -u hinteros-p1 -- env XDG_RUNTIME_DIR=/run/user/{uid} systemctl --user show -p MainPID --value hinteros-session.service"
         ).strip()
         bad = ["/run/hinteros/apps", "/nix/var/nix/profiles/hinteros", env_out, app_pkg]
         for name, pid in procs.items():
@@ -222,7 +218,7 @@ in
                     assert b not in v, (name, k, v)
         machine.fail("test -e /tmp/trust-shadowed")
         ok("apps.close", {"id": "moonlight"})
-        machine.wait_until_fails(f"pgrep -u hinteros -f '{app_pkg}/bin/hinteros-trust-app'", timeout=30)
+        machine.wait_until_fails(f"pgrep -u hinteros-p1 -f '{app_pkg}/bin/hinteros-trust-app'", timeout=30)
         machine.succeed(f"ln -sfn {P} {LINK} && rm -f {T} {T}-*-link")
 
     with subtest("Firefox policies box-wide, no Firefox in the system"):

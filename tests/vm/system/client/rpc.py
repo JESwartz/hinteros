@@ -14,7 +14,7 @@ import sys
 import time
 
 SOCK = "/run/hinteros/system.sock"
-VERSION = os.environ.get("HINTEROS_SYSTEM_API", "0.10")
+VERSION = os.environ.get("HINTEROS_SYSTEM_API", "0.12")
 
 
 class Conn:

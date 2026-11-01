@@ -6,14 +6,12 @@ let
   inherit (pkgs) lib;
 
   state = {
-    schemaVersion = 1;
-    profiles = [
-      {
-        id = "p1";
-        name = "T";
-        user = "tester";
-      }
-    ];
+    schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
+    profiles = [ { id = "p1"; } ];
+    requirements = [ ];
+    services = [ ];
   };
 
   mk =
@@ -21,19 +19,16 @@ let
     (self.lib.mkDevice {
       inherit state;
       configDir = ../vm/fixtures/config-sync;
-      extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
+      extraModules = extra;
     }).config;
 
   # The automatic clean-up from state.json `settings.cleanup` (storage.md).
   state2 = cleanup: {
     schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
     settings = lib.optionalAttrs (cleanup != null) { inherit cleanup; };
-    profiles = [
-      {
-        id = "p1";
-        user = "hinteros";
-      }
-    ];
+    profiles = [ { id = "p1"; } ];
     requirements = [ ];
     services = [ ];
   };
@@ -41,7 +36,6 @@ let
     cleanup:
     (self.lib.mkDevice {
       state = state2 cleanup;
-      extraModules = [ { system.stateVersion = "25.11"; } ];
     }).config;
   # What the clean-up does, as configured: [ timer on, calendar, trim command, boot entries ].
   cleanupOf =
@@ -67,14 +61,13 @@ let
     in
     if r.success then lib.concatStringsSep "\n" r.value else "EVAL ERROR";
 
-  # A schema-2 device with `settings.timeZone` (null: absent), and its failing state assertions.
+  # A device with `settings.timeZone` (null: absent), and its failing state assertions.
   mkTz =
     timeZone:
     (self.lib.mkDevice {
       state = state2 null // {
         settings = lib.optionalAttrs (timeZone != null) { inherit timeZone; };
       };
-      extraModules = [ { system.stateVersion = "25.11"; } ];
     }).config;
   tzFailures =
     timeZone:
@@ -226,7 +219,6 @@ let
       expr =
         (self.lib.mkDevice {
           inherit state;
-          extraModules = [ { system.stateVersion = "25.11"; } ];
         }).config.hinteros.deviceConfig.snapshot != null;
       expected = true;
     };
@@ -382,15 +374,11 @@ let
           cleanup.enable = "yes";
         }
         {
-          msg = "unknown field(s) in settings.cleanup: keep";
-          cleanup.keep = 5;
-        }
-        {
           msg = "settings.cleanup must be an object";
           cleanup = true;
         }
       ];
-      expected = lib.genList (_: true) 7;
+      expected = lib.genList (_: true) 6;
     };
 
     # The time zone (time-zone.md): NixOS does not own /etc/localtime; the activation script

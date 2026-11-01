@@ -77,9 +77,9 @@ in
     import time
 
     envs = json.loads(machine.succeed("cat /etc/hinteros-envs.json"))
-    P = "/nix/var/nix/profiles/hinteros/apps/hinteros"
-    home = "/home/hinteros"
-    ENV = "HINTEROS_SYSTEM_API=0.10 HINTEROS_SESSION_API=0.18"
+    P = "/nix/var/nix/profiles/hinteros/apps/hinteros-p1"
+    home = "/home/hinteros-p1"
+    ENV = "HINTEROS_SYSTEM_API=0.12 HINTEROS_SESSION_API=0.21"
 
     machine.succeed("mkdir -p /run/stub")
     machine.wait_for_unit("multi-user.target")
@@ -93,12 +93,12 @@ in
     machine.succeed(f"nix-env -p {P} --set {envs['firefox,youtube']['out']}")
     machine.succeed("systemctl restart hinteros-system.service")
     machine.wait_for_unit("hinteros-system.service")
-    machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros")
-    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock")
+    machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros-p1")
+    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros-p1)/hinteros/session.sock")
     system_gen = machine.succeed("readlink -f /run/current-system").strip()
 
     def sess(method, params=None):
-        out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/session.py {method} '{json.dumps(params or {})}'")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- env {ENV} python3 /etc/hinteros-test/session.py {method} '{json.dumps(params or {})}'")
         return json.loads(out)["response"]
 
     def ok(method, params=None):
@@ -107,7 +107,7 @@ in
         return r["result"]
 
     def sysrpc(method, params=None):
-        out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- env {ENV} python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
         return json.loads(out)["response"]
 
     def wait_job(jid, timeout=240):
@@ -128,7 +128,7 @@ in
         return machine.succeed(f"nix-env -p {P} --list-generations").strip().splitlines()
 
     with subtest("the profile's env is what the session lists"):
-        machine.wait_until_succeeds("test -e /run/hinteros/apps/hinteros/share/hinteros/apps.json")
+        machine.wait_until_succeeds("test -e /run/hinteros/apps/hinteros-p1/share/hinteros/apps.json")
         for _ in range(30):
             if {"firefox", "youtube"} <= set(app_ids()):
                 break
@@ -176,7 +176,7 @@ in
           d='{home}/.config/Moonlight Game Streaming Project'
           mkdir -p "$d" {home}/.config/other
           echo x > "$d/settings.conf"; echo keep > {home}/.config/other/keep
-          chown -R hinteros: {home}/.config
+          chown -R hinteros-p1: {home}/.config
         """)
         done = wait_job(ok("system.apps.remove", {"ids": ["moonlight"], "revision": mine()["revision"], "delete_data": True})["job_id"])
         assert done["state"] == "succeeded" and done["kind"] == "apps_remove", done

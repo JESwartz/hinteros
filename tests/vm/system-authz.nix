@@ -4,7 +4,7 @@
 # user gets authentication_required. A rules file returning NO is honored; pkcheck agrees per
 # action; every decision is in the system journal.
 #
-# Two profiles (profiles.md "Authority"), on a second box (schema 2, greeter mode; p1 = James, the
+# Two profiles (profiles.md "Authority"), on a second box (greeter mode; p1 = James, the
 # admin profile, PIN 2468; p2 = Sam, PIN 1357, on screen; p3 = Alex): p2 cannot rename, remove or
 # reset the PIN of another profile, change the starter set or the guest with its own PIN or
 # another profile's, only with the admin PIN; the admin profile is never removable and its PIN
@@ -18,7 +18,7 @@ let
   P3_PIN = "86420975";
   denyRule = pkgs.writeText "deny.rules" ''
     polkit.addRule(function (action, subject) {
-      if (action.id === "org.hinteros.system.settings" && subject.user === "hinteros") {
+      if (action.id === "org.hinteros.system.settings" && subject.user === "hinteros-p1") {
         return polkit.Result.NO;
       }
     });
@@ -58,7 +58,7 @@ in
       };
       envs.empty.ids = [ ];
       appProfiles = {
-        hinteros = "empty";
+        hinteros-p1 = "empty";
         hinteros-p2 = "empty";
         hinteros-p3 = "empty";
       };
@@ -75,19 +75,19 @@ in
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_for_unit("greetd.service")
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
     # seat0's active session belongs to the session user (and to nobody else).
     machine.wait_until_succeeds("loginctl show-seat seat0 -p ActiveSession --value | grep -q .")
     sid = machine.succeed("loginctl show-seat seat0 -p ActiveSession --value").strip()
-    assert machine.succeed(f"loginctl show-session {sid} -p Name --value").strip() == "hinteros"
+    assert machine.succeed(f"loginctl show-session {sid} -p Name --value").strip() == "hinteros-p1"
     machine.fail("loginctl list-sessions --no-legend | grep -w guest")
     # The launcher may start its own job at startup (an update check); let it settle.
     def rpc(user, method, params=None):
         out = machine.succeed(f"runuser -u {user} -- python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
         return json.loads(out)
     for _ in range(60):
-        if not [j for j in rpc("hinteros", "jobs.list")["response"]["result"]["jobs"] if j["state"] == "running"]:
+        if not [j for j in rpc("hinteros-p1", "jobs.list")["response"]["result"]["jobs"] if j["state"] == "running"]:
             break
         machine.sleep(1)
     machine.sleep(3)
@@ -113,7 +113,7 @@ in
         assert rpc("stranger", "system.info") == {"connect_error": "EACCES"}
 
     with subtest("read-only methods: the session user and a member that does not own the seat"):
-        for user in ("hinteros", "guest"):
+        for user in ("hinteros-p1", "guest"):
             info = rpc(user, "system.info")["response"]["result"]
             assert info["dev"] is False and info["version"] == "0.1.0-dev", info
             assert info["channel"] == "stable" and info["base"] == "unstable", info
@@ -121,7 +121,7 @@ in
             assert "generations" in rpc(user, "generations.list")["response"]["result"]
             assert "jobs" in rpc(user, "jobs.list")["response"]["result"]
 
-    rev = rpc("hinteros", "settings.get")["response"]["result"]["revision"]
+    rev = rpc("hinteros-p1", "settings.get")["response"]["result"]["revision"]
 
     with subtest("mutating: refused for a member that does not own seat0 (guest)"):
         for method, params in [
@@ -139,16 +139,16 @@ in
             assert e["code"] == 3002 and e["data"]["reason"] == "seat", (method, e)
 
     with subtest("mutating: the session user passes the seat and polkit checks"):
-        r = rpc("hinteros", "settings.set", {"revision": rev, "changes": {}})["response"]
+        r = rpc("hinteros-p1", "settings.set", {"revision": rev, "changes": {}})["response"]
         assert r["result"] == {"job_id": None}, r  # nothing to change, so no job
-        e = err(rpc("hinteros", "settings.set", {"revision": "f" * 64, "changes": {}}))
+        e = err(rpc("hinteros-p1", "settings.set", {"revision": "f" * 64, "changes": {}}))
         assert e["code"] == 3007 and e["data"]["reason"] == "revision", e
-        e = err(rpc("hinteros", "jobs.cancel", {"job_id": "0123456789abcdef"}))
+        e = err(rpc("hinteros-p1", "jobs.cancel", {"job_id": "0123456789abcdef"}))
         assert e["code"] == 3010, e  # allowed through, then not found
 
     with subtest("ssh.set from the session user: authentication_required"):
         for enabled in (True, False):
-            e = err(rpc("hinteros", "ssh.set", {"enabled": enabled}))
+            e = err(rpc("hinteros-p1", "ssh.set", {"enabled": enabled}))
             assert e["code"] == 3012 and e["data"] == {"action": "org.hinteros.system.ssh"}, e
         # And nothing changed: no sshd, no state change.
         machine.fail("systemctl is-active sshd.service")
@@ -163,7 +163,7 @@ in
         def pk(action, pid):
             return machine.execute(f"pkcheck --action-id org.hinteros.system.{action} --process {pid}")[0]
 
-        mine = proc_of("hinteros")
+        mine = proc_of("hinteros-p1")
         for a in ACTIONS:
             assert pk(a, mine) == 0, ("session user", a)
         print("pkcheck ssh (session user):", pk("ssh", mine))
@@ -175,36 +175,36 @@ in
         other = proc_of("stranger")
         for a in ACTIONS + ["ssh"]:
             assert pk(a, other) != 0, ("non-member", a)
-        for u in ("hinteros", "guest", "stranger"):
+        for u in ("hinteros-p1", "guest", "stranger"):
             machine.succeed(f"systemctl stop probe-{u}.service")
 
     with subtest("a rules file returning NO is honored"):
         machine.copy_from_host("${denyRule}", "/etc/polkit-1/rules.d/20-test-deny.rules")
-        mine = machine.succeed("pgrep -u hinteros -f hinteros-launcher | head -n1").strip()
+        mine = machine.succeed("pgrep -u hinteros-p1 -f hinteros-launcher | head -n1").strip()
         machine.wait_until_fails(f"pkcheck --action-id org.hinteros.system.settings --process {mine}")
         machine.succeed(f"pkcheck --action-id org.hinteros.system.rollback --process {mine}")
-        e = err(rpc("hinteros", "settings.set", {"revision": rev, "changes": {}}))
+        e = err(rpc("hinteros-p1", "settings.set", {"revision": rev, "changes": {}}))
         assert e["code"] == 3002 and e["data"] == {"action": "org.hinteros.system.settings", "reason": "polkit"}, e
         # Other actions of the same user are unaffected (not_found: past the polkit gate).
-        assert err(rpc("hinteros", "jobs.cancel", {"job_id": "0123456789abcdef"}))["code"] == 3010
+        assert err(rpc("hinteros-p1", "jobs.cancel", {"job_id": "0123456789abcdef"}))["code"] == 3010
         machine.succeed("rm /etc/polkit-1/rules.d/20-test-deny.rules")
         machine.wait_until_succeeds(f"pkcheck --action-id org.hinteros.system.settings --process {mine}")
-        assert rpc("hinteros", "settings.set", {"revision": rev, "changes": {}})["response"]["result"] == {"job_id": None}
+        assert rpc("hinteros-p1", "settings.set", {"revision": rev, "changes": {}})["response"]["result"] == {"job_id": None}
 
     with subtest("every decision is in the system journal"):
         out = machine.succeed("journalctl -o json --no-pager HINTEROS_AUDIT=1")
         entries = [json.loads(l) for l in out.splitlines() if l.strip()]
         seen = {(e.get("HINTEROS_UID"), e.get("HINTEROS_DECISION")) for e in entries}
         print(sorted(seen, key=str))
-        huid = machine.succeed("id -u hinteros").strip()
+        huid = machine.succeed("id -u hinteros-p1").strip()
         guid = machine.succeed("id -u guest").strip()
         assert (guid, "denied_seat") in seen, seen
         assert (huid, "auth_required") in seen, seen
         assert (huid, "denied_polkit") in seen, seen
         assert (huid, "allowed") in seen, seen
-        machine.fail("runuser -u hinteros -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
+        machine.fail("runuser -u hinteros-p1 -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
 
-    # ---- two profiles (profiles.md "Authority"): a second box, schema 2 with the greeter -------
+    # ---- two profiles (profiles.md "Authority"): a second box with the greeter ----------------
     machine.shutdown()
     machine = twoprofiles
     boot_box()
@@ -311,7 +311,7 @@ in
         machine.succeed("journalctl -o verbose --no-pager HINTEROS_PIN_CHECK=admin | grep -q HINTEROS_PIN_OUTCOME=failed")
 
     with subtest("two profiles: the others, not on screen, cannot act at all"):
-        for user in ["hinteros", "hinteros-p3"]:
+        for user in ["hinteros-p1", "hinteros-p3"]:
             own_rev = sys_ok(user, "apps.list")["revision"]
             for method, params in [
                 ("profiles.rename", {"id": "p2", "name": "Mallory", "pin": "2468"}),

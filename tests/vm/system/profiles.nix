@@ -1,5 +1,5 @@
 # Shared parts of the profile VM tests (profiles.md "VM tests", apps.md build plan steps 6-10):
-# a schema-2 box with profile accounts, their metadata and PINs as hinteros-system keeps them,
+# a box with profile accounts, their metadata and PINs as hinteros-system keeps them,
 # optional prebuilt app envs (with the stub `nix` of stub-nix-envs.nix, so jobs need no network),
 # specialisations that stand for the systems the jobs' apply flow "builds", and Python helpers
 # that drive the greeter-mode daemon (the picker's buttons), a profile's session daemon (the
@@ -8,7 +8,7 @@
 #   mkTest {
 #     name; testScript;              # testScript: a string or { nodes, ... }: string, run after
 #                                    #   the Python helpers below
-#     state;                         # state.json (schema 2: mkState { ... }; or a schema-1 set)
+#     state;                         # state.json (mkState { ... })
 #     profiles ? { };                # { p1 = { name; color ? "teal"; admin ? false;
 #                                    #          locked ? false; pin ? null; }; ... }
 #     envs ? { };                    # { <key> = { ids; rooted ? true; }; } app envs built with
@@ -25,7 +25,7 @@
 #     extraModule ? { };             # more config for the node
 #   }
 #
-# The node is a greeter-mode box by default (schema 2 turns it on) with cage, like
+# The node is a greeter-mode box by default (a state turns it on) with cage, like
 # profiles-greeter. /etc/hinteros is the device config snapshot (an embedded flake whose
 # flake.nix only carries the channel line the daemon reads, and the state), so each
 # specialisation's snapshot matches the state.json a job writes for it.
@@ -33,7 +33,7 @@
 let
   inherit (pkgs) lib;
 
-  userOf = id: if id == "p1" then "hinteros" else "hinteros-${id}";
+  userOf = id: "hinteros-${id}";
   numOf = id: lib.toInt (lib.removePrefix "p" id);
 
   # The channel line hinteros-system reads (the device flake is never evaluated: the stub nix
@@ -60,7 +60,7 @@ in
 rec {
   inherit userOf pinHash stubbornApp;
 
-  # state.json schema 2 (DECISIONS D6).
+  # state.json (DECISIONS D6).
   mkState =
     {
       accounts ? [
@@ -74,14 +74,12 @@ rec {
     {
       schemaVersion = 2;
       base = "unstable";
+      stateVersion = "25.11";
       settings = {
         ssh.enable = false;
         guest.enable = guest;
       };
-      profiles = map (id: {
-        inherit id;
-        user = userOf id;
-      }) accounts;
+      profiles = map (id: { inherit id; }) accounts;
       inherit requirements services;
     };
 
@@ -266,7 +264,7 @@ rec {
     import json
     import time
 
-    ENV = "HINTEROS_SESSION_API=0.18 HINTEROS_SYSTEM_API=0.10 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=0.21 HINTEROS_SYSTEM_API=0.12 PYTHONPATH=/etc/hinteros-test"
 
     def env_path(key):
         """The store path of a prebuilt app env (mkTest `envs`)."""

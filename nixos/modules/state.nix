@@ -1,13 +1,11 @@
 # Translates a device's state.json (see hinteros-docs/design/device-config.md) into
-# hinteros.* and NixOS options. This is the only place that reads the state. Anything it
-# does not know fails evaluation, so mistakes surface at build time, before a switch.
+# hinteros.* and NixOS options. This is the only place that reads the state. A bad value of a
+# field it knows fails evaluation, so mistakes surface at build time, before a switch. A field it
+# does not know is ignored: a box that moves to an older channel has to evaluate the newer
+# state.json. A change that is not safe to ignore bumps schemaVersion.
 #
-# Two schemas are supported side by side (apps.md, "Migration and M7 build plan"):
-#   - schema 1 (pre-M7): `apps` are box-wide (`hinteros.apps`, session.toml `[[apps]]`), and
-#     `profiles` is `[]` (the installer, every pre-M7 box) or the one session user.
-#   - schema 2 (M7): `profiles` are the accounts `{id, user}`, `requirements` the box features,
-#     `services` the catalog services; there are no `apps`: each profile has its own Nix profile
-#     of apps (app-env.nix). hinteros-system migrates a schema-1 box to schema 2 itself.
+# `profiles` are the accounts `{id}`, `requirements` the box features, `services` the catalog
+# services; each profile has its own Nix profile of apps (app-env.nix).
 {
   config,
   lib,
@@ -18,32 +16,12 @@ let
   cfg = config.hinteros;
   inherit (cfg) state;
 
-  supportedSchemaVersions = [
-    1
-    2
-  ];
   schema = state.schemaVersion or null;
-  v2 = schema == 2;
+  listOr = v: if builtins.isList v then v else [ ];
 
-  # Catalog ids (hinteros-catalog), tombstoned ones included: a state may still list them, and
-  # they do nothing.
-  catalog = cfg.catalog.entries;
-  isKind = k: e: (e.kind or "app") == k;
-  appIds = builtins.attrNames (lib.filterAttrs (_: isKind "app") catalog);
-  liveAppIds = builtins.attrNames (
-    lib.filterAttrs (_: e: isKind "app" e && e.status != "removed") catalog
-  );
   serviceIds = builtins.attrNames (
-    lib.filterAttrs (_: e: isKind "service" e && e.status != "removed") catalog
+    lib.filterAttrs (_: e: (e.kind or "app") == "service" && e.status != "removed") cfg.catalog.entries
   );
-
-  # Fail on keys outside `known`, naming the path.
-  checkKeys =
-    path: known: attrs:
-    let
-      unknown = lib.subtractLists known (builtins.attrNames attrs);
-    in
-    lib.optional (unknown != [ ]) "unknown field(s) in ${path}: ${lib.concatStringsSep ", " unknown}";
 
   # The one disk layout there is: GPT, 1 GiB ESP + ext4 root, found by partition label (disk.nix).
   # The installer creates it (nixos/pkgs/hinteros-install); the field names it so another layout
@@ -73,109 +51,37 @@ let
   timeZone = settings.timeZone or null;
   timeZoneOk = (import ../lib/time-zone.nix { inherit pkgs; }).ok timeZone;
   disk = state.disk or null;
-  apps = state.apps or [ ];
-  profiles = state.profiles or [ ];
-  requirements = state.requirements or [ ];
-  services = state.services or [ ];
-  unknownApps = lib.filter (a: !(lib.elem a appIds)) apps;
+  profiles = listOr (state.profiles or null);
+  requirements = listOr (state.requirements or null);
+  services = listOr (state.services or null);
   unknownFeatures = lib.filter (f: !(lib.elem f cfg.knownBoxFeatures)) requirements;
   unknownServices = lib.filter (s: !(lib.elem s serviceIds)) services;
 
-  # Accounts (profiles.md, "Declarative accounts"): `p1` is `hinteros`, `p<N>` is `hinteros-p<N>`.
+  # Accounts (profiles.md, "Declarative accounts"): `p<N>` is the Unix user `hinteros-p<N>`.
   idOk = id: builtins.isString id && builtins.match "p[1-9][0-9]{0,2}" id != null;
-  userFor = id: if id == "p1" then "hinteros" else "hinteros-${id}";
+  ids = map (p: p.id or null) profiles;
   profileProblems =
-    if v2 then
-      let
-        ids = map (p: p.id or null) profiles;
-      in
-      lib.optional (
-        !(builtins.isList profiles) || profiles == [ ] || builtins.length profiles > 8
-      ) "profiles: 1 to 8 accounts"
-      ++ lib.concatMap (
-        p:
-        checkKeys "profiles[]" [ "id" "user" ] p
-        ++ lib.optional (!idOk (p.id or null)) "profiles[]: bad id ${builtins.toJSON (p.id or null)}"
-        ++ lib.optional (
-          idOk (p.id or null) && (p.user or null) != userFor p.id
-        ) "profiles[]: ${p.id} must be user ${userFor p.id}, not ${builtins.toJSON (p.user or null)}"
-      ) profiles
-      ++ lib.optional (lib.unique ids != ids) "profiles: duplicate ids"
-    else
-      lib.concatMap (
-        p:
-        checkKeys "profiles[]" [
-          "id"
-          "name"
-          "user"
-        ] p
-      ) profiles;
+    lib.optional (profiles == [ ] || builtins.length profiles > 8) "profiles: 1 to 8 accounts"
+    ++ lib.concatMap (
+      p: lib.optional (!idOk (p.id or null)) "profiles[]: bad id ${builtins.toJSON (p.id or null)}"
+    ) profiles
+    ++ lib.optional (lib.unique ids != ids) "profiles: duplicate ids";
 
-  # Schema 1's `profiles: []` is p1 = `hinteros`; otherwise its first entry is the session user.
-  accounts =
-    if v2 then
-      # Invalid entries are reported above and left out here.
-      map (p: { inherit (p) id user; }) (
-        lib.filter (p: idOk (p.id or null) && (p.user or null) == userFor p.id) profiles
-      )
-    else if profiles == [ ] then
-      [
-        {
-          id = "p1";
-          user = "hinteros";
-        }
-      ]
-    else
-      [
-        {
-          id = (builtins.head profiles).id or "p1";
-          user = (builtins.head profiles).user or "hinteros";
-        }
-      ];
+  # Invalid entries are reported above and left out here.
+  accounts = map (p: { inherit (p) id; }) (lib.filter (p: idOk (p.id or null)) profiles);
 
   problems =
-    lib.optional (!(lib.elem schema supportedSchemaVersions))
-      "unsupported schemaVersion ${builtins.toJSON schema} (supported: ${
-        lib.concatMapStringsSep ", " toString supportedSchemaVersions
-      })"
-    ++ checkKeys "state" (
-      [
-        "schemaVersion"
-        "base"
-        "stateVersion"
-        "settings"
-        "disk"
-        "profiles"
-      ]
-      ++ (
-        if v2 then
-          [
-            "requirements"
-            "services"
-          ]
-        else
-          [ "apps" ]
-      )
-    ) state
-    ++ checkKeys "settings" (
-      [
-        "ssh"
-        "hostname"
-        "admin"
-        "cleanup"
-        "timeZone"
-      ]
-      ++ lib.optional v2 "guest"
-    ) settings
-    ++ checkKeys "settings.ssh" [ "enable" ] ssh
-    ++ lib.optionals v2 (checkKeys "settings.guest" [ "enable" ] guest)
+    lib.optional (schema != 2) "unsupported schemaVersion ${builtins.toJSON schema} (supported: 2)"
+    ++ lib.optional (!builtins.isString (state.base or null)) "base must be a string"
+    ++ lib.optional (!builtins.isString (state.stateVersion or null)) "stateVersion must be a string"
+    ++ lib.optional (!builtins.isList (state.requirements or null)) "requirements must be a list"
+    ++ lib.optional (!builtins.isList (state.services or null)) "services must be a list"
     ++ lib.optional (
-      v2 && guest ? enable && !builtins.isBool guest.enable
+      guest ? enable && !builtins.isBool guest.enable
     ) "settings.guest.enable must be a bool"
     ++ (
       if builtins.isAttrs cleanup then
-        checkKeys "settings.cleanup" [ "enable" "frequency" "keepSystem" "keepProfiles" ] cleanup
-        ++ lib.optional (!cleanupOk.enable) "settings.cleanup.enable must be a bool"
+        lib.optional (!cleanupOk.enable) "settings.cleanup.enable must be a bool"
         ++
           lib.optional (!cleanupOk.frequency)
             "settings.cleanup.frequency must be one of ${lib.concatStringsSep ", " cleanupFrequencies}, not ${builtins.toJSON cleanup.frequency}"
@@ -191,19 +97,10 @@ let
     ++
       lib.optional (timeZone != null && !timeZoneOk)
         "settings.timeZone must be a time zone name of tzdata (e.g. \"Europe/Berlin\" or \"UTC\"), not ${builtins.toJSON timeZone}"
-    ++ lib.optionals (admin != null) (
-      checkKeys "settings.admin" [ "user" ] admin
-      ++ lib.optional (!(admin ? user)) "settings.admin needs a user"
-    )
-    ++ lib.optionals (disk != null) (
-      checkKeys "disk" [ "layout" ] disk
-      ++
-        lib.optional ((disk.layout or null) != diskLayout)
-          "unsupported disk.layout ${builtins.toJSON (disk.layout or null)} (supported: ${diskLayout})"
-    )
+    ++ lib.optional (admin != null && !(admin ? user)) "settings.admin needs a user"
     ++
-      lib.optional (unknownApps != [ ])
-        "unknown app id(s): ${lib.concatStringsSep ", " unknownApps} (known: ${lib.concatStringsSep ", " appIds})"
+      lib.optional (disk != null && (disk.layout or null) != diskLayout)
+        "unsupported disk.layout ${builtins.toJSON (disk.layout or null)} (supported: ${diskLayout})"
     ++
       lib.optional (unknownFeatures != [ ])
         "unknown box feature(s) in requirements: ${lib.concatStringsSep ", " unknownFeatures} (known: ${lib.concatStringsSep ", " cfg.knownBoxFeatures})"
@@ -234,30 +131,18 @@ in
           inherit message;
         }) (map (m: "hinteros state: ${m}") problems);
 
-        # The accounts (profiles.nix makes one Unix user each). Schema 1: one, the session user.
-        hinteros.profiles.accounts = accounts;
-
-        # sshd on/off. Opt-in; the admin account is the only login (see hardening.nix).
-        hinteros.ssh.enable = sshEnable;
-      }
-
-      # Schema 1: the box-wide apps are exactly the selected catalog ids. mkOverride 900 beats the
-      # catalog's mkDefault (the `onIso` apps on) and loses to a device's own `enable = true`.
-      # Schema 2: none (apps are per profile).
-      {
-        hinteros.apps = lib.genAttrs liveAppIds (id: {
-          enable = lib.mkOverride 900 (!v2 && builtins.elem id apps);
-        });
-      }
-
-      (lib.mkIf v2 {
         hinteros = {
-          appEnv.perProfile = true;
+          # The accounts (profiles.nix makes one Unix user each).
+          profiles.accounts = accounts;
+          profiles.guest.enable = guest.enable or true;
+
+          # sshd on/off. Opt-in; the admin account is the only login (see hardening.nix).
+          ssh.enable = sshEnable;
+
           boxFeatures = lib.filter (f: lib.elem f cfg.knownBoxFeatures) requirements;
           catalog.services = lib.filter (s: lib.elem s serviceIds) services;
-          profiles.guest.enable = guest.enable or true;
         };
-      })
+      }
 
       # The automatic clean-up (maintenance.nix). A field only when it is valid (the problem
       # above names a bad one); absent fields keep the module defaults, the same policy.

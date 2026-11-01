@@ -22,7 +22,7 @@
   hinteros-session,
   # Home directory of the session user; libraryfolders.vdf names the Steam directory by
   # absolute path, as real Steam does.
-  homeDir ? "/home/hinteros",
+  homeDir ? "/home/hinteros-p1",
 }:
 let
   steamDir = "${homeDir}/.local/share/Steam";

@@ -14,7 +14,7 @@ import socket
 import sys
 import time
 
-VERSION = os.environ.get("HINTEROS_SESSION_API", "0.18")
+VERSION = os.environ.get("HINTEROS_SESSION_API", "0.21")
 
 
 def sock_path():

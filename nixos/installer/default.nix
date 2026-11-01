@@ -93,12 +93,7 @@ let
           guest.enable = true;
         };
         disk.layout = "gpt-esp-ext4";
-        profiles = [
-          {
-            id = "p1";
-            user = "hinteros";
-          }
-        ];
+        profiles = [ { id = "p1"; } ];
         requirements = lib.sort lib.lessThan (
           lib.unique (lib.concatMap (id: config.hinteros.catalog.entries.${id}.box or [ ]) apps)
         );

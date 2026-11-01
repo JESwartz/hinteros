@@ -17,8 +17,8 @@ EVAL=(runtime-eval profiles-eval daemon-eval mk-device hardening-eval installer-
 # Area -> VM tests. A change to a test's own file always adds that test.
 INSTALLER=(install-validation install-offline install-newer installer-ui installer-save-log)
 PROFILES=(profiles-greeter profiles-switch profiles-pin profiles-lifecycle profiles-lock
-  profiles-isolation profiles-migration guest system-authz)
-APPS=(profile-apps profile-apps-system apps-box-features apps-migration store-install)
+  profiles-isolation guest system-authz)
+APPS=(profile-apps profile-apps-system apps-box-features store-install)
 SESSION=(gamescope session-restart input-layer)
 SYSTEM=(system-authz system-jobs system-escalation polkit-agent time-zone)
 # The daemon and the launcher touch nearly everything; this is the set that exercises each part

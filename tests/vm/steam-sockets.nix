@@ -22,15 +22,15 @@ in
 
   testScript = ''
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
+    uid = machine.succeed("id -u hinteros-p1").strip()
     rt = f"/run/user/{uid}"
     machine.wait_until_succeeds(f"test -S {rt}/hinteros/session.sock")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
-    machine.succeed("mkdir -p /run/hinteros/apps/hinteros && touch /run/hinteros/apps/hinteros/marker")
+    machine.succeed("mkdir -p /run/hinteros/apps/hinteros-p1 && touch /run/hinteros/apps/hinteros-p1/marker")
 
-    user = f"runuser -u hinteros -- env XDG_RUNTIME_DIR={rt}"
+    user = f"runuser -u hinteros-p1 -- env XDG_RUNTIME_DIR={rt}"
 
     def inside(run, cmd):
         return machine.succeed(f"{user} {run}/bin/steam-run sh -c '{cmd}'").strip()
@@ -46,11 +46,11 @@ in
         inside("${ourRun}", f"test ! -e {rt}/hinteros/session.sock && test ! -e {rt}/hinteros/osk.sock")
 
     with subtest("app envs stay, read-only"):
-        inside("${ourRun}", "test -e /run/hinteros/apps/hinteros/marker")
+        inside("${ourRun}", "test -e /run/hinteros/apps/hinteros-p1/marker")
         machine.fail(f"{user} ${ourRun}/bin/steam-run sh -c 'touch /run/hinteros/apps/x'")
 
     with subtest("the rest of the runtime dir stays"):
-        machine.succeed(f"runuser -u hinteros -- touch {rt}/steam-test")
+        machine.succeed(f"runuser -u hinteros-p1 -- touch {rt}/steam-test")
         inside("${ourRun}", f"test -e {rt}/steam-test")
   '';
 }

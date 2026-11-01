@@ -22,7 +22,7 @@ let
     runtimeInputs = [ pkgs.xterm ];
     text = ''
       exec xterm -T homelog -geometry 20x4 -fa Monospace -fs 10 \
-        -e sh -c 'exec cat >> /home/hinteros/home-typed'
+        -e sh -c 'exec cat >> /home/hinteros-p1/home-typed'
     '';
   };
 
@@ -148,16 +148,16 @@ in
     import shlex
 
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/gamescope '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/gamescope '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
+    uid = machine.succeed("id -u hinteros-p1").strip()
     env = f"XDG_RUNTIME_DIR=/run/user/{uid}"
     sock = f"/run/user/{uid}/hinteros/session.sock"
-    home = "/home/hinteros"
+    home = "/home/hinteros-p1"
     box = f"{home}/.local/share/hinteros/sandbox/probe"
 
     def as_user(cmd, display=":0"):
-        return f"runuser -u hinteros -- env {env} DISPLAY={display} sh -c {shlex.quote(cmd)}"
+        return f"runuser -u hinteros-p1 -- env {env} DISPLAY={display} sh -c {shlex.quote(cmd)}"
 
     def root_prop(name):
         return machine.execute(as_user(f"xprop -root {name}"))[1].strip()
@@ -169,7 +169,7 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "gamescope-sandbox-test", "version": "0"}}}
+                 "params": {"api_version": "0.21", "client": {"name": "gamescope-sandbox-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         out = machine.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"))
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
@@ -205,7 +205,7 @@ in
     # Six Xwaylands, :0-:5 (nothing else runs X here; 2 + the default 4); none on an abstract
     # socket. The wrapper told the daemon how many app displays there are.
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPECTRL_BASELAYER_APPID | grep -q 4100000000"), timeout=90)
-    machine.succeed("pgrep -u hinteros -af '/bin/gamescope ' | grep -q -- '--xwayland-count 6 '")
+    machine.succeed("pgrep -u hinteros-p1 -af '/bin/gamescope ' | grep -q -- '--xwayland-count 6 '")
     for n in range(6):
         machine.wait_until_succeeds(f"test -S /tmp/.X11-unix/X{n}")
     machine.fail("test -e /tmp/.X11-unix/X6")
@@ -232,7 +232,7 @@ in
     wait_focused(app_id)
 
     # Home: the launcher again; apps.focus: the app again.
-    machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
+    machine.succeed("pkill -USR1 -u hinteros-p1 -f 'hinteros-session --config'")
     wait_focused(4100000000)
     ok("apps.focus", {"id": "probe"})
     wait_focused(app_id)
@@ -244,9 +244,9 @@ in
     machine.fail(f"grep -q hello {home}/home-typed")
 
     # XTEST from the app's own display while the home app has focus: never reaches the home app.
-    machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
+    machine.succeed("pkill -USR1 -u hinteros-p1 -f 'hinteros-session --config'")
     wait_focused(4100000000)
-    machine.succeed(f"runuser -u hinteros -- touch {box}/inject")
+    machine.succeed(f"runuser -u hinteros-p1 -- touch {box}/inject")
     machine.wait_until_succeeds(f"test -e {box}/injected", timeout=30)
     machine.sleep(3)
     typed_home = machine.execute(f"cat {home}/home-typed")[1]
@@ -278,7 +278,7 @@ in
     # The app's window is still an ordinary app window with its own id.
     ok("apps.focus", {"id": "probe"})
     wait_focused(app_id)
-    machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
+    machine.succeed("pkill -USR1 -u hinteros-p1 -f 'hinteros-session --config'")
     wait_focused(4100000000)
     # The same mode control on :0 still works (and is undone).
     machine.succeed(as_user("xprop -root -f GAMESCOPE_XWAYLAND_MODE_CONTROL 32c -set GAMESCOPE_XWAYLAND_MODE_CONTROL 1,320,240,1", ":0"))
@@ -344,10 +344,10 @@ in
     assert machine.succeed(f"cat {home}/.local/state/hinteros/app-displays").strip() == "1"
     bad = call("apps.displays.set", {"count": 9})
     assert bad["error"]["code"] == -32602, bad
-    old_gs = machine.succeed("pgrep -u hinteros -f '/bin/gamescope '").strip()
+    old_gs = machine.succeed("pgrep -u hinteros-p1 -f '/bin/gamescope '").strip()
     ok("session.restart")
     machine.wait_until_fails(f"kill -0 {old_gs}", timeout=60)
-    machine.wait_until_succeeds("pgrep -u hinteros -af '/bin/gamescope ' | grep -q -- '--xwayland-count 3 '", timeout=120)
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -af '/bin/gamescope ' | grep -q -- '--xwayland-count 3 '", timeout=120)
     machine.wait_until_succeeds(f"test \"$(cat /run/user/{uid}/hinteros/app-displays 2>/dev/null)\" = 1", timeout=60)
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPECTRL_BASELAYER_APPID | grep -q 4100000000"), timeout=90)
     for n in range(3):

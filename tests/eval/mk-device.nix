@@ -3,29 +3,24 @@
 {
   self,
   pkgs,
-  nixpkgs ? self.inputs.nixpkgs,
 }:
 let
   inherit (pkgs) lib;
 
   good = {
-    schemaVersion = 1;
+    schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
     settings.ssh.enable = true;
-    apps = [ "steam" ];
-    profiles = [
-      {
-        id = "p1";
-        name = "T";
-        user = "tester";
-      }
-    ];
+    profiles = [ { id = "p1"; } ];
+    requirements = [ ];
+    services = [ ];
   };
 
   mk =
     state:
     self.lib.mkDevice {
       inherit state;
-      extraModules = [ { system.stateVersion = "25.11"; } ];
     };
 
   # Evaluates the failing assertion messages (as one string) of a state, or the eval error.
@@ -43,26 +38,31 @@ let
   report = builtins.toFile "facter.json" "{}";
 
   c = (mk good).config;
-  good2 = {
-    schemaVersion = 2;
-    settings.ssh.enable = false;
-    settings.guest.enable = true;
+  good2 = good // {
+    settings = {
+      ssh.enable = false;
+      guest.enable = true;
+    };
     profiles = [
-      {
-        id = "p1";
-        user = "hinteros";
-      }
-      {
-        id = "p3";
-        user = "hinteros-p3";
-      }
+      { id = "p1"; }
+      { id = "p3"; }
     ];
     requirements = [ "graphics32" ];
-    services = [ ];
   };
   c2 = (mk good2).config;
   c2nog = (mk (good2 // { settings.guest.enable = false; })).config;
-  minimal = (mk { schemaVersion = 1; }).config;
+  minimal = (mk (removeAttrs good [ "settings" ])).config;
+  # A test VM's device: no state, box-wide apps.
+  boxSteam =
+    (self.lib.mkDevice {
+      state = null;
+      extraModules = [
+        {
+          system.stateVersion = "25.11";
+          hinteros.apps.steam.enable = true;
+        }
+      ];
+    }).config;
 
   # A device with a real hardware report: facter must not add a second DHCP client.
   withFixture =
@@ -70,7 +70,6 @@ let
     (self.lib.mkDevice {
       state = good;
       facterReport = f;
-      extraModules = [ { system.stateVersion = "25.11"; } ];
     }).config;
   noDhcp =
     f:
@@ -100,64 +99,23 @@ let
     testSchema2Bad = {
       expr = map (s: lib.hasInfix s.msg (failures (good2 // s.patch))) [
         {
-          msg = "unknown field(s) in state: apps";
-          patch.apps = [ "youtube" ];
-        }
-        {
-          msg = "p3 must be user hinteros-p3";
-          patch.profiles = [
-            {
-              id = "p1";
-              user = "hinteros";
-            }
-            {
-              id = "p3";
-              user = "sam";
-            }
-          ];
-        }
-        {
           msg = "bad id";
-          patch.profiles = [
-            {
-              id = "admin";
-              user = "hinteros-admin";
-            }
-          ];
+          patch.profiles = [ { id = "admin"; } ];
         }
         {
           msg = "duplicate ids";
           patch.profiles = [
-            {
-              id = "p1";
-              user = "hinteros";
-            }
-            {
-              id = "p1";
-              user = "hinteros";
-            }
+            { id = "p1"; }
+            { id = "p1"; }
           ];
         }
         {
           msg = "1 to 8 accounts";
-          patch.profiles = map (n: {
-            id = "p${toString n}";
-            user = if n == 1 then "hinteros" else "hinteros-p${toString n}";
-          }) (lib.range 1 9);
+          patch.profiles = map (n: { id = "p${toString n}"; }) (lib.range 1 9);
         }
         {
           msg = "1 to 8 accounts";
           patch.profiles = [ ];
-        }
-        {
-          msg = "unknown field(s) in profiles[]: name";
-          patch.profiles = [
-            {
-              id = "p1";
-              user = "hinteros";
-              name = "Dev";
-            }
-          ];
         }
         {
           msg = "unknown box feature(s) in requirements: opengl";
@@ -167,19 +125,59 @@ let
           msg = "unknown service id(s): youtube";
           patch.services = [ "youtube" ];
         }
-        {
-          msg = "unknown field(s) in settings.guest: pin";
-          patch.settings.guest.pin = "1234";
-        }
       ];
-      expected = lib.genList (_: true) 10;
+      expected = lib.genList (_: true) 6;
     };
-    # Schema 2: accounts, the guest, box features from `requirements`, apps per profile.
+    testRequiredFields = {
+      expr = map (f: lib.hasInfix "${f} must be" (failures (removeAttrs good2 [ f ]))) [
+        "base"
+        "stateVersion"
+        "requirements"
+        "services"
+      ];
+      expected = [
+        true
+        true
+        true
+        true
+      ];
+    };
+    # Unknown fields are ignored (a box on an older channel evaluates a newer state.json).
+    testUnknownFieldsIgnored =
+      let
+        newer = good2 // {
+          apps = [ "youtube" ];
+          wifi = { };
+          settings = good2.settings // {
+            bluetooth = { };
+            guest.pin = "1234";
+            cleanup.future = true;
+          };
+          profiles = [
+            {
+              id = "p1";
+              user = "sam";
+              name = "Dev";
+            }
+          ];
+        };
+      in
+      {
+        expr = [
+          (failures newer)
+          (mk newer).config.hinteros.session.user
+        ];
+        expected = [
+          ""
+          "hinteros-p1"
+        ];
+      };
+    # Accounts, the guest, box features from `requirements`, apps per profile.
     testSchema2Accounts = {
       expr = [
-        (map (a: a.user) c2.hinteros.profiles.accounts)
+        (map (a: a.id) c2.hinteros.profiles.accounts)
         c2.users.users.hinteros-p3.uid
-        (c2.users.users.hinteros.uid or null)
+        c2.users.users.hinteros-p1.uid
         c2.users.users.hinteros-p3.extraGroups
         c2.users.users.hinteros-p3.homeMode
         c2.users.users.hinteros-guest.uid
@@ -190,27 +188,26 @@ let
       ];
       expected = [
         [
-          "hinteros"
-          "hinteros-p3"
+          "p1"
+          "p3"
         ]
         20003
-        null
+        20001
         [ "hinteros" ]
         "700"
         20000
         [
-          "hinteros"
+          "hinteros-p1"
           "hinteros-p3"
           "hinteros-guest"
         ]
-        "hinteros"
+        "hinteros-p1"
         true
         false
       ];
     };
     testSchema2Apps = {
       expr = [
-        c2.hinteros.appEnv.perProfile
         c2.hinteros.daemon.session.settings.apps
         (c2.hinteros.daemon.session.settings ? steam && c2.hinteros.daemon.session.settings.steam ? path)
         c2.hinteros.boxFeatures
@@ -236,7 +233,6 @@ let
         c2.programs.firefox.enable
       ];
       expected = [
-        true
         { profile = "/run/hinteros/apps/%u"; }
         false
         [ "graphics32" ]
@@ -247,24 +243,6 @@ let
         false
         false
         true
-        false
-      ];
-    };
-    # Schema 1 with `profiles: []` (the installer, every pre-M7 box) is p1 = hinteros.
-    testSchema1EmptyProfiles = {
-      expr = [
-        minimal.hinteros.profiles.accounts
-        minimal.hinteros.session.user
-        minimal.hinteros.appEnv.perProfile
-      ];
-      expected = [
-        [
-          {
-            id = "p1";
-            user = "hinteros";
-          }
-        ]
-        "hinteros"
         false
       ];
     };
@@ -334,7 +312,6 @@ let
         generic =
           (self.lib.mkDevice {
             state = good;
-            extraModules = [ { system.stateVersion = "25.11"; } ];
           }).config;
       in
       {
@@ -349,20 +326,24 @@ let
           [ ]
         ];
       };
+    testNoBoxWideAppsWithState = {
+      expr = lib.attrNames (lib.filterAttrs (_: a: a.enable) c2.hinteros.apps);
+      expected = [ ];
+    };
     testGoodHasNoFailures = {
       expr = failures good;
       expected = "";
     };
-    # Schema 1, box-wide Steam: stock pkgs.steam installed, its box features on, no programs.steam.
+    # Box-wide Steam: stock pkgs.steam installed, its box features on, no programs.steam.
     testSteamEnabled = {
       expr = [
-        c.programs.steam.enable
-        c.hinteros.boxFeatures
-        c.hardware.graphics.enable32Bit
-        c.hardware.steam-hardware.enable
-        c.services.pipewire.alsa.support32Bit
-        (lib.any (p: lib.getName p == "steam") c.environment.systemPackages)
-        (lib.hasSuffix "/bin/steam" c.hinteros.daemon.session.settings.steam.path)
+        boxSteam.programs.steam.enable
+        boxSteam.hinteros.boxFeatures
+        boxSteam.hardware.graphics.enable32Bit
+        boxSteam.hardware.steam-hardware.enable
+        boxSteam.services.pipewire.alsa.support32Bit
+        (lib.any (p: lib.getName p == "steam") boxSteam.environment.systemPackages)
+        (lib.hasSuffix "/bin/steam" boxSteam.hinteros.daemon.session.settings.steam.path)
       ];
       expected = [
         false
@@ -379,7 +360,7 @@ let
     };
     testSessionUser = {
       expr = c.hinteros.session.user;
-      expected = "tester";
+      expected = "hinteros-p1";
     };
     testSshEnabled = {
       expr = [
@@ -402,80 +383,29 @@ let
       expected = [
         false
         false
-        "hinteros"
+        "hinteros-p1"
       ];
     };
     testBadSchemaVersion = {
-      expr = lib.hasInfix "unsupported schemaVersion 3" (failures (good // { schemaVersion = 3; }));
-      expected = true;
+      expr =
+        map
+          (
+            v:
+            lib.hasInfix "unsupported schemaVersion ${toString v}" (failures (good // { schemaVersion = v; }))
+          )
+          [
+            1
+            3
+          ];
+      expected = [
+        true
+        true
+      ];
     };
     testMissingSchemaVersion = {
       expr = lib.hasInfix "unsupported schemaVersion null" (
         failures (removeAttrs good [ "schemaVersion" ])
       );
-      expected = true;
-    };
-    testUnknownTopLevel = {
-      expr = lib.hasInfix "unknown field(s) in state: wifi" (failures (good // { wifi = { }; }));
-      expected = true;
-    };
-    testUnknownSetting = {
-      expr = lib.hasInfix "unknown field(s) in settings: bluetooth" (
-        failures (
-          good
-          // {
-            settings = good.settings // {
-              bluetooth = { };
-            };
-          }
-        )
-      );
-      expected = true;
-    };
-    # A tombstoned catalog id is known: a state may still list it and it does nothing.
-    testTombstoneAccepted = {
-      expr =
-        let
-          cat = {
-            gone = {
-              status = "removed";
-              name = "Gone";
-            };
-          };
-          sys = nixpkgs.lib.nixosSystem {
-            system = "x86_64-linux";
-            modules = [
-              (self + "/nixos/modules")
-              self.nixosModules.overlay
-              (import (self + "/nixos/modules/catalog.nix") {
-                entries = cat;
-                cacheableUnfree = [ ];
-                index = pkgs.hello;
-              })
-              {
-                hinteros.state = {
-                  schemaVersion = 1;
-                  apps = [ "gone" ];
-                };
-                system.stateVersion = "25.11";
-              }
-            ];
-          };
-          msgs = map (a: a.message) (
-            builtins.filter (a: !a.assertion && lib.hasPrefix "hinteros state:" a.message) sys.config.assertions
-          );
-        in
-        [
-          msgs
-          (sys.config.hinteros.apps ? gone)
-        ];
-      expected = [
-        [ ]
-        false
-      ];
-    };
-    testUnknownApp = {
-      expr = lib.hasInfix "unknown app id(s): bogus" (failures (good // { apps = [ "bogus" ]; }));
       expected = true;
     };
     testUnavailableBase = {
@@ -489,58 +419,6 @@ let
             true
         )).success;
       expected = false;
-    };
-    # Default apps are exactly the selected ones once a state exists; the rest stay off.
-    testDefaultAppsFollowState = {
-      expr =
-        let
-          a =
-            (mk (
-              good
-              // {
-                apps = [
-                  "youtube"
-                  "firefox"
-                ];
-              }
-            )).config.hinteros.apps;
-        in
-        lib.mapAttrs (_: x: x.enable) (
-          lib.getAttrs [ "jellyfin" "youtube" "crunchyroll" "firefox" "plex-htpc" "moonlight" ] a
-        );
-      expected = {
-        jellyfin = false;
-        youtube = true;
-        crunchyroll = false;
-        firefox = true;
-        plex-htpc = false;
-        moonlight = false;
-      };
-    };
-    testOnlineOnlyApps = {
-      expr =
-        let
-          a =
-            (mk (
-              good
-              // {
-                apps = [
-                  "plex-htpc"
-                  "moonlight"
-                ];
-              }
-            )).config;
-        in
-        [
-          a.hinteros.apps.plex-htpc.enable
-          a.hinteros.apps.moonlight.enable
-          a.hinteros.unfreeAllowlist
-        ];
-      expected = [
-        true
-        true
-        [ "plex-htpc" ]
-      ];
     };
     testInstallerFields =
       let
@@ -604,22 +482,6 @@ let
       };
     testUnknownDiskLayout = {
       expr = lib.hasInfix "unsupported disk.layout" (failures (good // { disk.layout = "zfs"; }));
-      expected = true;
-    };
-    testUnknownAdminField = {
-      expr = lib.hasInfix "unknown field(s) in settings.admin: password" (
-        failures (
-          good
-          // {
-            settings = good.settings // {
-              admin = {
-                user = "a";
-                password = "x";
-              };
-            };
-          }
-        )
-      );
       expected = true;
     };
     testFacterReportPath = {

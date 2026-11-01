@@ -69,20 +69,20 @@
     import shlex
 
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/gamescope '")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/xterm '", timeout=60)
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/gamescope '")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/xterm '", timeout=60)
 
-    uid = machine.succeed("id -u hinteros").strip()
+    uid = machine.succeed("id -u hinteros-p1").strip()
     env = f"XDG_RUNTIME_DIR=/run/user/{uid}"
     sock = f"/run/user/{uid}/hinteros/session.sock"
 
     def as_user(cmd):
-        return f"runuser -u hinteros -- env {env} DISPLAY=:0 sh -c {shlex.quote(cmd)}"
+        return f"runuser -u hinteros-p1 -- env {env} DISPLAY=:0 sh -c {shlex.quote(cmd)}"
 
     def shot():
         # gamescope writes the file asynchronously, a moment after gamescopectl returns.
-        machine.execute(f"rm -f /tmp/shot.png; runuser -u hinteros -- env {env} gamescopectl screenshot /tmp/shot.png")
+        machine.execute(f"rm -f /tmp/shot.png; runuser -u hinteros-p1 -- env {env} gamescopectl screenshot /tmp/shot.png")
         machine.sleep(2)
         return machine.execute("test -s /tmp/shot.png && tesseract /tmp/shot.png - 2>/dev/null")[1]
 
@@ -104,11 +104,11 @@
         return machine.execute(as_user(f"xprop -root {name}"))[1].strip()
 
     # The home app runs under the reaper, which gives its window the launcher app id.
-    machine.succeed("pgrep -u hinteros -x reaper")
+    machine.succeed("pgrep -u hinteros-p1 -x reaper")
 
     # The daemon waited for / found gamescope's Xwayland and took over focus: without the
     # base-layer property gamescope in Steam mode shows nothing at all.
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPECTRL_BASELAYER_APPID | grep -q 4100000000"), timeout=60)
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPE_FOCUSED_APP | grep -q 4100000000"), timeout=60)
     wait_sees("the placeholder", "hinteros", "placeholder")
@@ -116,11 +116,11 @@
     # Session API 0.18 over the socket.
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "gamescope-test", "version": "0"}}}
+                 "params": {"api_version": "0.21", "client": {"name": "gamescope-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         out = machine.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"))
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
-        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.18", replies[0]
+        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.21", replies[0]
         return replies
 
     def call(method, params=None, wait=2):
@@ -138,11 +138,11 @@
     # Runtime settings wiring: gamescope and the daemon both run with the mode files
     # (this test still pins -W/-H because the headless backend has no real display).
     for name, pat in (("gamescope", "/bin/gamescope "), ("hinteros-session", "hinteros-session --config")):
-        pid = machine.succeed(f"pgrep -u hinteros -f '{pat}' | head -n1").strip()
+        pid = machine.succeed(f"pgrep -u hinteros-p1 -f '{pat}' | head -n1").strip()
         penv = machine.succeed(f"tr '\0' '\n' < /proc/{pid}/environ")
-        assert "GAMESCOPE_MODE_SAVE_FILE=/home/hinteros/.local/state/hinteros/gamescope-modes" in penv, (name, penv)
+        assert "GAMESCOPE_MODE_SAVE_FILE=/home/hinteros-p1/.local/state/hinteros/gamescope-modes" in penv, (name, penv)
         assert f"GAMESCOPE_PATCHED_EDID_FILE=/run/user/{uid}/gamescope-edid" in penv, (name, penv)
-    machine.succeed("test -d /home/hinteros/.local/state/hinteros")
+    machine.succeed("test -d /home/hinteros-p1/.local/state/hinteros")
     # display.modes answers under gamescope (modes, or a clean error: the headless backend writes no modes file).
     modes = call("display.modes")
     print("display.modes", modes)
@@ -151,7 +151,7 @@
     # A long-lived subscriber, so events can be checked after the fact.
     sub = [
         {"jsonrpc": "2.0", "id": 0, "method": "hello",
-         "params": {"api_version": "0.18", "client": {"name": "gamescope-test-events", "version": "0"}}},
+         "params": {"api_version": "0.21", "client": {"name": "gamescope-test-events", "version": "0"}}},
         {"jsonrpc": "2.0", "id": 1, "method": "subscribe",
          "params": {"events": ["app_started", "app_exited", "focus_changed", "steam_attention", "home_pressed"]}},
     ]
@@ -189,9 +189,9 @@
     machine.screenshot("fake-game")
 
     # Home (SIGUSR1 stands in for Guide): the placeholder is back, the game keeps running.
-    machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
+    machine.succeed("pkill -USR1 -u hinteros-p1 -f 'hinteros-session --config'")
     wait_sees("the placeholder after Home", "hinteros", "placeholder", absent=("fakegame",))
-    machine.succeed("pgrep -u hinteros -f 'Fake game 1000002'")
+    machine.succeed("pgrep -u hinteros-p1 -f 'Fake game 1000002'")
     machine.screenshot("home-again")
 
     # Launching it again focuses the running game.
@@ -207,7 +207,7 @@
     ).split()
     assert keyboards, machine.succeed("ls -l /dev/input")
     for dev in keyboards:
-        machine.fail(f"runuser -u hinteros -- test -r {dev}")
+        machine.fail(f"runuser -u hinteros-p1 -- test -r {dev}")
     machine.wait_until_succeeds("journalctl -b -u hinteros-keyboard | grep -q 'keyboard found'", timeout=30)
     homes = len(events("home_pressed"))
     machine.send_key("ctrl-d")
@@ -217,7 +217,7 @@
     machine.send_key("ctrl-meta_l-d")
     wait_event("home_pressed", lambda p: len(events("home_pressed")) == homes + 1)
     wait_sees("the placeholder after Ctrl+Super+D", "hinteros", "placeholder", absent=("fakegame",))
-    machine.succeed("pgrep -u hinteros -f 'Fake game 1000002'")
+    machine.succeed("pgrep -u hinteros-p1 -f 'Fake game 1000002'")
     machine.sleep(2)
     assert len(events("home_pressed")) == homes + 1, events("home_pressed")
 
@@ -227,7 +227,7 @@
     ok("apps.close", {"id": "steam-1000002"})
     wait_event("app_exited", lambda p: p["id"] == "steam-1000002" and p["reason"] == "closed")
     wait_sees("the placeholder after close", "hinteros", "placeholder", absent=("fakegame",))
-    machine.fail("pgrep -u hinteros -f 'Fake game 1000002'")
+    machine.fail("pgrep -u hinteros-p1 -f 'Fake game 1000002'")
 
     # Steam itself: Big Picture is gamescope app 769.
     steam = ok("apps.launch", {"id": "steam"}, wait=3)["app"]
@@ -235,7 +235,7 @@
     wait_sees("Big Picture", "fakebigpicture", absent=("placeholder",))
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPE_FOCUSED_APP | grep -q 769"), timeout=60)
     machine.screenshot("big-picture")
-    machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
+    machine.succeed("pkill -USR1 -u hinteros-p1 -f 'hinteros-session --config'")
     wait_sees("the placeholder after Big Picture", "hinteros", "placeholder", absent=("fakebigpicture",))
 
     # Close Steam (it shuts down, through the stub), then a Steam Guard style pop-up appears while the
@@ -252,21 +252,21 @@
     ok("steam.focus", wait=3)
     wait_sees("the Steam Guard pop-up", "steamguard", absent=("placeholder",))
     machine.screenshot("steam-guard")
-    machine.succeed("pkill -USR1 -u hinteros -f 'hinteros-session --config'")
+    machine.succeed("pkill -USR1 -u hinteros-p1 -f 'hinteros-session --config'")
     wait_sees("the placeholder after the pop-up", "hinteros", "placeholder", absent=("steamguard",))
 
-    machine.succeed("pgrep -u hinteros -f '/bin/gamescope '")
+    machine.succeed("pgrep -u hinteros-p1 -f '/bin/gamescope '")
 
     # greetd restarted (what a crashed or restarted session looks like from the outside): the new
     # gamescope gets a new Xwayland, the session daemon is a new process of the new user manager,
     # and it must take over focus again - the base layer property is set and the home app shows.
     old_inv = machine.succeed(as_user("systemctl --user show -p InvocationID --value hinteros-session.service")).strip()
-    old_gs = machine.succeed("pgrep -u hinteros -o -f '/bin/gamescope '").strip()
+    old_gs = machine.succeed("pgrep -u hinteros-p1 -o -f '/bin/gamescope '").strip()
     print("greetd restart: old gamescope", old_gs, "old daemon invocation", old_inv)
     machine.succeed("systemctl restart greetd")
     machine.wait_until_fails(f"kill -0 {old_gs}", timeout=60)
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/gamescope '", timeout=120)
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros", timeout=120)
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/gamescope '", timeout=120)
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1", timeout=120)
     machine.wait_until_succeeds("test -S /run/user/" + uid + "/hinteros/session.sock", timeout=120)
     machine.wait_until_succeeds(as_user("systemctl --user show -p InvocationID --value hinteros-session.service | grep -qvx " + old_inv), timeout=120)
     machine.wait_until_succeeds(as_user("xprop -root GAMESCOPECTRL_BASELAYER_APPID | grep -q 4100000000"), timeout=120)

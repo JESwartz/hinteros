@@ -163,22 +163,22 @@ in
     import time
 
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
     machine.wait_for_unit("nginx.service")
-    uid = machine.succeed("id -u hinteros").strip()
+    uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     machine.wait_until_succeeds(f"test -S /run/user/{uid}/pulse/play")
-    home = "/home/hinteros"
+    home = "/home/hinteros-p1"
     sandboxes = f"{home}/.local/share/hinteros/sandbox"
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "sandbox-apps-test", "version": "0"}}}
+                 "params": {"api_version": "0.21", "client": {"name": "sandbox-apps-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
-        out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
         assert "error" not in replies[0], replies[0]
         return replies
@@ -194,7 +194,7 @@ in
     def userns_of(process):
         """User namespaces of the matching processes, but the host's (the reaper, bwrap's own)."""
         return len(machine.succeed(
-            f"for p in $(pgrep -u hinteros -f {shlex.quote(process)}); do readlink /proc/$p/ns/user; done"
+            f"for p in $(pgrep -u hinteros-p1 -f {shlex.quote(process)}); do readlink /proc/$p/ns/user; done"
             " | sort -u | grep -vxF \"$(readlink /proc/1/ns/user)\" || true"
         ).split())
 
@@ -216,14 +216,14 @@ in
     if res["dri_render"] != host_render:
         probe_failed.append("dri_render")
     ok("apps.close", {"id": "probe"})
-    machine.wait_until_fails("pgrep -u hinteros -f [h]interos-apps-probe", timeout=30)
+    machine.wait_until_fails("pgrep -u hinteros-p1 -f [h]interos-apps-probe", timeout=30)
 
     # The display the sandboxed apps get (cage: its Xwayland), seen as the profile user.
     def windows():
         """Visible X windows with a name: {id: name}."""
         script = ('for w in $(xdotool search --onlyvisible --name --class --classname .); do '
                   'echo "$w $(xdotool getwindowname "$w") / $(xprop -id "$w" WM_CLASS | cut -d= -f2)"; done')
-        out = machine.succeed(f"runuser -u hinteros -- env DISPLAY=:0 sh -c {shlex.quote(script)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- env DISPLAY=:0 sh -c {shlex.quote(script)}")
         return dict((line.split(" ", 1) + [""])[:2] for line in out.splitlines() if line.strip())
 
     print("windows before the apps", windows())
@@ -282,10 +282,10 @@ in
         mapped = bool(new)
         if not mapped:
             # All top-level windows, also unmapped ones, to see what the app made.
-            print(machine.succeed("runuser -u hinteros -- env DISPLAY=:0 xwininfo -root -children -int || true"))
+            print(machine.succeed("runuser -u hinteros-p1 -- env DISPLAY=:0 xwininfo -root -children -int || true"))
         if mapped:
             time.sleep(settle)
-        running = machine.execute(f"pgrep -u hinteros -f {shlex.quote(process)}")[0] == 0
+        running = machine.execute(f"pgrep -u hinteros-p1 -f {shlex.quote(process)}")[0] == 0
         userns = userns_of(process)
         machine.screenshot(f"app-{app}")
         log = machine.succeed(
@@ -294,7 +294,7 @@ in
         print(f"===== {app} log =====\n{log}\n===== end {app} =====")
         bad = sorted({line for line in log.splitlines() if BAD.search(line) and not EXPECTED.search(line)})
         ok("apps.close", {"id": app})
-        machine.wait_until_fails(f"pgrep -u hinteros -f {shlex.quote(process)}", timeout=60)
+        machine.wait_until_fails(f"pgrep -u hinteros-p1 -f {shlex.quote(process)}", timeout=60)
         after_home = real_home()
         tree = machine.succeed(f"cd {sandboxes}/{app} && find . -maxdepth 3 | sort")
         print(f"===== {app} sandbox home =====\n{tree}")
@@ -321,12 +321,12 @@ in
 
     # Baseline: Plex's fontconfig warnings also come without our sandbox.
     base = machine.succeed(
-        "runuser -u hinteros -- env DISPLAY=:0 HOME=/tmp/plex-base sh -c "
+        "runuser -u hinteros-p1 -- env DISPLAY=:0 HOME=/tmp/plex-base sh -c "
         "'mkdir -p $HOME; timeout -s KILL 30 plex-htpc > /tmp/plex-base.log 2>&1; true'; "
         "grep -c 'Fontconfig warning' /tmp/plex-base.log || true"
     ).strip()
     print("plex without the sandbox: fontconfig warnings:", base)
-    machine.succeed("pkill -u hinteros -f '[p]lex' || true")
+    machine.succeed("pkill -u hinteros-p1 -f '[p]lex' || true")
 
     print(json.dumps(results, indent=1))
     failed = {a: r for a, r in results.items()

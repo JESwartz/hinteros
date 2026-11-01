@@ -12,14 +12,11 @@ let
 
   stateWith = services: {
     schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
     settings.ssh.enable = true;
     settings.guest.enable = true;
-    profiles = [
-      {
-        id = "p1";
-        user = "hinteros";
-      }
-    ];
+    profiles = [ { id = "p1"; } ];
     requirements = [ ];
     inherit services;
   };
@@ -30,7 +27,6 @@ let
       state = stateWith services;
       extraModules = [
         {
-          system.stateVersion = "25.11";
           # Only so the toplevel evaluates.
           fileSystems."/" = {
             device = "/dev/vda";

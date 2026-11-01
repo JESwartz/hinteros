@@ -19,9 +19,9 @@
       ];
       # Only the user and groups of the session are needed, not a running compositor, so the
       # test node enables the input layer on its own.
-      hinteros.session.user = "hinteros";
+      hinteros.session.user = "hinteros-p1";
       hinteros.input.enable = true;
-      users.users.hinteros.isNormalUser = true;
+      users.users.hinteros-p1.isNormalUser = true;
 
       environment = {
         systemPackages = [
@@ -44,7 +44,7 @@
     MGRI = "org.shadowblip.InputManager"
     CD = "/org/shadowblip/InputPlumber/CompositeDevice0"
     CDI = "org.shadowblip.Input.CompositeDevice"
-    USER = "hinteros"
+    USER = "hinteros-p1"
 
     def bc(args):
         """busctl as the unprivileged session user (goes through polkit)."""

@@ -8,7 +8,7 @@
 # A function of the state (`self.lib.devices.devbox`): `nixosConfigurations.devbox` passes the
 # checked-in state.json, and the device flake embedded in every generation's snapshot
 # (`selfFlake`) passes /etc/hinteros/state.json, so hinteros-system can evaluate app envs and
-# apply a state it rewrote (the v1 -> v2 migration) on this box like on any other.
+# apply a state it rewrote on this box like on any other.
 { self }:
 { state }:
 self.lib.mkDevice {

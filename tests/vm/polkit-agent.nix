@@ -49,13 +49,13 @@ in
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_for_unit("greetd.service")
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
-    uid = machine.succeed("id -u hinteros").strip()
+    uid = machine.succeed("id -u hinteros-p1").strip()
     machine.wait_until_succeeds(f"test -S /run/user/{uid}/hinteros/session.sock")
 
     def rpc(method, params=None):
-        out = machine.succeed(f"runuser -u hinteros -- python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
         return json.loads(out)["response"]
 
     # The launcher may start a job of its own at startup (an update check); let it finish.
@@ -68,7 +68,7 @@ in
     with subtest("polkit's agent helper socket is on, the session unit keeps NoNewPrivileges"):
         machine.succeed("systemctl is-active polkit-agent-helper.socket")
         machine.succeed("test -S /run/polkit/agent-helper.socket")
-        assert machine.succeed(f"runuser -u hinteros -- env XDG_RUNTIME_DIR=/run/user/{uid} systemctl --user show -p NoNewPrivileges --value hinteros-session.service").strip() == "yes"
+        assert machine.succeed(f"runuser -u hinteros-p1 -- env XDG_RUNTIME_DIR=/run/user/{uid} systemctl --user show -p NoNewPrivileges --value hinteros-session.service").strip() == "yes"
         machine.succeed("pkaction --action-id org.hinteros.system.apps --verbose | grep -q 'implicit active:.*no'")
         assert "remote login (SSH)" in machine.succeed("pkaction --action-id org.hinteros.system.ssh --verbose")
         machine.fail("systemctl is-active sshd.service")
@@ -82,13 +82,13 @@ in
     machine.succeed(f"echo {spec} > /run/stub/toplevel")
 
     with subtest("without a launcher the system service says authentication_required"):
-        # The system socket directly, as hinteros: no agent is involved, polkit has none for it.
+        # The system socket directly, as hinteros-p1: no agent is involved, polkit has none for it.
         r = rpc("ssh.set", {"enabled": True})
         print(r)
         assert r["error"]["code"] == 3012, r
 
     with subtest("wrong passwords, a client that is not the launcher, cancel, then the right password"):
-        out = machine.succeed("runuser -u hinteros -- python3 /etc/hinteros-test/polkit_agent.py '${adminPassword}' '${wrongPassword}' 2>&1")
+        out = machine.succeed("runuser -u hinteros-p1 -- python3 /etc/hinteros-test/polkit_agent.py '${adminPassword}' '${wrongPassword}' 2>&1")
         print(out)
         job = out.strip().splitlines()[-1]
 

@@ -14,7 +14,7 @@
   # snapshot gets a generated device flake naming this repo by store path, whose
   # `nixosConfigurations.hinteros` is `self.lib.devices.<selfFlake> { state = <its state.json>; }`
   # (spike 8 item 6). So /etc/hinteros on the box evaluates like any box's, app envs included, and
-  # a state.json that hinteros-system rewrites there (the v1 -> v2 migration) takes effect.
+  # a state.json that hinteros-system rewrites there takes effect.
   selfFlake ? null,
   # Extra NixOS modules (hardware profiles, the dev box's extras).
   extraModules ? [ ],

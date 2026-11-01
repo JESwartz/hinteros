@@ -1,11 +1,12 @@
 {
   "schemaVersion": 2,
   "base": "unstable",
+  "stateVersion": "25.11",
   "settings": {
     "ssh": { "enable": false },
     "guest": { "enable": true }
   },
-  "profiles": [{ "id": "p1", "user": "hinteros" }],
+  "profiles": [{ "id": "p1" }],
   "requirements": ["graphics32", "steam-devices"],
   "services": []
 }

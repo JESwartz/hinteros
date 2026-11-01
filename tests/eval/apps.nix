@@ -3,25 +3,11 @@
 let
   inherit (pkgs) lib;
 
+  # No state: the box-wide apps of the test VMs, the three on the ISO on.
   mk =
     extra:
     self.lib.mkDevice {
-      state = {
-        schemaVersion = 1;
-        # A state selects its default apps; this test wants the three on the ISO.
-        apps = [
-          "jellyfin"
-          "youtube"
-          "firefox"
-        ];
-        profiles = [
-          {
-            id = "p1";
-            name = "T";
-            user = "tester";
-          }
-        ];
-      };
+      state = null;
       extraModules = [
         { system.stateVersion = "25.11"; }
         extra
@@ -56,39 +42,31 @@ let
   # Another box: other compositor and session settings.
   otherBox = cage;
   envFails = c: ids: !(builtins.tryEval (drv (env c ids))).success;
+  # Exactly these box-wide apps.
   mkApps =
     ids: extra:
     self.lib.mkDevice {
-      state = {
-        schemaVersion = 1;
-        apps = ids;
-        disk.layout = "gpt-esp-ext4";
-        profiles = [
-          {
-            id = "p1";
-            name = "T";
-            user = "tester";
-          }
-        ];
-      };
+      state = null;
       extraModules = [
-        { system.stateVersion = "25.11"; }
+        {
+          system.stateVersion = "25.11";
+          hinteros.disk.enable = true;
+          hinteros.apps = lib.genAttrs liveIds (id: {
+            enable = lib.mkOverride 900 (lib.elem id ids);
+          });
+        }
         extra
       ];
     };
   c2 = self.lib.mkDevice {
     state = {
       schemaVersion = 2;
-      profiles = [
-        {
-          id = "p1";
-          user = "hinteros";
-        }
-      ];
+      base = "unstable";
+      stateVersion = "25.11";
+      profiles = [ { id = "p1"; } ];
       requirements = [ ];
       services = [ ];
     };
-    extraModules = [ { system.stateVersion = "25.11"; } ];
   };
   # A device with every catalog entry enabled (nothing built: the drv paths below force evaluation).
   every = mkApps liveIds { };
@@ -230,7 +208,7 @@ let
       ];
     };
     # Unfree per env: the cache job's envs may hold Steam, never Plex; the system's own allowlist
-    # lists no app on schema 2, and the env still evaluates (its own nixpkgs instance).
+    # lists no app on a device, and the env still evaluates (its own nixpkgs instance).
     testEnvUnfree = {
       expr = [
         (envFails cacheJob [ "plex-htpc" ])
@@ -945,7 +923,7 @@ pkgs.runCommand "hinteros-apps-eval"
     # Evaluation only: every catalog entry in one device config, and the ISO (which throws on any
     # unfree package, as it allows none).
     everyDrv = builtins.unsafeDiscardStringContext every.config.system.build.toplevel.drvPath;
-    # Every app in one env (schema 2, as hinteros-system builds them).
+    # Every app in one env (as hinteros-system builds them).
     envDrv = drv (env base liveIds);
     cacheDrv = builtins.unsafeDiscardStringContext cacheJob.config.system.build.toplevel.drvPath;
     isoDrv = builtins.unsafeDiscardStringContext iso.config.system.build.isoImage.drvPath;

@@ -13,9 +13,9 @@
 #   - installs the generated index and vendor terms at `share/hinteros/catalog.json` and
 #     `share/hinteros/terms/` (the Store reads /run/current-system/sw/share/hinteros/).
 #
-# Which box-wide apps are on is decided elsewhere: the installer's `onIso` apps (app-ids.nix: on
-# the ISO and offered by the installer, so jellyfin, youtube and firefox) are on with the session
-# (no state), state.nix sets exactly the ids of a schema-1 state's `apps` and none on schema 2.
+# Box-wide apps are for test VMs: without a state the installer's `onIso` apps (app-ids.nix: on the
+# ISO and offered by the installer, so jellyfin, youtube and firefox) are on with the session. With
+# a state none is: apps are per profile.
 # A function of the catalog data, not a plain module: which entries exist decides the shape of
 # this module's config (one `service` module per entry), so it must not be read from `config`.
 # flake.nix passes it in; `hinteros.catalog.*` re-exports it for other modules to read.
@@ -118,7 +118,7 @@ in
         id: e:
         entriesLib.defaultLeaves (
           {
-            enable = sessionEnabled && lib.elem id appIds.onIso;
+            enable = sessionEnabled && (config.hinteros.state or null) == null && lib.elem id appIds.onIso;
           }
           // entriesLib.catalogSettings {
             inherit pkgs lib box;
@@ -145,7 +145,7 @@ in
       );
     }
 
-    # Box features the box-wide apps name (schema 1; on schema 2 state.json `requirements`).
+    # Box features the box-wide apps name (a device: state.json `requirements`).
     {
       hinteros.boxFeatures = lib.unique (lib.concatMap (e: e.box or [ ]) (lib.attrValues enabled));
     }

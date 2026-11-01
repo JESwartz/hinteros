@@ -218,15 +218,15 @@ in
     inet.wait_for_unit("web.service")
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("local-web.service")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
+    uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
-    home = "/home/hinteros"
+    home = "/home/hinteros-p1"
     sandboxes = f"{home}/.local/share/hinteros/sandbox"
     unit_cg = f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/app.slice/hinteros-session.service"
-    user = f"runuser -u hinteros -- env XDG_RUNTIME_DIR=/run/user/{uid}"
+    user = f"runuser -u hinteros-p1 -- env XDG_RUNTIME_DIR=/run/user/{uid}"
 
     # Outside any sandbox the box reaches all of them.
     machine.succeed("curl -sf -m 5 -o /dev/null http://192.168.1.3:8080/")
@@ -243,10 +243,10 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "lan-test", "version": "0"}}}
+                 "params": {"api_version": "0.21", "client": {"name": "lan-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
-        out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
         assert "error" not in replies[0], replies[0]
         return replies
@@ -263,8 +263,8 @@ in
         """Launch `app`, return its probe results, close it."""
         out = f"{sandboxes}/{app}/probe.txt"
         machine.succeed(
-            f"runuser -u hinteros -- mkdir -p {sandboxes}/{app} && "
-            f"echo ROUTER_LL={router_ll} | runuser -u hinteros -- tee {sandboxes}/{app}/targets && "
+            f"runuser -u hinteros-p1 -- mkdir -p {sandboxes}/{app} && "
+            f"echo ROUTER_LL={router_ll} | runuser -u hinteros-p1 -- tee {sandboxes}/{app}/targets && "
             f"rm -f {out}"
         )
         ok("apps.launch", {"id": app})
@@ -273,11 +273,11 @@ in
         print(app, res)
         # The cgroup the probe runs in (its reaper moved there before it started anything); the
         # daemon stays in its leaf.
-        cg = machine.succeed("cat /proc/$(pgrep -u hinteros -o -f [h]interos-lan-probe)/cgroup").strip()
+        cg = machine.succeed("cat /proc/$(pgrep -u hinteros-p1 -o -f [h]interos-lan-probe)/cgroup").strip()
         daemon = machine.succeed(f"{user} systemctl --user show -p MainPID --value hinteros-session.service").strip()
         machine.succeed(f"grep -qx {daemon} {unit_cg}/daemon/cgroup.procs")
         ok("apps.close", {"id": app})
-        machine.wait_until_fails("pgrep -u hinteros -f [h]interos-lan-probe", timeout=30)
+        machine.wait_until_fails("pgrep -u hinteros-p1 -f [h]interos-lan-probe", timeout=30)
         res["cgroup"] = cg
         return res
 
@@ -358,7 +358,7 @@ in
         err = call("apps.launch", {"id": "nolan"})
         assert err["error"]["code"] == 2002, err  # app_launch_failed
         assert "no local network filter" in err["error"]["message"], err
-        machine.fail("pgrep -u hinteros -f [h]interos-lan-probe")
+        machine.fail("pgrep -u hinteros-p1 -f [h]interos-lan-probe")
         # An app with lan does not need the filter.
         expect(run("withlan"), lan=True)
         # The service is back: the next launch asks again, then it starts.
@@ -367,7 +367,7 @@ in
         call("apps.launch", {"id": "nolan"})
         machine.wait_until_succeeds("nft list table inet hinteros_lan | grep -q 'uid " + uid + "'", timeout=60)
         call("apps.close", {"id": "nolan"})
-        machine.wait_until_fails("pgrep -u hinteros -f [h]interos-lan-probe", timeout=30)
+        machine.wait_until_fails("pgrep -u hinteros-p1 -f [h]interos-lan-probe", timeout=30)
         expect(run("nolan"), lan=False)
 
     with subtest("the session ends: the filter is cleared"):

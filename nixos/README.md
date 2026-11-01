@@ -2,7 +2,7 @@
 
 - `modules/`: the HinterOS NixOS modules, exported by the flake as `nixosModules`.
   - `session.nix`: greetd autologin into gamescope running the home app.
-    Options: `hinteros.session.enable`, `.user` (default `hinteros`), `.compositor`
+    Options: `hinteros.session.enable`, `.user` (default `hinteros-p1`), `.compositor`
     (`gamescope` or `cage`), `.environment`, `.homeApp`
     (package, default `pkgs.hinteros-launcher`; `pkgs.hinteros-placeholder-home` is kept for debugging), `.gamescope.package`, `.gamescope.extraArgs`, `.gamescope.reviewedVersion`. The compositor gets `XKB_DEFAULT_LAYOUT=us` (the daemon types US key codes). The gamescope version is pinned: the daemon vendors gamescope's private `gamescope_input_method` protocol (3.16.31), so evaluation fails with another version until `reviewedVersion` is updated after re-checking the daemon's protocol XML.
     `.launcherAppId` (4100000000) and `.reaperPackage`: under gamescope (always `-e`, Steam mode) the home app runs as
@@ -38,7 +38,7 @@
     `hinteros.update.allowedSigners` (a list of `"<principal> ssh-ed25519 <key>"`, written in ssh-keygen format with `namespaces="git"`).
     `allowedSigners` is empty by default; `nixosModules.default` fills it from the repo's `release/allowed_signers` (`release.nix`, below). With none,
     every update and channel check fails closed (git finds no matching principal, the daemon reports `update_verification_failed`/`unknown_signer`).
-  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 1, rejects unknown fields and app ids, and maps `settings.ssh`, `settings.hostname`, `settings.cleanup` (maintenance.nix), `settings.timeZone` (checked only: a zone of tzdata; time-zone.nix applies it at activation), `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `apps` (a state enables exactly the listed default apps; ids in `lib/app-ids.nix`) and the first profile's user (TODO M7: one user per profile).
+  - `state.nix`: `hinteros.state` (set by `lib.mkDevice`) is the decoded state.json; it asserts `schemaVersion` 2 and the required fields (`base`, `stateVersion`, `profiles`, `requirements`, `services`), checks the values of known fields, ignores unknown ones, and maps `settings.ssh`, `settings.hostname`, `settings.cleanup` (maintenance.nix), `settings.timeZone` (checked only: a zone of tzdata; time-zone.nix applies it at activation), `settings.admin` (admin account, hash file `/var/lib/hinteros/admin-password-hash`), `stateVersion`, `disk` (`disk.nix`), `profiles` (`{id}`; `hinteros.profiles.accounts`), `requirements` (`hinteros.boxFeatures`) and `services` (`hinteros.catalog.services`).
   - `release.nix` (in `nixosModules.default` only, not in `modules/default.nix`): sets `hinteros.release.version`, `hinteros.update.allowedSigners` and `hinteros.cache.publicKeys` from `release/{version,allowed_signers,cache-keys}` with `mkDefault`; comment lines are skipped. `cache.nix`: `hinteros.cache.{enable,url,publicKeys}`, off (no cache yet); when on, an extra substituter at priority 50 after cache.nixos.org.
   - `disk.nix`: `hinteros.disk.enable` (state.json `disk`): the installer layout, ESP + ext4 root by partition label `hinteros-esp`/`hinteros-root`, systemd-boot, zram.
 - `installer/`: `default.nix` (installer environment: `hinteros-install`, disko, offline closure and lock following `hinteros.installer.channel` (default `stable`), `hinteros.installer.ui.command` hook) and `iso.nix` (installation-cd base); `pkgs/hinteros-install`, `templates/device-flake.nix.in`. See the repo README, "Installer".
@@ -185,8 +185,8 @@ Xwaylands' memory.
 
 ## Profiles, the greeter and PINs (M7)
 
-- `profiles.nix`: one Unix user per profile account (`hinteros`, `hinteros-p<N>`), the guest, and
-  greeter mode (on with state.json schema 2): greetd runs the picker as `hinteros-greeter`; the
+- `profiles.nix`: one Unix user per profile account (`hinteros-p<N>`, uid 20000+N), the guest, and
+  greeter mode (on with a state): greetd runs the picker as `hinteros-greeter`; the
   `greetd` PAM stack enforces PINs and the kill on switch through `hinteros-system pin
   unlocked|verify|end-others` (pam_exec, as root). A profile without a PIN is entered without
   one, even when it is locked.

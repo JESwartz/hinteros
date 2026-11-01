@@ -440,8 +440,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
               or (.admin.user | test("^[a-z_][a-z0-9_-]{0,31}$") | not)
             then bad("admin.user"; "admin-user-invalid"; "admin user must be 1-32 lowercase letters, digits, - or _, starting with a letter or _") else empty end),
           (if (.admin.user | type) == "string"
-              and ((.admin.user | IN("root", "hinteros", "nobody", "deploy", "sshd", "daemon", "nixbld"))
-                   or (.admin.user | test("^(systemd-|nixbld)")))
+              and ((.admin.user | IN("root", "hinteros", "hinteros-guest", "hinteros-greeter", "hinteros-kbd", "nobody", "deploy", "sshd", "daemon", "nixbld"))
+                   or (.admin.user | test("^(systemd-|nixbld|hinteros-p[0-9])")))
             then bad("admin.user"; "admin-user-reserved"; "admin user name \(.admin.user) is reserved") else empty end),
           (if ((.admin.password | type) == "string" and (.admin.password | length) > 0)
               and ((.admin.hashedPassword | type) == "string")
@@ -531,7 +531,7 @@ fi
 install_rev=$ISO_REV
 install_version=$ISO_VERSION
 
-# state.json (schema 2, profiles.md "Installer"): one spare account (p1 = hinteros) and no
+# state.json (schema 2, profiles.md "Installer"): one spare account (p1) and no
 # profile (first-boot mode creates the admin profile), no apps (each profile has its own; the
 # picks become the starter set, below). `requirements` are the box features the picked apps need
 # (Steam: graphics32, steam-devices), so the system stage already has them and a profile created
@@ -545,7 +545,7 @@ write_state() {
       stateVersion: $sv,
       settings: {hostname: $host, ssh: {enable: $ssh}, admin: {user: $admin}, guest: {enable: true}},
       disk: {layout: "gpt-esp-ext4"},
-      profiles: [{id: "p1", user: "hinteros"}],
+      profiles: [{id: "p1"}],
       requirements: $req,
       services: []
     }' >"$dir/state.json"

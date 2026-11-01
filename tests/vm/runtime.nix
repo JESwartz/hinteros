@@ -23,7 +23,7 @@
 
   testScript = ''
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher")
 
     machine.wait_for_unit("NetworkManager.service")
     # bluetoothd only starts with a controller present (ConditionPathIsDirectory=/sys/class/bluetooth),
@@ -32,7 +32,7 @@
     machine.succeed("test -e /etc/systemd/system/bluetooth.target.wants/bluetooth.service || systemctl is-enabled bluetooth.service")
     machine.succeed("grep -q '^Experimental *= *true' /etc/bluetooth/main.conf")
     machine.succeed("grep -q '^UserspaceHID *= *true' /etc/bluetooth/input.conf")
-    machine.wait_for_unit("pipewire.socket", "hinteros")  # socket-activated
+    machine.wait_for_unit("pipewire.socket", "hinteros-p1")  # socket-activated
     machine.succeed("systemctl cat wireplumber.service | grep -q wireplumber")
 
     # logind: power button sleeps, lid ignored.
@@ -40,7 +40,7 @@
     assert "HandlePowerKey=suspend" in out and "HandleLidSwitch=ignore" in out, out
 
     # polkit, as seen from a process of the active console session.
-    pid = machine.succeed("pgrep -u hinteros -f hinteros-launcher | head -n1").strip()
+    pid = machine.succeed("pgrep -u hinteros-p1 -f hinteros-launcher | head -n1").strip()
     def check(action, pid=pid):
         return machine.execute(f"pkcheck --action-id {action} --process {pid}")[0]
 

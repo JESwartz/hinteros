@@ -41,7 +41,7 @@ pkgs.testers.runNixOSTest {
     # survive) is restored at boot. The first boot had no /etc/hinteros, so populate it and reboot.
     machine.succeed("""
       mkdir /etc/hinteros
-      echo '{"schemaVersion":1,"marker":"stale"}' > /etc/hinteros/state.json
+      echo '{"schemaVersion":2,"marker":"stale"}' > /etc/hinteros/state.json
       echo '# stale flake' > /etc/hinteros/flake.nix
       echo 'hardware' > /etc/hinteros/facter.json
       echo 'leftover' > /etc/hinteros/extra.json

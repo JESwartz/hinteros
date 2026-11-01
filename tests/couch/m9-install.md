@@ -31,7 +31,7 @@ second machine to build the ISO. An Ethernet cable for the online part; a Wi-Fi 
 - [ ] `/var/log/hinteros-install.log` has no network errors (no attempts to fetch from cache.nixos.org or the Forgejo).
 - [ ] Remove the stick, reboot: the box boots from the internal disk (systemd-boot, no menu needed), reaches the launcher with a controller attached. Record: boot time.
 - [ ] The launcher lists YouTube and Firefox only (Jellyfin and Steam are offered but unticked; Crunchyroll, Moonlight and Plex are Store-only).
-- [ ] From another machine on the LAN: `ssh <admin>@<host>` with the plan's password works; the same for `hinteros` and `root` fails. `sudo` asks for the admin password. `sudo iptables -S nixos-fw | grep "dport 22"` shows only the local networks as sources.
+- [ ] From another machine on the LAN: `ssh <admin>@<host>` with the plan's password works; the same for `hinteros-p1` and `root` fails. `sudo` asks for the admin password. `sudo iptables -S nixos-fw | grep "dport 22"` shows only the local networks as sources.
 - [ ] `ls /etc/hinteros` shows `flake.nix flake.lock state.json facter.json`; `state.json` has the apps, ssh and admin user but no password; `/var/lib/hinteros/admin-password-hash` is `0600 root`.
 - [ ] `diff -r /etc/hinteros /run/current-system/hinteros` shows only `facter.json` as extra.
 - [ ] `lsblk -f`: a 1 GiB vfat ESP (`hinteros-esp`) and an ext4 root (`hinteros-root`) filling the rest.

@@ -1,5 +1,5 @@
 # PINs (profiles.md "PINs and locking", "PAM: where the PIN and the kill are enforced",
-# "Authority"; DECISIONS D9, D14, H2, J4; VM `profiles-pin`). Greeter mode; p1 = `hinteros`
+# "Authority"; DECISIONS D9, D14, H2, J4; VM `profiles-pin`). Greeter mode; p1 = `hinteros-p1`
 # (James, the admin profile, locked, PIN 2468), p2 = `hinteros-p2` (Sam, locked, PIN 1357), p3 =
 # `hinteros-p3`, a spare account (no metadata), and the admin account `hinteros-admin`.
 #   - greetd's PAM stack, probed over greetd's IPC as root: it refuses root, the admin account,
@@ -124,7 +124,7 @@ profiles.mkTest {
         # profiles.list shows the wait; the admin profile never has one. (The public view, which
         # the picker reads, is not republished after a failure in PAM: a daemon gap, see the
         # M7 VM test report. The picker has the wait from greeter_result.)
-        p = {x["id"]: x for x in sys_ok("hinteros", "profiles.list")["profiles"]}
+        p = {x["id"]: x for x in sys_ok("hinteros-p1", "profiles.list")["profiles"]}
         assert p["p2"]["locked_until"], p
         assert not p["p1"]["locked_until"], p
         assert pin_state("p2")["failures"] == 7, pin_state("p2")
@@ -150,7 +150,7 @@ profiles.mkTest {
             return sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": pin})
 
         def pam_verify(pin):
-            return machine.succeed(f"printf '{pin}\\0' | env PAM_USER=hinteros hinteros-system pin verify || true").strip()
+            return machine.succeed(f"printf '{pin}\\0' | env PAM_USER=hinteros-p1 hinteros-system pin verify || true").strip()
 
         locked_out = {"pin": "admin", "reboot_required": True}
         # API (any profile's session) and the greeter's PAM helper share one count; no wait.
@@ -245,7 +245,7 @@ profiles.mkTest {
         assert hint["token"]["user"] == "hinteros-p2", hint
         assert machine.succeed("stat -c '%a %U' /run/hinteros/switch.json").strip() == "600 root"
         # A token is bound to its user.
-        machine.fail("env PAM_USER=hinteros hinteros-system pin unlocked")
+        machine.fail("env PAM_USER=hinteros-p1 hinteros-system pin unlocked")
         machine.succeed(unlocked)
         machine.fail(unlocked)
         # Another one, expired.

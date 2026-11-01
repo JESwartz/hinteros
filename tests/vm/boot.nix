@@ -44,17 +44,17 @@
     machine.wait_for_unit("greetd.service")
 
     # Autologin: a login session for the session user exists.
-    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
+    machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
 
     # The compositor (cage in the VM, see nixos/vm/default.nix) runs as that user
     # and the launcher is up inside it.
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher")
 
     # Still up a few seconds later, i.e. not crash-looping.
     machine.sleep(duration=timedelta(seconds=5))
-    machine.succeed("pgrep -u hinteros -f '/bin/cage '")
-    machine.succeed("pgrep -u hinteros -f hinteros-launcher")
+    machine.succeed("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.succeed("pgrep -u hinteros-p1 -f hinteros-launcher")
 
     # The launcher draws its title; OCR must see it (retried until the timeout).
     machine.screenshot("session")
@@ -70,27 +70,27 @@
         assert bad.lower() not in screen.lower(), f"launcher shows a connection notice ({bad}): {screen}"
     machine.wait_until_succeeds(
         "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
-        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.18'"
+        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.21'"
     )
 
     # System service: socket in /run/hinteros, root:hinteros 0660, answers the API.
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
     assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
-    machine.succeed("id -nG hinteros | tr ' ' '\\n' | grep -qx hinteros")
-    assert rpc("/run/hinteros/system.sock", "0.10", as_user="hinteros") == "hinteros-system"
+    machine.succeed("id -nG hinteros-p1 | tr ' ' '\\n' | grep -qx hinteros")
+    assert rpc("/run/hinteros/system.sock", "0.12", as_user="hinteros-p1") == "hinteros-system"
 
     # Session daemon: user service of the session user, socket in its runtime dir, mode 0600.
-    uid = machine.succeed("id -u hinteros").strip()
+    uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
-    assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros"
-    assert rpc(sock, "0.18", as_user="hinteros") == "hinteros-session"
+    assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros-p1"
+    assert rpc(sock, "0.21", as_user="hinteros-p1") == "hinteros-session"
 
     # Steam is not installed in this VM: the daemon lists no built-in Steam tile.
     apps_call = {"jsonrpc": "2.0", "id": 3, "method": "apps.list", "params": {}}
-    payload = "".join(json.dumps(m) + "\n" for m in (hello_msg("0.18"), apps_call))
-    out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(f'(printf %s {shlex.quote(payload)}; sleep 1) | socat -t2 - UNIX-CONNECT:{sock}')}")
+    payload = "".join(json.dumps(m) + "\n" for m in (hello_msg("0.21"), apps_call))
+    out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(f'(printf %s {shlex.quote(payload)}; sleep 1) | socat -t2 - UNIX-CONNECT:{sock}')}")
     listed = next(r for r in map(json.loads, out.splitlines()) if r.get("id") == 3)
     assert "steam" not in [a["id"] for a in listed["result"]["apps"]], listed
   '';

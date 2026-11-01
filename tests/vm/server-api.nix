@@ -1,7 +1,7 @@
 # The Server section through the real chain (design/server.md, M10 build step 3; system API 0.11,
 # session API 0.19): the launcher's calls on p1's session daemon -> the relay -> hinteros-system
 # (seat0 owner, polkit `org.hinteros.system.services`, the admin PIN) -> job units -> the services.
-# Greeter mode; p1 = `hinteros` (James, admin, PIN 2468), p2 = `hinteros-p2` (Sam, PIN 1357),
+# Greeter mode; p1 = `hinteros-p1` (James, admin, PIN 2468), p2 = `hinteros-p2` (Sam, PIN 1357),
 # the guest on.
 #   - services.enable jellyfin-server: a wrong PIN is refused, the right one starts a job that
 #     switches to the system with Jellyfin and waits for its setup; services.list then shows it
@@ -107,7 +107,7 @@ profiles.mkTest {
   testScript = ''
     import base64
 
-    ENV = "HINTEROS_SESSION_API=0.19 HINTEROS_SYSTEM_API=0.11 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=0.21 HINTEROS_SYSTEM_API=0.12 PYTHONPATH=/etc/hinteros-test"
     API = "http://127.0.0.1:8096"
     S = "/var/lib/hinteros/services"
     PIN = "2468"
@@ -118,13 +118,13 @@ profiles.mkTest {
     MACHINE = machine.succeed("ip -4 -o addr show dev $(ip -4 route show default | awk '{print $5; exit}') | awk '{print $4}' | cut -d/ -f1").strip()
 
     def rev():
-        return sys_ok("hinteros", "settings.get")["revision"]
+        return sys_ok("hinteros-p1", "settings.get")["revision"]
 
     def services():
         # A switch restarts hinteros-system when its unit changes (loopback for the servers):
         # the session daemon's relay reconnects within seconds (system_unavailable until then).
         for _ in range(30):
-            r = sess("hinteros", "system.services.list")
+            r = sess("hinteros-p1", "system.services.list")
             if r.get("error", {}).get("code") != 3001:
                 break
             time.sleep(1)
@@ -133,12 +133,12 @@ profiles.mkTest {
 
     def job(method, params, timeout=600, state="succeeded"):
         for _ in range(5):
-            r = sess("hinteros", method, params)
+            r = sess("hinteros-p1", method, params)
             if r.get("error", {}).get("code") != 3005:
                 break
-            jobs_idle("hinteros")
+            jobs_idle("hinteros-p1")
         assert "result" in r and r["result"]["job_id"], (method, r)
-        done = wait_job("hinteros", r["result"]["job_id"], timeout)
+        done = wait_job("hinteros-p1", r["result"]["job_id"], timeout)
         assert done["state"] == state, (method, done)
         return done
 
@@ -155,8 +155,8 @@ profiles.mkTest {
             f"printf %s '{body}' | curl -fsS -X POST -H 'Content-Type: application/json' -H '{CLIENT_HDR}' "
             f"--data-binary @- {API}/Users/AuthenticateByName | jq -er .User.Id").strip()
 
-    enter("p1", "hinteros")
-    jobs_idle("hinteros")
+    enter("p1", "hinteros-p1")
+    jobs_idle("hinteros-p1")
 
     with subtest("services.list before: the catalog's services, all off"):
         s = services()
@@ -168,11 +168,11 @@ profiles.mkTest {
 
     with subtest("services.enable jellyfin-server: the admin PIN, a job, the setup"):
         for pin in ("0000", "1357"):
-            r = sess("hinteros", "system.services.enable", {"ids": ["jellyfin-server"], "pin": pin, "revision": rev()})
+            r = sess("hinteros-p1", "system.services.enable", {"ids": ["jellyfin-server"], "pin": pin, "revision": rev()})
             assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
-        r = sess("hinteros", "system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": "0" * 64})
+        r = sess("hinteros-p1", "system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": "0" * 64})
         assert r["error"]["code"] == 3007, r
-        r = sess("hinteros", "system.services.enable", {"ids": ["jellyfin"], "pin": PIN, "revision": rev()})
+        r = sess("hinteros-p1", "system.services.enable", {"ids": ["jellyfin"], "pin": PIN, "revision": rev()})
         assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "not_a_service", r
         stub_build(systems["jf"])
         done = job("system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": rev()}, timeout=900)
@@ -195,7 +195,7 @@ profiles.mkTest {
         assert not names["James"]["Policy"]["IsAdministrator"], names["James"]
         assert machine.succeed(f"stat -c '%a %U' {S}/jellyfin-server/users.json").strip() == "600 root"
         # A second enable is nothing to do.
-        r = sess_ok("hinteros", "system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": rev()})
+        r = sess_ok("hinteros-p1", "system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": rev()})
         assert r == {"job_id": None}, r
 
     with subtest("media.folders: /srv/media's folders, no hidden ones, no way out"):
@@ -204,25 +204,25 @@ profiles.mkTest {
             "ln -s /root/secret /srv/media/Escape && ln -s /etc /srv/media/Movies/etc && "
             "echo film > /srv/media/Movies/a.mkv && chgrp -R hinteros-media /srv/media"
         )
-        r = sess_ok("hinteros", "system.media.folders")
+        r = sess_ok("hinteros-p1", "system.media.folders")
         print(r)
         ids = [f["id"] for f in r["folders"]]
         assert ids == ["Movies", "Shows"], r
-        r = sess_ok("hinteros", "system.media.folders", {"folder_id": "Movies"})
+        r = sess_ok("hinteros-p1", "system.media.folders", {"folder_id": "Movies"})
         assert [f["id"] for f in r["folders"]] == ["Movies/HD"], r
         for bad in ("..", "../etc", "Movies/..", "/etc", ".hidden"):
-            r = sess("hinteros", "system.media.folders", {"folder_id": bad})
+            r = sess("hinteros-p1", "system.media.folders", {"folder_id": bad})
             assert r["error"]["code"] == -32602, (bad, r)
         for out in ("Escape", "Movies/etc", "Nope"):
-            r = sess("hinteros", "system.media.folders", {"folder_id": out})
+            r = sess("hinteros-p1", "system.media.folders", {"folder_id": out})
             assert r["error"]["code"] == 3010, (out, r)
-            r = sess("hinteros", "system.jellyfin.libraries.add", {"pin": PIN, "name": "X", "kind": "movies", "folder": out})
+            r = sess("hinteros-p1", "system.jellyfin.libraries.add", {"pin": PIN, "name": "X", "kind": "movies", "folder": out})
             assert r["error"]["code"] == 3010, (out, r)
-        r = sess("hinteros", "system.jellyfin.libraries.add", {"pin": PIN, "name": "X", "kind": "movies", "folder": "../etc"})
+        r = sess("hinteros-p1", "system.jellyfin.libraries.add", {"pin": PIN, "name": "X", "kind": "movies", "folder": "../etc"})
         assert r["error"]["code"] == -32602, r
 
     with subtest("jellyfin.libraries.add and remove"):
-        r = sess("hinteros", "system.jellyfin.libraries.add", {"pin": "1357", "name": "Films", "kind": "movies", "folder": "Movies"})
+        r = sess("hinteros-p1", "system.jellyfin.libraries.add", {"pin": "1357", "name": "Films", "kind": "movies", "folder": "Movies"})
         assert r["error"]["code"] == 3016, r
         done = job("system.jellyfin.libraries.add", {"pin": PIN, "name": "Films", "kind": "movies", "folder": "Movies"})
         assert done["kind"] == "jellyfin_library_add", done
@@ -231,9 +231,9 @@ profiles.mkTest {
         vf = {f["Name"]: f for f in jf_get("/Library/VirtualFolders")}
         assert vf["Films"]["Locations"] == ["/srv/media/Movies"] and vf["Films"]["CollectionType"] == "movies", vf
         assert vf["Films"]["ItemId"] == libs[0]["id"], (vf, libs)
-        r = sess("hinteros", "system.jellyfin.libraries.add", {"pin": PIN, "name": "films", "kind": "shows", "folder": "Shows"})
+        r = sess("hinteros-p1", "system.jellyfin.libraries.add", {"pin": PIN, "name": "films", "kind": "shows", "folder": "Shows"})
         assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "exists", r
-        r = sess("hinteros", "system.jellyfin.libraries.remove", {"pin": PIN, "library_id": "0" * 32})
+        r = sess("hinteros-p1", "system.jellyfin.libraries.remove", {"pin": PIN, "library_id": "0" * 32})
         assert r["error"]["code"] == 3010, r
         job("system.jellyfin.libraries.remove", {"pin": PIN, "library_id": libs[0]["id"]})
         assert services()["jellyfin-server"]["detail"]["libraries"] == []
@@ -241,9 +241,9 @@ profiles.mkTest {
         machine.succeed("test -f /srv/media/Movies/a.mkv")
 
     with subtest("jellyfin.users.reveal: admin PIN only, the passwords sign in"):
-        r = sess("hinteros", "system.jellyfin.users.reveal", {"pin": "0000"})
+        r = sess("hinteros-p1", "system.jellyfin.users.reveal", {"pin": "0000"})
         assert r["error"]["code"] == 3016, r
-        r = sess_ok("hinteros", "system.jellyfin.users.reveal", {"pin": PIN})
+        r = sess_ok("hinteros-p1", "system.jellyfin.users.reveal", {"pin": PIN})
         assert r["admin"]["name"] == "admin", r["admin"]["name"]
         jf_login("admin", r["admin"]["password"])
         accounts = {u["profile_id"]: u for u in r["users"]}
@@ -259,7 +259,7 @@ profiles.mkTest {
 
     with subtest("jellyfin.client_token: the caller's own user only"):
         tokens = {}
-        for p, user in (("p1", "hinteros"), ("p2", "hinteros-p2")):
+        for p, user in (("p1", "hinteros-p1"), ("p2", "hinteros-p2")):
             t = sys_ok(user, "jellyfin.client_token")
             assert t["user_id"] == ids[p] and t["device_id"] == f"hinteros-{p}", (p, t)
             assert t["server_id"] == jf_get("/System/Info")["Id"], t
@@ -268,7 +268,7 @@ profiles.mkTest {
             tokens[p] = t
         assert tokens["p1"]["access_token"] != tokens["p2"]["access_token"]
         # Through the relay too; the same live token (one per device).
-        t = sess_ok("hinteros", "system.jellyfin.client_token")
+        t = sess_ok("hinteros-p1", "system.jellyfin.client_token")
         assert t["user_id"] == ids["p1"], t
         jf_get("/Users/Me", t["access_token"])
         devices = [d["Id"] for d in jf_get("/Devices")["Items"]]
@@ -276,7 +276,7 @@ profiles.mkTest {
         for user in ("hinteros-guest", "root"):
             e = sys_err(user, "jellyfin.client_token", {}, 3002)
             assert e["data"]["reason"] == "profile", (user, e)
-        r = sysrpc("hinteros", "jellyfin.client_token", {"profile_id": "p2"})
+        r = sysrpc("hinteros-p1", "jellyfin.client_token", {"profile_id": "p2"})
         assert r["error"]["code"] == -32602, r
         machine.fail(f"journalctl --no-pager | grep -qF -- '{tokens['p1']['access_token']}'")
 
@@ -304,8 +304,8 @@ profiles.mkTest {
     with subtest("a new profile gets its Jellyfin user"):
         stub_build(systems["jf-p3"])
         # Back to 12.1 on the way: the backup is replaced.
-        r = sess_ok("hinteros", "system.profiles.create", {"name": "Alex", "pin": "4444", "locked": False, "revision": rev()})
-        done = wait_job("hinteros", r["job_id"])
+        r = sess_ok("hinteros-p1", "system.profiles.create", {"name": "Alex", "pin": "4444", "locked": False, "revision": rev()})
+        done = wait_job("hinteros-p1", r["job_id"])
         assert done["state"] == "succeeded", done
         machine.wait_until_succeeds(f"curl -fsS -H 'Authorization: MediaBrowser Token=\"{api_key()}\"' {API}/Users | jq -e 'map(.Name) | index(\"Alex\")'", timeout=60)
         users = {u["profile_id"]: u["jellyfin_user"] for u in services()["jellyfin-server"]["detail"]["users"]}
@@ -318,7 +318,7 @@ profiles.mkTest {
     with subtest("services.disable with delete_data: Jellyfin's data and the firewall rule are gone"):
         machine.succeed("test -d /var/lib/jellyfin/data && test -d /var/cache/jellyfin")
         assert "tcp dport 8096 accept" in machine.succeed("nft list ruleset")
-        r = sess("hinteros", "system.services.disable", {"ids": ["jellyfin-server"], "pin": "1357", "revision": rev(), "delete_data": True})
+        r = sess("hinteros-p1", "system.services.disable", {"ids": ["jellyfin-server"], "pin": "1357", "revision": rev(), "delete_data": True})
         assert r["error"]["code"] == 3016, r
         stub_build(systems["p3"])
         done = job("system.services.disable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": rev(), "delete_data": True})
@@ -332,13 +332,13 @@ profiles.mkTest {
         assert j["enabled"] is False and j["detail"] is None, j
         assert state_json()["services"] == [], state_json()
         machine.succeed("test -f /srv/media/Movies/a.mkv")
-        r = sess("hinteros", "system.jellyfin.users.reveal", {"pin": PIN})
+        r = sess("hinteros-p1", "system.jellyfin.users.reveal", {"pin": PIN})
         assert r["error"]["code"] == 4001 and r["error"]["data"] == {"service": "jellyfin", "reason": "off"}, r
 
     with subtest("Plex, Tailscale, Cloudflare Tunnel: one enable, Plex's terms"):
         net = ["cloudflare-tunnel", "tailscale", "plex-media-server"]
         p = {"ids": net, "pin": PIN, "revision": rev()}
-        r = sess("hinteros", "system.services.enable", p)
+        r = sess("hinteros-p1", "system.services.enable", p)
         assert r["error"]["code"] == 3014 and r["error"]["data"] == {"id": "plex-media-server", "version": "2025-10-30"}, r
         stub_build(systems["net"])
         job("system.services.enable", {**p, "accepted_terms": {"plex-media-server": "2025-10-30"}})
@@ -359,7 +359,7 @@ profiles.mkTest {
 
     with subtest("Plex: Preferences.xml, the claim code's format"):
         for code in ("claim-short", "nope-AbCdEfGhIjKlMnOpQrSt", "claim-AbCdEfGhIjKlMnOpQr;t"):
-            r = sess("hinteros", "system.plex.claim", {"pin": PIN, "code": code})
+            r = sess("hinteros-p1", "system.plex.claim", {"pin": PIN, "code": code})
             assert r["error"]["code"] == -32602, (code, r)
         prefs = "/var/lib/plex/Plex Media Server/Preferences.xml"
         machine.succeed(
@@ -371,7 +371,7 @@ profiles.mkTest {
         assert d["claimed"] is True and d["server_name"] == "Box", d
         assert "secret-plex-token" not in json.dumps(services())
         # Linked already: nothing to do.
-        assert sess_ok("hinteros", "system.plex.claim", {"pin": PIN, "code": "claim-AbCdEfGhIjKlMnOpQrSt"}) == {"job_id": None}
+        assert sess_ok("hinteros-p1", "system.plex.claim", {"pin": PIN, "code": "claim-AbCdEfGhIjKlMnOpQrSt"}) == {"job_id": None}
 
     with subtest("Cloudflare: token checked, written 0600, the unit started; cleared"):
         tok = "/var/lib/hinteros/services/cloudflare-tunnel/token"
@@ -388,7 +388,7 @@ profiles.mkTest {
             good + "\n",
         ]
         for t in bad:
-            r = sess("hinteros", "system.cloudflare.set_token", {"pin": PIN, "token": t})
+            r = sess("hinteros-p1", "system.cloudflare.set_token", {"pin": PIN, "token": t})
             assert r["error"]["code"] == -32602, (t, r)
         machine.fail(f"test -e {tok}")
         # No internet: cloudflared runs but never connects; the job says so.
@@ -405,15 +405,15 @@ profiles.mkTest {
         machine.fail(f"test -e {tok}")
         machine.fail("systemctl is-active hinteros-cloudflared.service")
         assert services()["cloudflare-tunnel"]["detail"]["token_set"] is False
-        assert sess_ok("hinteros", "system.cloudflare.clear_token", {"pin": PIN}) == {"job_id": None}
+        assert sess_ok("hinteros-p1", "system.cloudflare.clear_token", {"pin": PIN}) == {"job_id": None}
 
     with subtest("Tailscale: sign-in without internet fails cleanly"):
-        r = sess_ok("hinteros", "system.tailscale.login", {"pin": PIN})
+        r = sess_ok("hinteros-p1", "system.tailscale.login", {"pin": PIN})
         jid = r["job_id"]
         seen = set()
         urls = set()
         for _ in range(120):
-            jj = sys_ok("hinteros", "jobs.get", {"job_id": jid})["job"]
+            jj = sys_ok("hinteros-p1", "jobs.get", {"job_id": jid})["job"]
             seen.add(jj["stage"])
             if jj.get("detail") and jj["detail"].get("auth_url"):
                 urls.add(jj["detail"]["auth_url"])
@@ -427,6 +427,6 @@ profiles.mkTest {
         assert services()["tailscale"]["detail"]["state"] == "needs_login"
         machine.fail("pgrep -x tailscale")
         # Signed out already: nothing to do.
-        assert sess_ok("hinteros", "system.tailscale.logout", {"pin": PIN}) == {"job_id": None}
+        assert sess_ok("hinteros-p1", "system.tailscale.logout", {"pin": PIN}) == {"job_id": None}
   '';
 }

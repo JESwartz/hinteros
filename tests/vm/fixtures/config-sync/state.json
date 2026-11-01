@@ -1,1 +1,1 @@
-{"schemaVersion":1,"settings":{"hostname":"snapshot"}}
+{"schemaVersion":2,"base":"unstable","stateVersion":"25.11","settings":{"hostname":"snapshot"},"profiles":[{"id":"p1"}],"requirements":[],"services":[]}

@@ -1,1 +1,0 @@
-{"schemaVersion":2,"base":"unstable","settings":{"ssh":{"enable":false},"guest":{"enable":true}},"profiles":[{"id":"p1","user":"hinteros"}],"requirements":[],"services":[]}

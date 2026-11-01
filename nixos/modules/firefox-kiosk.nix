@@ -9,7 +9,7 @@
 #     (the nixpkgs wrapper points Firefox at its own lib/mozilla only), and `mkWrapper pkgs`, the
 #     `hinteros-firefox-kiosk` wrapper around it (a profile per app, see
 #     nixos/pkgs/firefox-kiosk.nix). app-env.nix passes `mkWrapper <env pkgs>` to the catalog as
-#     `box.firefoxKiosk`; box-wide (schema 1) apps use `wrapper` (= `mkWrapper pkgs`).
+#     `box.firefoxKiosk`; box-wide apps (test VMs) use `wrapper` (= `mkWrapper pkgs`).
 {
   config,
   lib,
