@@ -116,11 +116,11 @@
     # Session API 0.18 over the socket.
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.21", "client": {"name": "gamescope-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "gamescope-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         out = machine.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"))
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
-        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.21", replies[0]
+        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "1.0", replies[0]
         return replies
 
     def call(method, params=None, wait=2):
@@ -151,7 +151,7 @@
     # A long-lived subscriber, so events can be checked after the fact.
     sub = [
         {"jsonrpc": "2.0", "id": 0, "method": "hello",
-         "params": {"api_version": "0.21", "client": {"name": "gamescope-test-events", "version": "0"}}},
+         "params": {"api_version": "1.0", "client": {"name": "gamescope-test-events", "version": "0"}}},
         {"jsonrpc": "2.0", "id": 1, "method": "subscribe",
          "params": {"events": ["app_started", "app_exited", "focus_changed", "steam_attention", "home_pressed"]}},
     ]

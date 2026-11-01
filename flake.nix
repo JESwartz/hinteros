@@ -12,7 +12,7 @@
     # Component repos. Their packages come in through their overlays (see overlays.default).
     # scripts/dev-override picks these up by input name.
     hinteros-launcher = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git";
+      url = "git+https://git.hinteros.org/hinteros-launcher.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -21,7 +21,7 @@
       };
     };
     hinteros-daemon = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git";
+      url = "git+https://git.hinteros.org/hinteros-daemon.git?ref=pre-1.0";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -30,7 +30,7 @@
     # The App Store catalog (design/catalog.md): app entries, Store index and vendor terms, locked
     # per release like the other inputs.
     hinteros-catalog = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git";
+      url = "git+https://git.hinteros.org/hinteros-catalog.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";

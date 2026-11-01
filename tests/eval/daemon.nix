@@ -403,7 +403,7 @@ pkgs.runCommand "hinteros-daemon-eval"
     if [ -n "$failures" ]; then echo "$failures" >&2; exit 1; fi
     cd $share/share
     [ "$(jq -c . hinteros/release.json)" = "{\"dev\":false,\"version\":\"$releaseVersion\"}" ]
-    [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://justsomeshed.com/JSwartz/HinterOS/hinteros.git"}' ]
+    [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://git.hinteros.org/hinteros.git"}' ]
     # The vendor's release and backup keys (release/allowed_signers, through release.nix), namespace pinned,
     # and nothing else.
     [ "$(grep -v '^#' hinteros/update/allowed_signers | grep -c .)" = 2 ]

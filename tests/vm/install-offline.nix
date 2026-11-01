@@ -330,7 +330,7 @@ in
         assert target.succeed("hostname").strip() == "livingroom"
         # The flake: the channel ref and the repo; hinteros is pinned to the ISO's revision.
         flake = target.succeed("cat /etc/hinteros/flake.nix")
-        assert 'git+https://justsomeshed.com/JSwartz/HinterOS/hinteros.git?ref=stable' in flake, flake
+        assert 'git+https://git.hinteros.org/hinteros.git?ref=stable' in flake, flake
         # The input line is exactly what channels.json says (channel.set rewrites that one string).
         channels = json.loads(target.succeed("cat /run/current-system/sw/share/hinteros/update/channels.json"))
         assert f'inputs.hinteros.url = "git+{channels["repo"]}?ref={channels["branches"]["stable"]}";' in flake, (flake, channels)
@@ -348,7 +348,7 @@ in
 
     with subtest("the privileged service answers (system API 0.10) and knows its channel"):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.12", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "install-test", "version": "0"}}}
         info = {"jsonrpc": "2.0", "id": 1, "method": "system.info", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, info))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:/run/hinteros/system.sock"

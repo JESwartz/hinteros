@@ -195,7 +195,7 @@ in
     update = {
       repo = lib.mkOption {
         type = lib.types.str;
-        default = "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git";
+        default = "https://git.hinteros.org/hinteros.git";
         description = ''
           The system repo that updates and channel switches fetch, as shipped in
           `share/hinteros/update/channels.json`. The device flake's input line

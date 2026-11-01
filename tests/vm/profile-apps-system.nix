@@ -165,7 +165,7 @@ in
 
         def rpc(*msgs, wait=2):
             hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                     "params": {"api_version": "0.21", "client": {"name": "trust-test", "version": "0"}}}
+                     "params": {"api_version": "1.0", "client": {"name": "trust-test", "version": "0"}}}
             payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
             cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
             out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")

@@ -54,14 +54,14 @@
     def rpc(method, params=None, wait=3):
         msgs = [
             {"jsonrpc": "2.0", "id": 0, "method": "hello",
-             "params": {"api_version": "0.21", "client": {"name": "runtime-settings-test", "version": "0"}}},
+             "params": {"api_version": "1.0", "client": {"name": "runtime-settings-test", "version": "0"}}},
             {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}},
         ]
         payload = "".join(json.dumps(m) + "\n" for m in msgs)
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
         out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
-        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.21", replies[0]
+        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "1.0", replies[0]
         return next(r for r in replies if r.get("id") == 1)
 
     def poll(method, good, params=None, timeout=60):

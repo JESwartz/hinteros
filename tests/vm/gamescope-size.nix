@@ -193,7 +193,7 @@ in
 
         # An X11 app the daemon starts (on the apps' Xwayland, :2) gets the output size too.
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.21", "client": {"name": "gamescope-size-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "gamescope-size-test", "version": "0"}}}
         launch = {"jsonrpc": "2.0", "id": 1, "method": "apps.launch", "params": {"id": "appfill"}}
         payload = "".join(json.dumps(x) + "\n" for x in (hello, launch))
         out = m.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep 3) | socat -t3 - UNIX-CONNECT:{sock}"))

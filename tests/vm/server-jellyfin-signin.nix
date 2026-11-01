@@ -51,7 +51,7 @@ profiles.mkTest {
   testScript = ''
     import shlex
 
-    ENV = "HINTEROS_SESSION_API=0.21 HINTEROS_SYSTEM_API=0.12 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=1.0 HINTEROS_SYSTEM_API=1.0 PYTHONPATH=/etc/hinteros-test"
     API = "http://127.0.0.1:8096"
     S = "/var/lib/hinteros/services/jellyfin-server"
     BASE = "/home/hinteros-p1/.local/share/hinteros/sandbox/jellyfin/.local/share/jellyfin-desktop"

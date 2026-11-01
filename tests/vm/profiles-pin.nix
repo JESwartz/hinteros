@@ -106,21 +106,21 @@ profiles.mkTest {
     with subtest("the picker: three free tries, then a doubling wait"):
         for _ in range(3):
             o = try_pin("p2", "0000")
-            assert o["ok"] is False and not o.get("locked_seconds"), o
+            assert o["ok"] is False and not o.get("locked_s"), o
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o.get("locked_seconds") == 1, o
+        assert o["ok"] is False and o.get("locked_s") == 1, o
         wait_unlocked("p2")
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 2, o
+        assert o["ok"] is False and o["locked_s"] == 2, o
         wait_unlocked("p2")
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 4, o
+        assert o["ok"] is False and o["locked_s"] == 4, o
         wait_unlocked("p2")
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 8, o
+        assert o["ok"] is False and o["locked_s"] == 8, o
         # During the lock even the right PIN is refused, with the time left.
         o = try_pin("p2", "1357")
-        assert o["ok"] is False and 0 < o["locked_seconds"] <= 8, o
+        assert o["ok"] is False and 0 < o["locked_s"] <= 8, o
         # profiles.list shows the wait; the admin profile never has one. (The public view, which
         # the picker reads, is not republished after a failure in PAM: a daemon gap, see the
         # M7 VM test report. The picker has the wait from greeter_result.)
@@ -138,7 +138,7 @@ profiles.mkTest {
         wait_unlocked("p2")
         # The eighth failure doubles again (16 s), it does not start over at 1 s.
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 16, o
+        assert o["ok"] is False and o["locked_s"] == 16, o
         wait_unlocked("p2")
         g = greeter("p2", "1357")
         assert g["outcomes"][-1]["ok"] is True, g

@@ -34,7 +34,7 @@
   appsJson,
   catalogIndex,
   stateVersion,
-  repoUrl ? "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git",
+  repoUrl ? "https://git.hinteros.org/hinteros.git",
   isoRev ? "unknown",
   # The release version of that revision (its release/version), shown next to a newer one.
   isoVersion ? "0.0.0",

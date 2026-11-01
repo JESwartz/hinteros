@@ -164,7 +164,7 @@ c = Conn(hello=False)
 r = c.call("hello", {"api_version": "9.0", "client": {"name": "x", "version": "0"}})
 assert r["error"], r
 c = Conn(hello=False)
-r = c.call("hello", {"api_version": "0.12", "client": {"name": "x", "version": "0"}, "uid": 0})
+r = c.call("hello", {"api_version": "1.0", "client": {"name": "x", "version": "0"}, "uid": 0})
 # NOTE: the daemon (e0f95a2) accepts unknown fields in hello (the schema says closed); the extra
 # field is ignored, never used as an identity. Recorded, not asserted.
 print("hello with an extra field ->", "error" if "error" in r else "accepted, ignored")
@@ -250,7 +250,7 @@ for _ in range(40):
 served = 0
 for h in held:
     try:
-        r = h.call("hello", {"api_version": "0.12", "client": {"name": "flood", "version": "0"}})
+        r = h.call("hello", {"api_version": "1.0", "client": {"name": "flood", "version": "0"}})
         served += 1 if r and "result" in r else 0
     except (OSError, socket.timeout):
         pass

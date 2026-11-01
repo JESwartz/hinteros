@@ -111,8 +111,8 @@ profiles.mkTest {
     with subtest("time_zone.get and time_zone.list"):
         info = sys_ok("hinteros-p2", "time_zone.get")
         assert info["zone"] == "America/Chicago", info
-        assert info["standard_offset_seconds"] == -6 * 3600, info
-        assert info["offset_seconds"] in (-6 * 3600, -5 * 3600), info
+        assert info["standard_offset_s"] == -6 * 3600, info
+        assert info["offset_s"] in (-6 * 3600, -5 * 3600), info
         assert isinstance(info["offset_valid_until"], int), info  # Chicago has DST
         assert sess_ok("hinteros-p2", "system.time_zone.get") == info
         zones = sys_ok("hinteros-p2", "time_zone.list")["zones"]
@@ -121,7 +121,7 @@ profiles.mkTest {
         for z in ("UTC", "Europe/Berlin", "Asia/Tokyo", "America/Chicago"):
             assert z in names, z
         tokyo = next(z for z in zones if z["zone"] == "Asia/Tokyo")
-        assert tokyo["offset_seconds"] == tokyo["standard_offset_seconds"] == 9 * 3600, tokyo
+        assert tokyo["offset_s"] == tokyo["standard_offset_s"] == 9 * 3600, tokyo
 
     before = (link(), machine.succeed("sha256sum /etc/hinteros/state.json"))
 
@@ -144,7 +144,7 @@ profiles.mkTest {
         gens = system_generations()
         info = sess_ok("hinteros-p2", "system.time_zone.set", {"zone": "Europe/London", "admin_pin": "2468"})
         assert info["zone"] == "Europe/London", info
-        assert info["standard_offset_seconds"] == 0 and isinstance(info["offset_valid_until"], int), info
+        assert info["standard_offset_s"] == 0 and isinstance(info["offset_valid_until"], int), info
         assert zone_of_link() == "Europe/London", link()
         assert tz_state() == "Europe/London", state_json()
         assert date("%Z") in ("GMT", "BST"), date("%Z")
@@ -176,7 +176,7 @@ profiles.mkTest {
         # Same service process, after the swap: the helper writes the new /etc/hinteros.
         info = sess_ok("hinteros-p2", "system.time_zone.set", {"zone": "Asia/Tokyo", "admin_pin": "2468"})
         assert info["zone"] == "Asia/Tokyo", info
-        assert info["offset_seconds"] == info["standard_offset_seconds"] == 9 * 3600, info
+        assert info["offset_s"] == info["standard_offset_s"] == 9 * 3600, info
         assert info["offset_valid_until"] is None, info  # no DST in Japan
         assert zone_of_link() == "Asia/Tokyo", link()
         assert tz_state() == "Asia/Tokyo", state_json()

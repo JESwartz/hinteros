@@ -112,7 +112,7 @@ in
 
     def hello():
         return {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                "params": {"api_version": "0.21", "client": {"name": "pad-test", "version": "0"}}}
+                "params": {"api_version": "1.0", "client": {"name": "pad-test", "version": "0"}}}
 
     def ok(method, params=None):
         msgs = [hello(), {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}]

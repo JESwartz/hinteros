@@ -4,7 +4,7 @@
 #   - The picker asks a locked profile for its PIN (a wrong one is refused) and opens an unlocked
 #     one without asking.
 #   - Sleep: the session daemon holds a logind sleep delay inhibitor. On logind's
-#     PrepareForSleep(true) a locked profile's session locks (`lock_state {locked: true}`,
+#     PrepareForSleep(true) a locked profile's session locks (`lock_changed {locked: true}`,
 #     `profile.current.screen_locked`), and stays locked after resume (PrepareForSleep(false)),
 #     with the inhibitor taken again for the next sleep. A wrong PIN is refused (the shared
 #     backoff applies: the fourth failure waits), the right one unlocks. An unlocked profile is
@@ -61,14 +61,14 @@ profiles.mkTest {
         return [l for l in out.splitlines() if "HinterOS" in l and user in l.split() and "sleep" in l and "delay" in l]
 
     def start_watch(user, path):
-        # The launcher's connection: lock_state events, appended to `path`.
+        # The launcher's connection: lock_changed events, appended to `path`.
         machine.succeed(f"runuser -u {user} -- touch {path}")
         machine.succeed(
             f"(runuser -u {user} -- env {ENV} HINTEROS_SESSION_SOCK={sock(user)} python3 -c '"
             "import json, sys; from session import Session; s = Session(); s.s.settimeout(None); "
-            "s.call(\"subscribe\", {\"events\": [\"lock_state\"]}); out = open(sys.argv[1], \"a\", buffering=1); "
+            "s.call(\"subscribe\", {\"events\": [\"lock_changed\"]}); out = open(sys.argv[1], \"a\", buffering=1); "
             "out.write(\"subscribed\\n\")\n"
-            "while True: out.write(json.dumps(s.event(\"lock_state\", timeout=100000)) + \"\\n\")' "
+            "while True: out.write(json.dumps(s.event(\"lock_changed\", timeout=100000)) + \"\\n\")' "
             f"{path} >/dev/null 2>&1 &)"
         )
         machine.wait_until_succeeds(f"grep -q subscribed {path}", timeout=60)

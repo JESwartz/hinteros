@@ -70,7 +70,7 @@
         assert bad.lower() not in screen.lower(), f"launcher shows a connection notice ({bad}): {screen}"
     machine.wait_until_succeeds(
         "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
-        "| grep -E 'handshake done client=hinteros-launcher .*api_version=0.21'"
+        "| grep -E 'handshake done client=hinteros-launcher .*api_version=1.0'"
     )
 
     # System service: socket in /run/hinteros, root:hinteros 0660, answers the API.
@@ -78,18 +78,18 @@
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
     assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
     machine.succeed("id -nG hinteros-p1 | tr ' ' '\\n' | grep -qx hinteros")
-    assert rpc("/run/hinteros/system.sock", "0.12", as_user="hinteros-p1") == "hinteros-system"
+    assert rpc("/run/hinteros/system.sock", "1.0", as_user="hinteros-p1") == "hinteros-system"
 
     # Session daemon: user service of the session user, socket in its runtime dir, mode 0600.
     uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     assert machine.succeed(f"stat -c '%a %U' {sock}").strip() == "600 hinteros-p1"
-    assert rpc(sock, "0.21", as_user="hinteros-p1") == "hinteros-session"
+    assert rpc(sock, "1.0", as_user="hinteros-p1") == "hinteros-session"
 
     # Steam is not installed in this VM: the daemon lists no built-in Steam tile.
     apps_call = {"jsonrpc": "2.0", "id": 3, "method": "apps.list", "params": {}}
-    payload = "".join(json.dumps(m) + "\n" for m in (hello_msg("0.21"), apps_call))
+    payload = "".join(json.dumps(m) + "\n" for m in (hello_msg("1.0"), apps_call))
     out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(f'(printf %s {shlex.quote(payload)}; sleep 1) | socat -t2 - UNIX-CONNECT:{sock}')}")
     listed = next(r for r in map(json.loads, out.splitlines()) if r.get("id") == 3)
     assert "steam" not in [a["id"] for a in listed["result"]["apps"]], listed

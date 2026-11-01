@@ -98,7 +98,7 @@ in
   testScript = ''
     import json
 
-    ENV = "HINTEROS_SESSION_API=0.21 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=1.0 PYTHONPATH=/etc/hinteros-test"
 
     def sock(user):
         uid = machine.succeed(f"id -u {user}").strip()
@@ -223,7 +223,7 @@ in
         assert [p["locked"] for p in g["list"]["profiles"]] == [True, False], g
         assert len(g["outcomes"]) == 6, g
         for o in g["outcomes"][:5]:
-            assert o["ok"] is False and not o.get("locked_seconds"), g
+            assert o["ok"] is False and not o.get("locked_s"), g
         assert g["outcomes"][5]["ok"] is True, g
         session_of("hinteros-p1")
         assert_splash("Loading James…", before, painted)

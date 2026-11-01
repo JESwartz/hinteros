@@ -64,15 +64,15 @@
       "locked": {
         "lastModified": 1792984458,
         "narHash": "sha256-Uic5yMFwOor8o7JVEdvGyphM/4d7jkHqVjtE0lurxv8=",
-        "ref": "main",
+        "ref": "refs/heads/main",
         "rev": "929f2599c2271b5df5fce3d7fd587476b5860ab6",
         "revCount": 42,
         "type": "git",
-        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git"
+        "url": "https://git.hinteros.org/hinteros-catalog.git"
       },
       "original": {
         "type": "git",
-        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git"
+        "url": "https://git.hinteros.org/hinteros-catalog.git"
       }
     },
     "hinteros-daemon": {
@@ -86,17 +86,18 @@
         ]
       },
       "locked": {
-        "lastModified": 1793538262,
-        "narHash": "sha256-8GgpU9Io7fuQVljM19HkpN/nawP9RkFgcFmhrepsicg=",
-        "ref": "main",
-        "rev": "552a737c6a1e2d010b1fb9c86ba3fb6c88f837ce",
-        "revCount": 193,
+        "lastModified": 1793574160,
+        "narHash": "sha256-eTS5Yo+whY3G4JBGIzrrLHgzaiVU3gGQxDaMl3R3XeE=",
+        "ref": "pre-1.0",
+        "rev": "f7c1f1ad60b96d8a075e222222842a44c1201870",
+        "revCount": 201,
         "type": "git",
-        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git"
+        "url": "https://git.hinteros.org/hinteros-daemon.git"
       },
       "original": {
+        "ref": "pre-1.0",
         "type": "git",
-        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git"
+        "url": "https://git.hinteros.org/hinteros-daemon.git"
       }
     },
     "hinteros-launcher": {
@@ -114,15 +115,15 @@
       "locked": {
         "lastModified": 1793539105,
         "narHash": "sha256-U8Y67XFGwCNEUcyqglEFK1ojY/PypauTP75cLPNGqog=",
-        "ref": "main",
+        "ref": "refs/heads/main",
         "rev": "30c6279f7253b1faf4a7beb3d6212589b5afc98a",
         "revCount": 217,
         "type": "git",
-        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git"
+        "url": "https://git.hinteros.org/hinteros-launcher.git"
       },
       "original": {
         "type": "git",
-        "url": "https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git"
+        "url": "https://git.hinteros.org/hinteros-launcher.git"
       }
     },
     "nixpkgs": {

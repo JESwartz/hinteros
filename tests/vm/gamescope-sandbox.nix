@@ -169,7 +169,7 @@ in
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.21", "client": {"name": "gamescope-sandbox-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "gamescope-sandbox-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         out = machine.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"))
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
