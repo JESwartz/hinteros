@@ -104,6 +104,9 @@
         # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
         mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
 
+        # What a device flake outputs, given its config dir; see nixos/lib/device-outputs.nix.
+        deviceOutputs = import ./nixos/lib/device-outputs.nix { inherit self; };
+
         # Checked-in devices as functions of their state (mkDevice `selfFlake`).
         devices.devbox = import ./devices/devbox { inherit self; };
       };

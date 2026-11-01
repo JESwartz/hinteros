@@ -484,6 +484,35 @@ let
       expr = lib.hasInfix "unsupported disk.layout" (failures (good // { disk.layout = "zfs"; }));
       expected = true;
     };
+    # The device flake's outputs (nixos/lib/device-outputs.nix): the report unless deferred, an
+    # optional extra.nix, the config dir as the snapshot.
+    testDeviceOutputs =
+      let
+        out = d: (self.lib.deviceOutputs d).nixosConfigurations.hinteros.config;
+        full = ./fixtures/device-outputs;
+        deferred = ./fixtures/device-outputs-deferred;
+        bare = ../vm/fixtures/config-sync;
+      in
+      {
+        expr = [
+          (out full).networking.hostName
+          ((out full).hardware.facter.reportPath == full + "/facter.json")
+          (out full).hinteros.deviceConfig.configDir
+          (out full).hinteros.maintenance.keepGenerations
+          (out deferred).hardware.facter.reportPath
+          (out bare).hardware.facter.reportPath
+          (out bare).hinteros.maintenance.keepGenerations
+        ];
+        expected = [
+          "fixture"
+          true
+          full
+          3
+          null
+          null
+          5
+        ];
+      };
     testFacterReportPath = {
       expr =
         (self.lib.mkDevice {

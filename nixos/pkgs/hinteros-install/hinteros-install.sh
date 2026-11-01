@@ -729,7 +729,7 @@ if [ "$newer" -eq 1 ]; then
   staged=$(mktemp -d)
   tmp_dirs+=("$staged")
   install -d "$staged/flake"
-  sed -e "s|%CHANNEL%|$channel|g" -e "s|%REPO%|$REPO_URL|g" -e "s|%EXTRA%||g" "$TEMPLATE" >"$staged/flake/flake.nix"
+  sed -e "s|%CHANNEL%|$channel|g" -e "s|%REPO%|$REPO_URL|g" "$TEMPLATE" >"$staged/flake/flake.nix"
   write_state "$staged/flake"
   echo "+ nix flake lock --override-input hinteros git+$REPO_URL?ref=$channel&rev=$install_rev" >>"$LOG"
   if ! timeout -k 10 1800 nix --extra-experimental-features 'nix-command flakes' flake lock \
@@ -849,18 +849,22 @@ fi
 progress config 28 "Writing the device configuration"
 write_state
 
-# Extra modules of the generated flake: the test hook, and the boot loader override.
+sed -e "s|%CHANNEL%|$channel|g" -e "s|%REPO%|$REPO_URL|g" "$TEMPLATE" >"$cfg/flake.nix"
+chmod 0644 "$cfg/flake.nix"
+
+# Extra modules of this device: the test hook, and the boot loader override. hinteros.lib.deviceOutputs
+# picks up extra.nix; without one there is no such file.
 extra_mods=()
-write_flake() {
-  sed -e "s|%CHANNEL%|$channel|g" -e "s|%REPO%|$REPO_URL|g" -e "s|%EXTRA%|${extra_mods[*]}|g" \
-    "$TEMPLATE" >"$cfg/flake.nix"
-  chmod 0644 "$cfg/flake.nix"
+write_extra() {
+  printf '{ imports = [ %s ]; }\n' "${extra_mods[*]}" >"$cfg/extra.nix"
+  chmod 0644 "$cfg/extra.nix"
 }
 if [ -n "${HINTEROS_INSTALL_EXTRA_MODULE:-}" ]; then
   # Test hook: one more NixOS module for the installed system (the VM test adds its
   # instrumentation this way). Not part of the plan; unset on real installs.
   install -m 0644 "$HINTEROS_INSTALL_EXTRA_MODULE" "$cfg/extra-module.nix"
   extra_mods+=(./extra-module.nix)
+  write_extra
 fi
 # Where EFI variables cannot be written (efivarfs missing or read-only) bootctl would fail the whole
 # install; the box then boots through the fallback path (EFI/BOOT/BOOTX64.EFI) instead.
@@ -876,16 +880,15 @@ NIX
   chmod 0644 "$cfg/installer-overrides.nix"
   extra_mods+=(./installer-overrides.nix)
   efi_override_done=1
-  write_flake
+  write_extra
 }
-write_flake
 if [ ! -w /sys/firmware/efi/efivars ]; then
   efi_override
   progress config 29 "EFI variables are not writable here; the boot loader goes to the fallback path only" warn efivars-unavailable
 fi
 # The lock pins hinteros (and everything it locks) to the revision on this installer, so the
 # evaluation needs no network; `nix flake update hinteros` later moves it to the channel. A newer
-# revision: the lock made for it above (same inputs: flake.nix differs only in its modules).
+# revision: the lock made for it above (the same flake.nix).
 if [ "$newer" -eq 1 ]; then
   install -m 0644 "$staged/flake/flake.lock" "$cfg/flake.lock"
 else

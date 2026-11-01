@@ -92,7 +92,6 @@ in
         installer.succeed("mkdir -p /mnt && mount /dev/disk/by-partlabel/hinteros-root /mnt")
         installer.succeed("cmp ${fixture} /mnt/etc/hinteros/facter.json")
         installer.succeed("test -e /mnt/etc/hinteros/facter.deferred")
-        installer.succeed("grep -q 'facter.deferred' /mnt/etc/hinteros/flake.nix")
         # The installed generation is the generic system: no microcode in its initrd/firmware setup.
         sysdir = installer.succeed("readlink -f /mnt/nix/var/nix/profiles/system").strip()
         installer.fail(f"test -e /mnt{sysdir}/kernel-modules/lib/firmware/intel-ucode")
