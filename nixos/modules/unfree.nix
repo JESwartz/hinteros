@@ -8,7 +8,7 @@
 # allowlist holds anything outside `hinteros.unfreeExceptions`:
 #   - the ISO leaves the exceptions empty: nothing unfree at all, Steam included;
 #   - the cache job sets them to `config.hinteros.catalog.cacheableUnfree`: the unfree packages
-#     of entries with `cache = true`, which nixpkgs marks unfreeRedistributable (Steam). Plex
+#     of entries with `delivery = "download"`, which nixpkgs marks unfreeRedistributable (Steam). Plex
 #     HTPC is unfree and not redistributable: it is built on the box, never cached.
 { config, lib, ... }:
 let

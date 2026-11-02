@@ -9,7 +9,7 @@
 # The apps themselves come from the catalog (catalog.nix: one `hinteros.apps.<id>` per entry,
 # with the entry's settings as defaults). The entry shape and the session.toml entries are shared
 # with the app envs (nixos/lib/app-entries.nix), so a test VM and a profile env list the same
-# apps the same way. The `onIso` apps (jellyfin, youtube, firefox) are enabled whenever the session
+# apps the same way. The `onIso` apps (jellyfin-desktop, youtube, firefox) are enabled whenever the session
 # is; a test VM enables any other catalog id with `hinteros.apps.<id>.enable = true` (Plex and
 # Steam are unfree: allowed by name from the entry, see unfree.nix).
 {

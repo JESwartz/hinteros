@@ -284,7 +284,7 @@ in
         example = lib.literalExpression ''
           {
             steam.autostart = true;
-            apps = [ { id = "jellyfin"; name = "Jellyfin"; command = [ "jellyfin-desktop" ]; } ];
+            apps = [ { id = "jellyfin-desktop"; name = "Jellyfin"; command = [ "jellyfin-desktop" ]; } ];
           }
         '';
         description = ''

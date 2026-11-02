@@ -312,7 +312,7 @@ in
         if nested:
             results[app]["nested_ok"] = userns > base_userns
 
-    try_app("jellyfin", "[j]ellyfin-desktop", [".local/share/jellyfin-desktop", ".config/jellyfin-desktop"])
+    try_app("jellyfin-desktop", "[j]ellyfin-desktop", [".local/share/jellyfin-desktop", ".config/jellyfin-desktop"])
     try_app("moonlight", "[m]oonlight", [".config/Moonlight Game Streaming Project"])
     try_app("vacuum-tube", "[V]acuumTube|[v]acuum-tube|[e]lectron", [".config/VacuumTube"], nested=True)
     try_app("plex-htpc", "[P]lex|[p]lex-htpc", [".local/share/plex-htpc", ".local/share/Plex HTPC", ".config/Plex HTPC", ".cache/plex"], settle=40)

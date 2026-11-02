@@ -164,7 +164,7 @@ in
         r = ok("store.list")
         assert r["index_version"] == 3 and r["more_after_update"] is False, r
         apps = {a["id"]: a for a in r["apps"]}
-        assert {"crunchyroll", "firefox", "jellyfin", "moonlight", "plex-htpc", "steam", "youtube"} <= set(apps), list(apps)
+        assert {"crunchyroll", "firefox", "jellyfin-desktop", "moonlight", "plex-htpc", "steam", "youtube"} <= set(apps), list(apps)
         assert "jellyfin-server" not in apps, "a service in the Store"
         assert all(a["state"] == "available" for a in apps.values()), apps
         t = apps["plex-htpc"]["terms"]

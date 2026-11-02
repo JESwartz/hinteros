@@ -50,10 +50,16 @@ let
       extraModules = [
         {
           system.stateVersion = "25.11";
-          hinteros.disk.enable = true;
-          hinteros.apps = lib.genAttrs liveIds (id: {
-            enable = lib.mkOverride 900 (lib.elem id ids);
-          });
+          hinteros = {
+            disk = {
+              enable = true;
+              rootUuid = "11111111-2222-3333-4444-555555555555";
+              espUuid = "ABCD-1234";
+            };
+            apps = lib.genAttrs liveIds (id: {
+              enable = lib.mkOverride 900 (lib.elem id ids);
+            });
+          };
         }
         extra
       ];
@@ -136,7 +142,7 @@ let
           (env base [
             "youtube"
             "steam"
-            "jellyfin"
+            "jellyfin-desktop"
             "youtube"
           ]).manifest;
       in
@@ -148,19 +154,19 @@ let
           m.box
           (lib.hasSuffix "/bin/steam" m.steam.path)
           (lib.findFirst (a: a.id == "youtube") null m.apps == entry base "youtube")
-          (lib.findFirst (a: a.id == "jellyfin") null m.apps == entry base "jellyfin")
+          (lib.findFirst (a: a.id == "jellyfin-desktop") null m.apps == entry base "jellyfin-desktop")
           (env base [ "youtube" ]).manifest.steam
           (env base [ "youtube" ]).manifest.box
         ];
         expected = [
           1
           [
-            "jellyfin"
+            "jellyfin-desktop"
             "steam"
             "youtube"
           ]
           [
-            "jellyfin"
+            "jellyfin-desktop"
             "youtube"
           ]
           [
@@ -182,11 +188,11 @@ let
           drv (
             env base [
               "firefox"
-              "jellyfin"
+              "jellyfin-desktop"
             ]
           ) == drv (
             env base [
-              "jellyfin"
+              "jellyfin-desktop"
               "firefox"
               "firefox"
             ]
@@ -196,7 +202,7 @@ let
         (drv (env base [ "steam" ]) == drv (env otherBox [ "steam" ]))
         (drv (env base [ "steam" ]) == drv (env cacheJob [ "steam" ]))
         (drv (env base [ "firefox" ]) == drv (env c2 [ "firefox" ]))
-        (drv (env base [ "firefox" ]) != drv (env base [ "jellyfin" ]))
+        (drv (env base [ "firefox" ]) != drv (env base [ "jellyfin-desktop" ]))
       ];
       expected = [
         true
@@ -230,7 +236,7 @@ let
     testDefaultApps = {
       expr = appsOf base;
       expected = [
-        "jellyfin"
+        "jellyfin-desktop"
         "youtube"
         "firefox"
       ];
@@ -257,7 +263,7 @@ let
         }
       );
       expected = [
-        "jellyfin"
+        "jellyfin-desktop"
         "youtube"
         "firefox"
       ];
@@ -270,7 +276,7 @@ let
       expr = [
         (entry base "youtube").input
         (entry base "youtube").back_key
-        (entry base "jellyfin" ? input)
+        (entry base "jellyfin-desktop" ? input)
       ];
       expected = [
         "keyboard"
@@ -460,7 +466,7 @@ let
       expr = [
         (entry base "firefox").address_bar or false
         (entry base "youtube").address_bar or false
-        (entry base "jellyfin").address_bar or false
+        (entry base "jellyfin-desktop").address_bar or false
         (entry crunchy "crunchyroll").address_bar or false
       ];
       expected = [
@@ -534,7 +540,7 @@ let
       ];
       expected = [
         [
-          "jellyfin"
+          "jellyfin-desktop"
           "plex-htpc"
           "youtube"
           "firefox"
@@ -545,7 +551,7 @@ let
     # Icons: the catalog's fields reach session.toml; no generated icon files.
     testIconFields = {
       expr = [
-        (entry base "jellyfin").desktop_id
+        (entry base "jellyfin-desktop").desktop_id
         (entry base "youtube").firefox_profile
         (entry base "youtube").site_url
         (lib.hasPrefix "https://" (entry base "youtube").icon_url)

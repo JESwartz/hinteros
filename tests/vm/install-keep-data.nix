@@ -182,7 +182,7 @@ in
         before = superblock()
         existing = disk_listed()["existing"]
         print(existing)
-        assert existing == {"version": "${self.nixosConfigurations.installer.config.hinteros.release.version}", "profiles": 1, "schemaOk": True}, existing
+        assert existing == {"version": "${self.nixosConfigurations.installer.config.hinteros.release.version}", "channel": "stable", "profiles": 1, "schemaOk": True}, existing
         assert superblock() == before
         installer.fail("findmnt -rn | grep -q vdc")
 

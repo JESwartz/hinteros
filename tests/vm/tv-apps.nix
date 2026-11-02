@@ -94,11 +94,11 @@ in
     apps = ok("apps.list")["apps"]
     ids = [a["id"] for a in apps]
     print(ids)
-    for want in ("jellyfin", "youtube", "crunchyroll", "firefox"):
+    for want in ("jellyfin-desktop", "youtube", "crunchyroll", "firefox"):
         assert want in ids, ids
     assert "plex" not in ids, ids
     by_id = {a["id"]: a for a in apps}
-    assert by_id["youtube"]["kind"] == "web" and by_id["jellyfin"]["kind"] == "native", by_id
+    assert by_id["youtube"]["kind"] == "web" and by_id["jellyfin-desktop"]["kind"] == "native", by_id
     assert by_id["youtube"]["name"] == "YouTube", by_id["youtube"]
     # Store-only streaming apps that were installed show up like the other web apps.
     for want in ("netflix", "spotify"):
@@ -159,7 +159,7 @@ in
     ok("apps.close", {"id": "netflix"})
 
     # Jellyfin: the desktop client starts and stays up (no server to log in to here).
-    ok("apps.launch", {"id": "jellyfin"})
+    ok("apps.launch", {"id": "jellyfin-desktop"})
     machine.wait_until_succeeds("pgrep -u hinteros-p1 -f jellyfin-desktop", timeout=60)
     machine.sleep(duration=timedelta(seconds=10))
     machine.succeed("pgrep -u hinteros-p1 -f jellyfin-desktop")

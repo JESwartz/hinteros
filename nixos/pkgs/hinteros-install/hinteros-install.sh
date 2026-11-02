@@ -8,10 +8,11 @@
 #
 # --list-disks (offline, needs root to look inside a disk): what `lsblk --json -b` says about the
 # block devices, with on every whole disk `existing`, the HinterOS install on it:
-#   {"blockdevices":[{"name":...,"type":"disk",...,"existing":{"version":"1.0.0","profiles":2,"schemaOk":true}|null}]}
-# `version` is absent if unknown, `profiles` counts state.json's accounts, `schemaOk` says a
-# keepData plan is accepted on this disk. null: no such install, the disk is in use or it cannot be
-# read. Disks are mounted read-only, one at a time; an unreadable disk never fails the listing.
+#   {"blockdevices":[{"name":...,"type":"disk",...,"existing":{"version":"1.0.0","channel":"stable","profiles":2,"schemaOk":true}|null}]}
+# `version` and `channel` are absent if unknown, `profiles` counts state.json's accounts,
+# `schemaOk` says a keepData plan is accepted on this disk. null: no such install, the disk is in
+# use or it cannot be read. Disks are mounted read-only, one at a time; an unreadable disk never
+# fails the listing.
 #
 # --info (offline, instant, no root): what this installer carries, as one JSON object,
 #   {"iso":{"rev":...,"version":...},"channel":"stable"}
@@ -325,6 +326,7 @@ EX_CODE=      # why a keepData plan is refused here (empty: accepted), with EX_M
 EX_MSG=
 EX_READ=0     # 1: state.json was read; EX_VERSION, EX_PROFILES hold
 EX_VERSION=
+EX_CHANNEL=
 EX_PROFILES=0
 EX_ROOT=      # the partitions
 EX_ESP=
@@ -353,6 +355,7 @@ read_install_at() {
   fi
   EX_READ=1
   EX_PROFILES=$(jq '.profiles | if type == "array" then length else 0 end' <<<"$state")
+  EX_CHANNEL=$(jq -r '.nodes.hinteros.original.ref | select(. == "stable" or . == "beta")' "$dir/root/etc/hinteros/flake.lock" 2>/dev/null || true)
   EX_ROOT_UUID=$(jq -r '.disk | objects | .rootUuid | strings' <<<"$state")
   EX_ESP_UUID=$(jq -r '.disk | objects | .espUuid | strings' <<<"$state")
   sys=$(readlink "$dir/nix/var/nix/profiles/system" 2>/dev/null || true)
@@ -386,7 +389,7 @@ read_install_at() {
 # read_install DISK: sets the EX_ fields. Always returns 0.
 read_install() {
   local d=$1 dir
-  EX_CODE='' EX_MSG='' EX_READ=0 EX_VERSION='' EX_PROFILES=0 EX_ROOT_UUID='' EX_ESP_UUID=''
+  EX_CODE='' EX_MSG='' EX_READ=0 EX_VERSION='' EX_CHANNEL='' EX_PROFILES=0 EX_ROOT_UUID='' EX_ESP_UUID=''
   EX_ROOT=$(lsblk -lnpo PATH,PARTLABEL "$d" 2>/dev/null | awk '$2 == "hinteros-root" {print $1}' | head -n1 || true)
   EX_ESP=$(lsblk -lnpo PATH,PARTLABEL "$d" 2>/dev/null | awk '$2 == "hinteros-esp" {print $1}' | head -n1 || true)
   if [ -z "$EX_ROOT" ] || [ -z "$EX_ESP" ]; then
@@ -418,8 +421,9 @@ list_disks() {
     if [ -z "$(lsblk -rno MOUNTPOINTS "$d" 2>/dev/null | tr -d ' \n' || true)" ]; then
       read_install "$d"
       if [ "$EX_READ" -eq 1 ]; then
-        one=$(jq -nc --arg v "$EX_VERSION" --argjson n "$EX_PROFILES" --arg code "$EX_CODE" \
-          '{profiles: $n, schemaOk: ($code == "")} + (if $v == "" then {} else {version: $v} end)')
+        one=$(jq -nc --arg v "$EX_VERSION" --arg ch "$EX_CHANNEL" --argjson n "$EX_PROFILES" --arg code "$EX_CODE" \
+          '{profiles: $n, schemaOk: ($code == "")} + (if $v == "" then {} else {version: $v} end)
+            + (if $ch == "" then {} else {channel: $ch} end)')
       fi
     fi
     existing=$(jq -c --arg d "$d" --argjson one "$one" '.[$d] = $one' <<<"$existing")
@@ -449,7 +453,7 @@ that follows it, that release ("newer"; else null). A plan's "rev" installs it.
 its default channel, {"iso":{"rev":...,"version":...},"channel":...}.
 
 --list-disks (offline) prints the block devices as lsblk's JSON, and on every disk "existing":
-the HinterOS install on it, {"version":...,"profiles":N,"schemaOk":true|false}, or null.
+the HinterOS install on it, {"version":...,"channel":...,"profiles":N,"schemaOk":true|false}, or null.
 USAGE
   exit 2
 }
@@ -639,7 +643,7 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
           # Vendor terms: an app whose catalog entry has terms needs the user acceptance of
           # exactly the version in the catalog index of this installer.
           (. as $plan | .apps[] | . as $a
-             | ($idx[0].apps[] | select(.id == $a and .terms != null)) as $e
+             | ($idx[0].entries[] | select(.id == $a and .terms != null)) as $e
              | select(($plan.acceptedTerms[$a] // null) != $e.terms.version)
              | bad("acceptedTerms"; "terms-not-accepted"; "the terms of \($e.name) (\($e.terms.title), version \($e.terms.version)) have not been accepted"))
         end),
@@ -716,7 +720,7 @@ json_array() { jq -nc '$ARGS.positional' --args "$@"; }
 # The box features of these apps (JSON array of ids; catalog index v3 `box`), sorted.
 app_requirements() {
   jq -c --slurpfile idx "$CATALOG_INDEX" \
-    '. as $a | [$idx[0].apps[] | select(.id as $i | $a | index($i)) | (.box // [])[]] | unique' <<<"$1"
+    '. as $a | [$idx[0].entries[] | select(.id as $i | $a | index($i)) | (.boxFeatures // [])[]] | unique' <<<"$1"
 }
 requirements=$(app_requirements "$(json_array "${apps[@]}")")
 # The starter set (apps.md "Starter set"): which apps new profiles and guests start with.
@@ -927,9 +931,9 @@ if [ "$newer" -eq 1 ]; then
   # That revision's catalog, in the shape of the Store index the rest of this script reads.
   # shellcheck disable=SC2016 # Nix, not shell
   catalog_apply='es: {
-    apps = map (id: let e = es.${id}; in {
+    entries = map (id: let e = es.${id}; in {
       inherit id;
-      box = e.box or [ ];
+      boxFeatures = e.boxFeatures or [ ];
       offered = (e.kind or "app") == "app" && e.status == "available" && (e.starter or null) != null;
       terms = if (e.terms or null) == null then null else { inherit (e.terms) version title; };
     }) (builtins.attrNames es);
@@ -948,7 +952,7 @@ if [ "$newer" -eq 1 ]; then
     [ -n "$a" ] && skip_apps[$a]=$why
   done < <(json_array "${apps[@]}" | jq -r --slurpfile idx "$CATALOG_INDEX" \
     --argjson acc "$(plan -c .acceptedTerms)" --arg v "$install_version" '
-    .[] as $a | ($idx[0].apps | map(select(.id == $a)) | first) as $e
+    .[] as $a | ($idx[0].entries | map(select(.id == $a)) | first) as $e
     | if $e == null or ($e.offered | not) then "\($a)\tHinterOS \($v) does not offer \($a) in the installer"
       elif $e.terms != null and ($acc[$a] // null) != $e.terms.version then
         "\($a)\tthe terms of \($a) changed in HinterOS \($v) (\($e.terms.title), version \($e.terms.version)); accept them in the Store to add it"
@@ -1134,7 +1138,7 @@ write_terms() { # JSON array of installed app ids
     umask 0077
     jq -n --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson apps "$1" \
       --slurpfile idx "$CATALOG_INDEX" '
-      [$apps[] as $a | $idx[0].apps[] | select(.id == $a and .terms != null)
+      [$apps[] as $a | $idx[0].entries[] | select(.id == $a and .terms != null)
          | {key: .id, value: [{version: .terms.version, accepted_at: $now, by: "installer"}]}]
       | {version: 1, accepted: from_entries}' >"$MNT/var/lib/hinteros/terms-accepted.json"
   )

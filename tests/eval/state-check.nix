@@ -99,7 +99,7 @@ pkgs.runCommand "hinteros-state-check"
   ''
     export HINTEROS_INSTALL_LOG=$TMPDIR/install.log
     # Terms of every app that has them, accepted at the catalog's version.
-    terms=$(jq -c '[.apps[] | select(.terms != null) | {key: .id, value: .terms.version}] | from_entries' \
+    terms=$(jq -c '[.entries[] | select(.terms != null) | {key: .id, value: .terms.version}] | from_entries' \
       ${index}/share/hinteros/catalog.json)
 
     mkdir states

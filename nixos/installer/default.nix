@@ -102,7 +102,7 @@ let
         };
         profiles = [ { id = "p1"; } ];
         requirements = lib.sort lib.lessThan (
-          lib.unique (lib.concatMap (id: config.hinteros.catalog.entries.${id}.box or [ ]) apps)
+          lib.unique (lib.concatMap (id: config.hinteros.catalog.entries.${id}.boxFeatures or [ ]) apps)
         );
         services = [ ];
       };

@@ -62,7 +62,7 @@ in
 
       # Only Firefox: it is the keyboard-profile app whose window the typing goes to.
       hinteros.apps = {
-        jellyfin.enable = false;
+        jellyfin-desktop.enable = false;
         youtube.enable = false;
         crunchyroll.enable = false;
         firefox.kiosk.url = "http://127.0.0.1:8000/";

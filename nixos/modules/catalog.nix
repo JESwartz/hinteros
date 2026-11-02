@@ -14,8 +14,8 @@
 #     `share/hinteros/terms/` (the Store reads /run/current-system/sw/share/hinteros/).
 #
 # Box-wide apps are for test VMs: without a state the installer's `onIso` apps (app-ids.nix: on the
-# ISO and offered by the installer, so jellyfin, youtube and firefox) are on with the session. With
-# a state none is: apps are per profile.
+# ISO and offered by the installer, so jellyfin-desktop, youtube and firefox) are on with the
+# session. With a state none is: apps are per profile.
 # A function of the catalog data, not a plain module: which entries exist decides the shape of
 # this module's config (one `service` module per entry), so it must not be read from `config`.
 # flake.nix passes it in; `hinteros.catalog.*` re-exports it for other modules to read.
@@ -83,7 +83,7 @@ in
       readOnly = true;
       description = ''
         Unfree package names (`lib.getName`) the binary cache may hold: those of entries with
-        `cache = true` (hinteros-catalog's `lib.cacheableUnfree`). A cache build sets
+        `delivery = "download"` (hinteros-catalog's `lib.cacheableUnfree`). A cache build sets
         `hinteros.forbidUnfree = true` and `hinteros.unfreeExceptions` to this list.
       '';
     };
@@ -147,7 +147,9 @@ in
 
     # Box features the box-wide apps name (a device: state.json `requirements`).
     {
-      hinteros.boxFeatures = lib.unique (lib.concatMap (e: e.box or [ ]) (lib.attrValues enabled));
+      hinteros.boxFeatures = lib.unique (
+        lib.concatMap (e: e.boxFeatures or [ ]) (lib.attrValues enabled)
+      );
     }
 
     # Each enabled service's restricted NixOS module.

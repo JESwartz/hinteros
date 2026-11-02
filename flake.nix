@@ -30,7 +30,7 @@
     # The App Store catalog (design/catalog.md): app entries, Store index and vendor terms, locked
     # per release like the other inputs.
     hinteros-catalog = {
-      url = "git+https://git.hinteros.org/hinteros-catalog.git";
+      url = "git+https://git.hinteros.org/hinteros-catalog.git?ref=pre-1.0";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";

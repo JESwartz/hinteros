@@ -163,7 +163,7 @@ profiles.mkTest {
         assert {"jellyfin-server", "plex-media-server", "tailscale", "cloudflare-tunnel"} <= set(s), list(s)
         for i in ("jellyfin-server", "plex-media-server", "tailscale", "cloudflare-tunnel"):
             assert s[i]["enabled"] is False and s[i]["available"] is True and s[i]["detail"] is None, s[i]
-        assert s["jellyfin-server"]["setup"] == "jellyfin" and s["tailscale"]["setup"] == "tailscale", s
+        assert s["jellyfin-server"]["setup"] == "jellyfin-server" and s["tailscale"]["setup"] == "tailscale", s
         assert s["plex-media-server"]["terms"]["version"] == "2025-10-30", s
 
     with subtest("services.enable jellyfin-server: the admin PIN, a job, the setup"):
@@ -172,7 +172,7 @@ profiles.mkTest {
             assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         r = sess("hinteros-p1", "system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": "0" * 64})
         assert r["error"]["code"] == 3007, r
-        r = sess("hinteros-p1", "system.services.enable", {"ids": ["jellyfin"], "pin": PIN, "revision": rev()})
+        r = sess("hinteros-p1", "system.services.enable", {"ids": ["jellyfin-desktop"], "pin": PIN, "revision": rev()})
         assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "not_a_service", r
         stub_build(systems["jf"])
         done = job("system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": rev()}, timeout=900)

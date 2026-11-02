@@ -115,7 +115,7 @@ let
         system_rev = cfg.systemRev;
         inherit ids;
         apps = entriesLib.toEntries apps;
-        box = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.box or [ ]) sel));
+        box = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.boxFeatures or [ ]) sel));
       }
       // {
         # DECISIONS D3: `steam` is `{path}` or null.

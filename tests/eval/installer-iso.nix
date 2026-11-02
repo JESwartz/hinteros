@@ -35,7 +35,7 @@ let
         in
         lib.sort (a: b: a < b) ids.all == [
           "firefox"
-          "jellyfin"
+          "jellyfin-desktop"
           "plex-htpc"
           "steam"
           "vacuum-tube"
@@ -49,7 +49,7 @@ let
         &&
           lib.sort (a: b: a < b) ids.onIso == [
             "firefox"
-            "jellyfin"
+            "jellyfin-desktop"
             "youtube"
           ];
       # The UI's stderr (the launcher's hinteros-focus: lines) reaches the journal, so it is in

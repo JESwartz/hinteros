@@ -74,7 +74,7 @@ in
     ];
 
     hinteros.apps = {
-      jellyfin.enable = false;
+      jellyfin-desktop.enable = false;
       youtube.enable = false;
       firefox.enable = false;
       padreader = {

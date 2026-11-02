@@ -4,7 +4,7 @@
 # none.
 #   - Jellyfin serves the seed page /web/hinteros/signin.html (+ signin.js) from the web
 #     directory bound over its own, and the rest of jellyfin-web still;
-#   - apps.launch jellyfin from p1's session: the session daemon gets p1's token
+#   - apps.launch jellyfin-desktop from p1's session: the session daemon gets p1's token
 #     (system.jellyfin.client_token) and writes the client's settings in the app's sandbox home
 #     (profiles.json, profiles/<id>/jellyfin-desktop.conf version 7: the seed URL, the server,
 #     the TV layout; 0600); the client opens the seed page, which stores jellyfin-web's login;
@@ -36,7 +36,7 @@ profiles.mkTest {
       pin = "1357";
     };
   };
-  envs.jf.ids = [ "jellyfin" ];
+  envs.jf.ids = [ "jellyfin-desktop" ];
   appProfiles.hinteros-p1 = "jf";
   extraModule =
     { lib, ... }:
@@ -54,7 +54,7 @@ profiles.mkTest {
     ENV = "HINTEROS_SESSION_API=1.0 HINTEROS_SYSTEM_API=1.0 PYTHONPATH=/etc/hinteros-test"
     API = "http://127.0.0.1:8096"
     S = "/var/lib/hinteros/services/jellyfin-server"
-    BASE = "/home/hinteros-p1/.local/share/hinteros/sandbox/jellyfin/.local/share/jellyfin-desktop"
+    BASE = "/home/hinteros-p1/.local/share/hinteros/sandbox/jellyfin-desktop/.local/share/jellyfin-desktop"
 
     boot_box()
     machine.wait_for_unit("jellyfin.service", timeout=900)
@@ -94,8 +94,8 @@ profiles.mkTest {
         raise AssertionError(f"no session for hinteros-p1: {jf_get('/Sessions')}")
 
     with subtest("launch: the app signs in by itself"):
-        r = sess_ok("hinteros-p1", "apps.launch", {"id": "jellyfin"})
-        assert r["app"]["id"] == "jellyfin", r
+        r = sess_ok("hinteros-p1", "apps.launch", {"id": "jellyfin-desktop"})
+        assert r["app"]["id"] == "jellyfin-desktop", r
         machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '[j]ellyfin-desktop'", timeout=60)
         conf = conf_path()
         c = json.loads(machine.succeed(f"cat {shlex.quote(conf)}"))
@@ -124,11 +124,11 @@ profiles.mkTest {
         machine.fail(f"runuser -u hinteros-p2 -- cat {shlex.quote(conf)}")
 
     with subtest("started again: only our keys change, signed in again"):
-        sess_ok("hinteros-p1", "apps.close", {"id": "jellyfin"})
+        sess_ok("hinteros-p1", "apps.close", {"id": "jellyfin-desktop"})
         machine.wait_until_fails("pgrep -u hinteros-p1 -f '[j]ellyfin-desktop'", timeout=60)
         before = json.loads(machine.succeed(f"cat {shlex.quote(conf)}"))
         print(before)
-        sess_ok("hinteros-p1", "apps.launch", {"id": "jellyfin"})
+        sess_ok("hinteros-p1", "apps.launch", {"id": "jellyfin-desktop"})
         machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '[j]ellyfin-desktop'", timeout=60)
         after = json.loads(machine.succeed(f"cat {shlex.quote(conf)}"))
         assert after["version"] == before["version"], (before, after)
@@ -138,6 +138,6 @@ profiles.mkTest {
                     assert after["sections"][name][k] == v, (name, k, before, after)
         signed_in(user_id)
         machine.fail(f"ls {BASE}/profiles/*/jellyfin-desktop.conf.broken")
-        sess_ok("hinteros-p1", "apps.close", {"id": "jellyfin"})
+        sess_ok("hinteros-p1", "apps.close", {"id": "jellyfin-desktop"})
   '';
 }
