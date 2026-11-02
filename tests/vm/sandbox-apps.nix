@@ -248,6 +248,8 @@ in
         r"dbus/bus\.cc.*Failed to connect to the bus", r"dbus/object_proxy\.cc.*NameHasOwner",
         # GTK (Firefox): the accessibility bus, through the session bus.
         r"Failed to create DBus proxy for org\.a11y\.Bus",
+        # Without state.json (this VM) the token request is an error; a box always has one.
+        r"Jellyfin app: no sign-in token: reading /etc/hinteros/state\.json",
         # Plex's bundled (older) fontconfig reads the system's /etc/fonts, also without our
         # sandbox (its own FHS bwrap binds the host's /etc/fonts).
         r"Fontconfig warning: \"/etc/fonts/conf\.d/",

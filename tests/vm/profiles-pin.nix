@@ -240,7 +240,7 @@ profiles.mkTest {
         unlocked = "env PAM_USER=hinteros-p2 hinteros-system pin unlocked"
         # Locked, with a PIN, no token: not without the PIN.
         machine.fail(unlocked)
-        assert sess_ok("hinteros-p2", "system.profiles.switch", {"id": "p2"}) == {}
+        assert sys_ok("hinteros-p2", "profiles.switch", {"id": "p2"}) == {}
         hint = json.loads(machine.succeed("cat /run/hinteros/switch.json"))
         assert hint["token"]["user"] == "hinteros-p2", hint
         assert machine.succeed("stat -c '%a %U' /run/hinteros/switch.json").strip() == "600 root"
@@ -249,7 +249,7 @@ profiles.mkTest {
         machine.succeed(unlocked)
         machine.fail(unlocked)
         # Another one, expired.
-        assert sess_ok("hinteros-p2", "system.profiles.switch", {"id": "p2"}) == {}
+        assert sys_ok("hinteros-p2", "profiles.switch", {"id": "p2"}) == {}
         machine.succeed(
             "t=$(($(date +%s) - 1)); jq -c --argjson t $t '.expires = $t | .token.expires = $t' "
             "/run/hinteros/switch.json > /run/hinteros/switch.new && mv /run/hinteros/switch.new /run/hinteros/switch.json"

@@ -192,7 +192,15 @@ profiles.mkTest {
         assert date("%Z") == "JST", date("%Z")
         # The snapshot still says Chicago; the live zone won.
         assert json.loads(machine.succeed("cat /run/current-system/hinteros/state.json"))["settings"]["timeZone"] == "America/Chicago"
-        assert sys_ok("hinteros-p1", "time_zone.get")["zone"] == "Asia/Tokyo"
+        # The boot still ends a first runuser session now and then: ask until one answers.
+        machine.wait_until_succeeds("runuser -u hinteros-p1 -- true")
+        for _ in range(10):
+            try:
+                zone = sys_ok("hinteros-p1", "time_zone.get")["zone"]
+                break
+            except AssertionError:
+                machine.sleep(1)
+        assert zone == "Asia/Tokyo", zone
 
     with subtest("activation: an unknown or absent zone is UTC; a valid one comes back"):
         for bad in ["Mars/Olympus_Mons", "../../etc/shadow", "posix/Asia/Tokyo", 5]:

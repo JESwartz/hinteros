@@ -160,9 +160,9 @@ in
         ids = [a["id"] for a in ok("apps.list")["apps"]]
         assert "steam" not in ids, ids
 
-    with subtest("store.list: the format-3 catalog for this profile, services hidden, terms texts on this box"):
+    with subtest("store.list: the catalog for this profile, services hidden, terms texts on this box"):
         r = ok("store.list")
-        assert r["index_version"] == 3 and r["more_after_update"] is False, r
+        assert r["index_version"] == 4 and r["more_after_update"] is False, r
         apps = {a["id"]: a for a in r["apps"]}
         assert {"crunchyroll", "firefox", "jellyfin-desktop", "moonlight", "plex-htpc", "steam", "youtube"} <= set(apps), list(apps)
         assert "jellyfin-server" not in apps, "a service in the Store"
@@ -170,7 +170,7 @@ in
         t = apps["plex-htpc"]["terms"]
         assert t["version"] == "2025-10-30" and t["file"].startswith("/run/current-system/sw/share/hinteros/terms/"), t
         machine.succeed(f"test -s {t['file']}")
-        assert apps["crunchyroll"]["terms"] is None and apps["crunchyroll"]["free"] is True
+        assert apps["crunchyroll"]["terms"] is None and apps["crunchyroll"]["unfree"] is False
         machine.succeed("test -s /run/current-system/sw/share/hinteros/catalog.json")
 
     with subtest("hostile apps.* input is refused and nothing changes"):

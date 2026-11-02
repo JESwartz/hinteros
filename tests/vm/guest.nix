@@ -81,6 +81,11 @@ profiles.mkTest {
     with subtest("the guest installs an app and writes files"):
         mine = sys_ok("hinteros-guest", "apps.list")
         assert mine["ids"] == ["firefox", "youtube"], mine
+        # The session checks for updates when it starts: that job holds the queue for a moment.
+        for _ in range(60):
+            if not [x for x in sys_ok("hinteros-guest", "jobs.list")["jobs"] if x["state"] == "running"]:
+                break
+            machine.sleep(1)
         j = sys_ok("hinteros-guest", "apps.install", {"ids": ["moonlight"], "revision": mine["revision"]})["job_id"]
         done = wait_job("hinteros-guest", j)
         assert done["state"] == "succeeded", done
