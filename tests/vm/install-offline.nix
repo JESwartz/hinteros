@@ -127,6 +127,7 @@ in
 
     ${builtins.readFile ./install/system-steps.py}
     ${builtins.readFile ./install/copy-plan.py}
+    ${builtins.readFile ./install/disk.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
@@ -144,14 +145,15 @@ in
         ''
           with subtest("an old HinterOS install is on the target disk"):
               installer.succeed(
-                  "parted -s /dev/vdc mklabel gpt mkpart hinteros-esp fat32 1MiB 1GiB set 1 esp on mkpart hinteros-root ext4 1GiB 100%",
+                  "parted -s /dev/vdc mklabel gpt mkpart hinteros-esp fat32 1MiB 1GiB set 1 esp on mkpart hinteros-root btrfs 1GiB 100%",
                   "udevadm settle",
                   "mkfs.vfat -n HINTEROSESP /dev/vdc1",
-                  "mkfs.ext4 -q -L oldroot /dev/vdc2",
+                  "mkfs.btrfs -q -L oldroot /dev/vdc2",
                   "mkdir -p /tmp/old && mount /dev/vdc2 /tmp/old",
-                  "mkdir -p /tmp/old/etc/hinteros /tmp/old/nix/store/stale-path",
-                  "echo old-box > /tmp/old/etc/hostname; echo stale > /tmp/old/stale-marker",
-                  "echo '{\"stale\": true}' > /tmp/old/etc/hinteros/state.json",
+                  "btrfs -q subvolume create /tmp/old/root /tmp/old/nix",
+                  "mkdir -p /tmp/old/root/etc/hinteros /tmp/old/nix/store/stale-path",
+                  "echo old-box > /tmp/old/root/etc/hostname; echo stale > /tmp/old/root/stale-marker",
+                  "echo '{\"stale\": true}' > /tmp/old/root/etc/hinteros/state.json",
                   "umount /tmp/old",
               )
         ''
@@ -231,7 +233,7 @@ in
               # Package builds, as opposed to the small file and environment assemblies any install builds.
               heavy = [b for b in built if re.match(r"^(bash|glibc|gcc|binutils|coreutils|perl|python3|systemd|linux|linux-firmware|microcode-[a-z]+|wireless-regdb|mesa|nix|openssh|util-linux|kmod|intel-[a-z-]+|libva[a-z-]*|firefox[a-z-]*|hinteros-[a-z-]+)-[0-9][0-9a-z._]*$", b)]
               assert not heavy, heavy
-              installer.succeed("mountpoint -q /mnt || mount /dev/disk/by-partlabel/hinteros-root /mnt")
+              mount_target()
               installer.succeed("cmp ${facterFixture} /mnt/etc/hinteros/facter.json")
               installer.succeed("test -e /mnt/etc/hinteros/facter.deferred")
               installer.succeed("rm -rf /tmp/cfg && cp -r /mnt/etc/hinteros /tmp/cfg && umount -R /mnt")
@@ -322,7 +324,7 @@ in
         assert state["settings"]["ssh"]["enable"] is True, state
         assert state["settings"]["admin"] == {"user": "james"}, state
         assert state["settings"]["hostname"] == "livingroom", state
-        assert state["disk"] == {"layout": "gpt-esp-ext4"}, state
+        check_layout(target, state)
         assert "password" not in json.dumps(state).lower(), state
         for f in ("flake.nix", "flake.lock", "state.json"):
             target.succeed(f"cmp /run/current-system/hinteros/{f} /etc/hinteros/{f}")
@@ -341,10 +343,6 @@ in
         assert node["original"]["ref"] == "stable", node
         assert lock["nodes"]["root"]["inputs"] == {"hinteros": "hinteros"}, lock["nodes"]["root"]
         assert target.succeed("stat -c '%a %U' /etc/hinteros/state.json").strip() == "644 root"
-        # Files of the disk layout: ESP and root by partition label.
-        target.succeed("test -e /dev/disk/by-partlabel/hinteros-esp && test -e /dev/disk/by-partlabel/hinteros-root")
-        target.succeed("findmnt -no FSTYPE / | grep -qx ext4")
-        target.succeed("findmnt -no FSTYPE /boot | grep -qx vfat")
 
     with subtest("the privileged service answers (system API 0.10) and knows its channel"):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",

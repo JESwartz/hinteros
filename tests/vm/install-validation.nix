@@ -200,8 +200,8 @@ in
           installer.succeed("umount /tmp/target")
 
       with subtest("another disk with HinterOS partition labels is refused"):
-          # The system finds its disks by partition label; a second disk with the same labels (an old
-          # install, a USB stick) would be ambiguous, also for the partitioning script.
+          # The partitioning script finds the new partitions by label; a second disk with the same
+          # labels (an old install, a USB stick) would be ambiguous.
           installer.succeed("parted -s /dev/vdc mklabel gpt mkpart hinteros-root ext4 1MiB 100%")
           installer.succeed("udevadm settle")
           refused("ok", "other-hinteros-disk")

@@ -23,10 +23,10 @@ let
     lib.filterAttrs (_: e: (e.kind or "app") == "service" && e.status != "removed") cfg.catalog.entries
   );
 
-  # The one disk layout there is: GPT, 1 GiB ESP + ext4 root, found by partition label (disk.nix).
-  # The installer creates it (nixos/pkgs/hinteros-install); the field names it so another layout
-  # can be added without breaking old states.
-  diskLayout = "gpt-esp-ext4";
+  # The one disk layout there is: GPT, 1 GiB ESP + btrfs subvolumes, found by UUID (disk.nix). The
+  # installer creates it (nixos/pkgs/hinteros-install); the field names it so another layout can
+  # be added without breaking old states.
+  diskLayout = "gpt-esp-btrfs";
 
   settings = state.settings or { };
   ssh = settings.ssh or { };
@@ -51,6 +51,8 @@ let
   timeZone = settings.timeZone or null;
   timeZoneOk = (import ../lib/time-zone.nix { inherit pkgs; }).ok timeZone;
   disk = state.disk or null;
+  # A bad value is reported below; the disk options still need a string.
+  diskUuid = v: if builtins.isString v then v else "invalid";
   profiles = listOr (state.profiles or null);
   requirements = listOr (state.requirements or null);
   services = listOr (state.services or null);
@@ -101,6 +103,12 @@ let
     ++
       lib.optional (disk != null && (disk.layout or null) != diskLayout)
         "unsupported disk.layout ${builtins.toJSON (disk.layout or null)} (supported: ${diskLayout})"
+    ++ lib.optional (
+      disk != null && !builtins.isString (disk.rootUuid or null)
+    ) "disk.rootUuid must be a string"
+    ++ lib.optional (
+      disk != null && !builtins.isString (disk.espUuid or null)
+    ) "disk.espUuid must be a string"
     ++
       lib.optional (unknownFeatures != [ ])
         "unknown box feature(s) in requirements: ${lib.concatStringsSep ", " unknownFeatures} (known: ${lib.concatStringsSep ", " cfg.knownBoxFeatures})"
@@ -172,7 +180,13 @@ in
         };
       })
 
-      (lib.mkIf (disk != null) { hinteros.disk.enable = true; })
+      (lib.mkIf (disk != null) {
+        hinteros.disk = {
+          enable = true;
+          rootUuid = diskUuid (disk.rootUuid or null);
+          espUuid = diskUuid (disk.espUuid or null);
+        };
+      })
     ]
   );
 }

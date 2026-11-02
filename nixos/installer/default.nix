@@ -77,6 +77,10 @@ let
       hostname ? "hinteros",
       user ? "admin",
       ssh ? false,
+      # hinteros-install reads them with blkid. The representative device has placeholders; an
+      # install builds what depends on them (fstab, the initrd), see isoVariants.
+      rootUuid ? "00000000-0000-0000-0000-000000000000",
+      espUuid ? "0000-0000",
       apps,
     }:
     self.lib.mkDevice {
@@ -92,7 +96,10 @@ let
           admin.user = user;
           guest.enable = true;
         };
-        disk.layout = "gpt-esp-ext4";
+        disk = {
+          layout = "gpt-esp-btrfs";
+          inherit rootUuid espUuid;
+        };
         profiles = [ { id = "p1"; } ];
         requirements = lib.sort lib.lessThan (
           lib.unique (lib.concatMap (id: config.hinteros.catalog.entries.${id}.box or [ ]) apps)
@@ -121,11 +128,17 @@ let
   # only in small configuration derivations.
   defaultDevice = mkVariant { apps = appIds.onIso; };
 
-  # Devices an offline install can produce, with and without ssh.
+  # Devices an offline install can produce, with and without ssh. Their UUIDs differ from the
+  # default device's, as a real disk's do: the file system list is in /etc and in the initrd, so an
+  # install rebuilds both.
   # The build-time inputs of what they build are put on the ISO (nixos/lib/offline-inputs.nix).
   offlineInputs = import ../lib/offline-inputs.nix { inherit lib pkgs; };
   toplevelOf = d: d.config.system.build.toplevel;
-  isoVariants = map (v: toplevelOf (mkVariant v)) (
+  otherDisk = {
+    rootUuid = "11111111-1111-1111-1111-111111111111";
+    espUuid = "1111-1111";
+  };
+  isoVariants = map (v: toplevelOf (mkVariant (v // otherDisk))) (
     [
       { apps = [ ]; }
       {
@@ -151,6 +164,8 @@ let
       {
         hostname = "livingroom";
         user = "james";
+        rootUuid = "22222222-2222-2222-2222-222222222222";
+        espUuid = "2222-2222";
         apps = [ ];
       }
       {
@@ -259,10 +274,24 @@ let
             label = "hinteros-root";
             size = "100%";
             content = {
-              type = "filesystem";
-              format = "ext4";
-              mountpoint = "/";
-              mountOptions = [ "noatime" ];
+              type = "btrfs";
+              extraArgs = [ "-f" ];
+              # The same options as nixos/modules/disk.nix.
+              subvolumes =
+                lib.mapAttrs
+                  (_: mountpoint: {
+                    inherit mountpoint;
+                    mountOptions = [
+                      "compress=zstd:1"
+                      "noatime"
+                    ];
+                  })
+                  {
+                    root = "/";
+                    nix = "/nix";
+                    home = "/home";
+                    srv = "/srv";
+                  };
             };
           };
         };
@@ -352,7 +381,8 @@ let
         if [ -n "$src" ] && [ -b "$src" ]; then refuse_disks="$refuse_disks $(disk_of "$src")"; fi
       done
       if [ -e /dev/hinteros-target ]; then refuse_disks="$refuse_disks $(readlink -f /dev/hinteros-target)"; fi
-      for src in $(findmnt -rno SOURCE | grep '^/dev/' || true); do
+      # -v: a btrfs subvolume's source without its [/subvolume] part.
+      for src in $(findmnt -rnvo SOURCE | grep '^/dev/' || true); do
         mp=$(findmnt -rno TARGET "$src" | head -n1 || true)
         case "$mp" in /mnt|/mnt/*) refuse_disks="$refuse_disks $(disk_of "$src")" ;; esac
       done
@@ -630,9 +660,11 @@ in
       fi
     '';
 
-    # Mounting a second stick to save logs: FAT32 (vfat) is always there; exFAT and NTFS (the
-    # kernel ntfs3 driver, plus ntfs-3g tools) are what Windows-formatted sticks use.
+    # btrfs: the target's file system. Mounting a second stick to save logs: FAT32 (vfat) is always
+    # there; exFAT and NTFS (the kernel ntfs3 driver, plus ntfs-3g tools) are what Windows-formatted
+    # sticks use.
     boot.supportedFilesystems = {
+      btrfs = true;
       exfat = true;
       ntfs = true;
     };

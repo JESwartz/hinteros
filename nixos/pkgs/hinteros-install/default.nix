@@ -9,6 +9,8 @@
   bash,
   coreutils,
   util-linux,
+  btrfs-progs,
+  dosfstools,
   gnugrep,
   gnused,
   gawk,
@@ -85,6 +87,8 @@ stdenvNoCC.mkDerivation {
         lib.makeBinPath [
           coreutils
           util-linux
+          btrfs-progs
+          dosfstools
           gnugrep
           gnused
           gawk

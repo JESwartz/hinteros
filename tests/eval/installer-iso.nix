@@ -15,6 +15,7 @@ let
       motdDiagnose = has "hinteros-diagnose" c.users.motd && has "hinteros-save-log" c.users.motd;
       motdNoStaleText = !(has "No installer screen is running yet" c.users.motd);
       motdNoStockText = !(has "empty passwords" c.users.motd);
+      btrfs = c.boot.supportedFilesystems.btrfs or false;
       exfat = c.boot.supportedFilesystems.exfat or false;
       ntfs = c.boot.supportedFilesystems.ntfs or false;
       wifiPowersaveOff = c.networking.networkmanager.wifi.powersave == false;

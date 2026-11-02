@@ -72,6 +72,9 @@ LOG=${HINTEROS_INSTALL_LOG:-/var/log/hinteros-install.log}
 MNT=/mnt
 TARGET_LINK=/dev/hinteros-target
 MIN_DISK_GIB=16
+# The state.json format and disk layout this installer writes.
+SCHEMA_VERSION=2
+DISK_LAYOUT=gpt-esp-btrfs
 # Test hook: the command that writes the hardware report (VM tests feed a fixture).
 FACTER=${HINTEROS_INSTALL_FACTER:-nixos-facter}
 # Test hook: a command run just before the disk is checked for the last time and erased (VM tests
@@ -535,16 +538,20 @@ install_version=$ISO_VERSION
 # profile (first-boot mode creates the admin profile), no apps (each profile has its own; the
 # picks become the starter set, below). `requirements` are the box features the picked apps need
 # (Steam: graphics32, steam-devices), so the system stage already has them and a profile created
-# from the starter set never waits for a rebuild. Into DIR (default: the device config).
+# from the starter set never waits for a rebuild. `disk` names the file systems the system mounts:
+# placeholders until they exist. Into DIR (default: the device config).
+root_uuid=00000000-0000-0000-0000-000000000000
+esp_uuid=0000-0000
 write_state() {
   local dir=${1:-$cfg}
   jq -n --arg base "$base" --arg sv "$STATE_VERSION" --arg host "$hostname" --arg admin "$admin_user" \
-    --argjson ssh "$ssh_enable" --argjson req "$requirements" '{
-      schemaVersion: 2,
+    --argjson ssh "$ssh_enable" --argjson req "$requirements" --argjson schema "$SCHEMA_VERSION" \
+    --arg layout "$DISK_LAYOUT" --arg root "$root_uuid" --arg esp "$esp_uuid" '{
+      schemaVersion: $schema,
       base: $base,
       stateVersion: $sv,
       settings: {hostname: $host, ssh: {enable: $ssh}, admin: {user: $admin}, guest: {enable: true}},
-      disk: {layout: "gpt-esp-ext4"},
+      disk: {layout: $layout, rootUuid: $root, espUuid: $esp},
       profiles: [{id: "p1"}],
       requirements: $req,
       services: []
@@ -665,16 +672,16 @@ disk_was="disk $disk_seq, $disk_real, $(disk_desc "$disk_real")"
 if [ "$disk_bytes" -lt $((MIN_DISK_GIB * 1024 * 1024 * 1024)) ]; then
   fail 2 disk-too-small "$disk is $((disk_bytes / 1024 / 1024 / 1024)) GiB; at least $MIN_DISK_GIB GiB are needed"
 fi
-# The installed system finds its partitions by GPT partition label (hinteros-esp, hinteros-root),
-# and so does the partitioning script. A second disk (an old install, a USB stick) carrying those
-# labels would make them ambiguous: udev links the label to either disk, so the new file systems
-# could be made on, or mounted from, the wrong one. Refuse before anything is touched.
+# The partitioning script finds its partitions by GPT partition label (hinteros-esp,
+# hinteros-root). A second disk (an old install, a USB stick) carrying those labels would make them
+# ambiguous: udev links the label to either disk, so the new file systems could be made on the
+# wrong one. Refuse before anything is touched. (The installed system mounts by UUID.)
 others=$(lsblk -J -p -o PATH,PKNAME,PARTLABEL 2>/dev/null | jq -r --arg d "$disk_real" '
   [.. | objects | select((.partlabel // "") | test("^hinteros-(esp|root)$"))
    | select((.pkname // "") != $d) | "\(.path) (\(.partlabel))"] | join(", ")' 2>/dev/null || true)
-[ -z "$others" ] || fail 2 other-hinteros-disk "another disk already has HinterOS partitions: $others. The system finds its disks by partition label, so two such disks are ambiguous; unplug that disk or erase it first"
+[ -z "$others" ] || fail 2 other-hinteros-disk "another disk already has HinterOS partitions: $others. The installer finds the new partitions by label, so two such disks are ambiguous; unplug that disk or erase it first"
 if mountpoint -q "$MNT"; then
-  mnt_src=$(findmnt -no SOURCE "$MNT")
+  mnt_src=$(findmnt -nvo SOURCE "$MNT")
   case $(lsblk -rno PKNAME "$mnt_src" 2>/dev/null | head -n1) in
     "$(basename "$disk_real")") ;;
     *) fail 2 mnt-in-use "$MNT is mounted from $mnt_src, which is not on $disk" ;;
@@ -806,19 +813,25 @@ ln -sfn "$disk_real" "$TARGET_LINK"
 run "Partitioning" "$DISKO_SCRIPT" --yes-wipe-all-disks
 rm -f "$TARGET_LINK"
 udevadm settle >>"$LOG" 2>&1 || true
-if ! { mountpoint -q "$MNT" && mountpoint -q "$MNT/boot"; }; then
-  fail 1 mount-failed "the new file systems are not mounted at $MNT"
-fi
+for m in "$MNT" "$MNT/boot" "$MNT/nix" "$MNT/home" "$MNT/srv"; do
+  mountpoint -q "$m" || fail 1 mount-failed "the new file systems are not mounted at $MNT ($m is not)"
+done
 # The partitions are found by label, so make sure they are the ones on the target disk and that
-# the root file system is new.
+# the subvolumes are new.
 same_disk 1 "It was partitioned"
-for m in "$MNT" "$MNT/boot"; do
-  src=$(readlink -f "$(findmnt -no SOURCE "$m")")
+for m in "$MNT" "$MNT/boot" "$MNT/nix" "$MNT/home" "$MNT/srv"; do
+  src=$(readlink -f "$(findmnt -nvo SOURCE "$m")")
   [ "$(lsblk -no PKNAME -p "$src" | head -n1)" = "$disk_real" ] \
     || fail 1 wrong-partition "$m is mounted from $src, which is not on $disk; refusing to install there"
 done
-stale=$(find "$MNT" -mindepth 1 -maxdepth 1 ! -name lost+found ! -name boot -printf '%f\n')
+stale=$(find "$MNT" -mindepth 1 -maxdepth 1 ! -name boot ! -name nix ! -name home ! -name srv -printf '%f\n'
+  find "$MNT/nix" "$MNT/home" "$MNT/srv" -mindepth 1 -maxdepth 1 -printf '%f\n')
 [ -z "$stale" ] || fail 1 stale-filesystem "the new root file system is not empty ($(printf '%s' "$stale" | tr '\n' ' ')); an old install was not erased"
+# What the system mounts (disk.nix); -p: read the disk, not blkid's cache of the old one.
+root_uuid=$(blkid -p -o value -s UUID "$(findmnt -nvo SOURCE "$MNT")")
+esp_uuid=$(blkid -p -o value -s UUID "$(findmnt -nvo SOURCE "$MNT/boot")")
+[ -n "$root_uuid" ] && [ -n "$esp_uuid" ] \
+  || fail 1 uuid-unknown "could not read the UUIDs of the new file systems"
 progress partition 20 "Disk is partitioned and mounted"
 
 # ---------------------------------------------------------------------------------------------

@@ -24,6 +24,11 @@ let
     };
 
   # Evaluates the failing assertion messages (as one string) of a state, or the eval error.
+  disk = {
+    layout = "gpt-esp-btrfs";
+    rootUuid = "11111111-2222-3333-4444-555555555555";
+    espUuid = "ABCD-1234";
+  };
   failures =
     state:
     let
@@ -431,7 +436,7 @@ let
                 hostname = "livingroom";
                 admin.user = "james";
               };
-              disk.layout = "gpt-esp-ext4";
+              inherit disk;
             }
           )).config;
       in
@@ -453,7 +458,7 @@ let
           "james"
           "/var/lib/hinteros/admin-password-hash"
           true
-          "/dev/disk/by-partlabel/hinteros-root"
+          "/dev/disk/by-uuid/11111111-2222-3333-4444-555555555555"
           true
         ];
       };
@@ -461,7 +466,7 @@ let
     # systemd-boot (the disk layout) turns it on, with the boot-health gate.
     testInstalledBoxBootCounting =
       let
-        i = (mk (good // { disk.layout = "gpt-esp-ext4"; })).config;
+        i = (mk (good // { inherit disk; })).config;
         v = (mk good).config;
       in
       {
@@ -481,9 +486,78 @@ let
         ];
       };
     testUnknownDiskLayout = {
-      expr = lib.hasInfix "unsupported disk.layout" (failures (good // { disk.layout = "zfs"; }));
+      expr = lib.hasInfix "unsupported disk.layout" (
+        failures (
+          good
+          // {
+            disk = disk // {
+              layout = "zfs";
+            };
+          }
+        )
+      );
       expected = true;
     };
+    testDiskUuidsRequired = {
+      expr = [
+        (lib.hasInfix "disk.rootUuid must be a string" (
+          failures (good // { disk = removeAttrs disk [ "rootUuid" ]; })
+        ))
+        (lib.hasInfix "disk.espUuid must be a string" (
+          failures (
+            good
+            // {
+              disk = disk // {
+                espUuid = 5;
+              };
+            }
+          )
+        ))
+      ];
+      expected = [
+        true
+        true
+      ];
+    };
+    # The subvolumes, by UUID, with the options the installer's disko config mounts them with.
+    testDiskLayout =
+      let
+        fs = (mk (good // { inherit disk; })).config.fileSystems;
+        subvol = name: {
+          device = "/dev/disk/by-uuid/${disk.rootUuid}";
+          fsType = "btrfs";
+          options = [
+            "subvol=${name}"
+            "compress=zstd:1"
+            "noatime"
+          ];
+        };
+        # NixOS adds x-initrd.mount to what the initrd mounts.
+        shape = f: {
+          inherit (f) device fsType;
+          options = lib.remove "x-initrd.mount" f.options;
+        };
+      in
+      {
+        expr = [
+          (shape fs."/")
+          (shape fs."/nix")
+          (shape fs."/home")
+          (shape fs."/srv")
+          (shape fs."/boot")
+        ];
+        expected = [
+          (subvol "root")
+          (subvol "nix")
+          (subvol "home")
+          (subvol "srv")
+          {
+            device = "/dev/disk/by-uuid/${disk.espUuid}";
+            fsType = "vfat";
+            options = [ "umask=0077" ];
+          }
+        ];
+      };
     # The device flake's outputs (nixos/lib/device-outputs.nix): the report unless deferred, an
     # optional extra.nix, the config dir as the snapshot.
     testDeviceOutputs =

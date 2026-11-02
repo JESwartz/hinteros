@@ -48,7 +48,7 @@
       # medium five minutes before stage 1 gives up on /dev/disk/by-label/HINTEROS.
       systemd.settings.Manager.DefaultDeviceTimeoutSec = "300s";
     };
-    # No ZFS (kernel module builds, size); ext4 and vfat are all the installer needs.
+    # No ZFS (kernel module builds, size); btrfs and vfat are all the installer needs.
     supportedFilesystems.zfs = lib.mkForce false;
   };
 

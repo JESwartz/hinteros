@@ -112,6 +112,7 @@ pkgs.runCommand "hinteros-state-check"
     # The spare p1, no apps; the picks are the starter set and their box features the
     # requirements.
     test "$(jq -c '[.schemaVersion, .profiles, has("apps"), .requirements, .services]' states/minimal/system/state.json)" = '[2,[{"id":"p1"}],false,[],[]]'
+    test "$(jq -c .disk states/minimal/system/state.json)" = '{"layout":"gpt-esp-btrfs","rootUuid":"00000000-0000-0000-0000-000000000000","espUuid":"0000-0000"}'
     test "$(jq -c .requirements states/online-one/apps/state.json)" = '["graphics32","steam-devices"]'
     test "$(jq -c .requirements states/offline-all-on-iso/apps/state.json)" = '[]'
     test "$(jq -c '[.version, .ids, .by]' states/online-one/apps/starter.json)" = '[1,["steam"],"installer"]'
@@ -155,5 +156,8 @@ pkgs.runCommand "hinteros-state-check"
     hinteros-system check-state tz.json
     jq '.settings.timeZone = 5' states/minimal/system/state.json > tz-bad.json
     if hinteros-system check-state tz-bad.json; then echo "check-state accepted timeZone 5" >&2; exit 1; fi
+    # The disk's UUIDs are extra fields the daemon keeps.
+    jq '.disk.rootUuid = "11111111-2222-3333-4444-555555555555"' states/minimal/system/state.json > disk.json
+    hinteros-system check-state disk.json
     touch $out
   ''
