@@ -4,6 +4,14 @@
 #   hinteros-install --plan plan.json [--validate-only]
 #   hinteros-install --check-newer [--channel stable|beta]
 #   hinteros-install --info
+#   hinteros-install --list-disks
+#
+# --list-disks (offline, needs root to look inside a disk): what `lsblk --json -b` says about the
+# block devices, with on every whole disk `existing`, the HinterOS install on it:
+#   {"blockdevices":[{"name":...,"type":"disk",...,"existing":{"version":"1.0.0","profiles":2,"schemaOk":true}|null}]}
+# `version` is absent if unknown, `profiles` counts state.json's accounts, `schemaOk` says a
+# keepData plan is accepted on this disk. null: no such install, the disk is in use or it cannot be
+# read. Disks are mounted read-only, one at a time; an unreadable disk never fails the listing.
 #
 # --info (offline, instant, no root): what this installer carries, as one JSON object,
 #   {"iso":{"rev":...,"version":...},"channel":"stable"}
@@ -50,6 +58,14 @@
 # part-way). The last line of a successful run has stage "done" and percent 100. Everything
 # else (tool output) goes to stderr and to /var/log/hinteros-install.log, which also holds the
 # build log of every derivation that failed.
+#
+# A plan with keepData: true repairs the install on the disk in place: nothing is erased. The disk
+# must hold an install this installer can read (keep-* error codes). The subvolumes are mounted,
+# /etc/hinteros gets this installer's flake.nix and flake.lock and a new hardware report (state.json
+# and extra.nix stay), a new system generation goes into the existing store and the ESP is formatted
+# again with its volume id, last of all, so a failed build leaves the boot files alone. Stages:
+# validate, mount (10-20) in place of partition, facter, config, packages, build, bootloader,
+# snapshot, finalize, done. No apps stage, no admin password, no first-boot files.
 #
 # The design is in the system repo's README ("Installer").
 set -Eeuo pipefail
@@ -162,8 +178,12 @@ SHORT_REV=12 # as update.rs: a tip without a readable release/version is named b
 repo_scheme=${REPO_URL%%://*}
 chk_dir=
 tmp_dirs=()
+probe_mnt= # a disk mounted read-only by read_install
 # shellcheck disable=SC2329 # the EXIT trap
-cleanup_tmp() { [ "${#tmp_dirs[@]}" -eq 0 ] || rm -rf "${tmp_dirs[@]}"; }
+cleanup_tmp() {
+  [ -z "$probe_mnt" ] || umount "$probe_mnt" 2>/dev/null || true
+  [ "${#tmp_dirs[@]}" -eq 0 ] || rm -rf "${tmp_dirs[@]}"
+}
 trap cleanup_tmp EXIT
 # Results of check_channel: the tip, and the newer release (empty: none newer).
 TIP_REV=
@@ -297,15 +317,128 @@ check_channel() {
   NEWER_REV=$tip
 }
 
+# ---------------------------------------------------------------------------------------------
+# The install on a disk, for the disk listing and a keepData plan. Only reads: the top of the btrfs
+# file system is mounted read-only without replaying its log, and is unmounted again.
+# ---------------------------------------------------------------------------------------------
+EX_CODE=      # why a keepData plan is refused here (empty: accepted), with EX_MSG
+EX_MSG=
+EX_READ=0     # 1: state.json was read; EX_VERSION, EX_PROFILES hold
+EX_VERSION=
+EX_PROFILES=0
+EX_ROOT=      # the partitions
+EX_ESP=
+EX_ROOT_UUID= # the UUIDs from state.json
+EX_ESP_UUID=
+
+ex_refuse() {
+  EX_CODE=$1
+  EX_MSG=$2
+}
+
+# read_install_at DISK DIR: DIR is the top of the file system. Always returns 0.
+read_install_at() {
+  local d=$1 dir=$2 s state sys
+  for s in root nix home srv; do
+    # A subvolume's root directory has this inode number.
+    if [ "$(stat -c %i "$dir/$s" 2>/dev/null || true)" != 256 ]; then
+      ex_refuse keep-no-subvolumes "$d has no HinterOS subvolume $s"
+      return 0
+    fi
+  done
+  state=$(jq -c . "$dir/root/etc/hinteros/state.json" 2>/dev/null || true)
+  if ! jq -e 'type == "object"' <<<"${state:-null}" >/dev/null 2>&1; then
+    ex_refuse keep-state-unreadable "the install on $d has no readable state.json"
+    return 0
+  fi
+  EX_READ=1
+  EX_PROFILES=$(jq '.profiles | if type == "array" then length else 0 end' <<<"$state")
+  EX_ROOT_UUID=$(jq -r '.disk | objects | .rootUuid | strings' <<<"$state")
+  EX_ESP_UUID=$(jq -r '.disk | objects | .espUuid | strings' <<<"$state")
+  sys=$(readlink "$dir/nix/var/nix/profiles/system" 2>/dev/null || true)
+  sys=$(readlink "$dir/nix/var/nix/profiles/$sys" 2>/dev/null || true)
+  [ -z "$sys" ] || EX_VERSION=$(parse_version "$(cat "$dir$sys/hinteros-version" 2>/dev/null || true)")
+  case $(jq -r --arg layout "$DISK_LAYOUT" --argjson schema "$SCHEMA_VERSION" '
+    (.disk | if type == "object" then . else {} end) as $d
+    | if (.schemaVersion | type) != "number" then "invalid"
+      elif .schemaVersion > $schema then "schema"
+      elif $d.layout != $layout then "layout"
+      else "ok" end' <<<"$state") in
+    invalid)
+      ex_refuse keep-state-unreadable "the state.json on $d has no valid schemaVersion"
+      ;;
+    schema)
+      ex_refuse keep-schema-newer "the install on $d is newer than this installer (state.json schema $(jq -r .schemaVersion <<<"$state"), this installer knows $SCHEMA_VERSION); use a newer installer"
+      ;;
+    layout)
+      ex_refuse keep-layout "the install on $d has another disk layout, not $DISK_LAYOUT"
+      ;;
+    *)
+      if ! [[ $EX_ESP_UUID =~ ^[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}$ ]]; then
+        ex_refuse keep-state-unreadable "the state.json on $d has no valid disk.espUuid"
+      elif [ "$EX_ROOT_UUID" != "$(blkid -p -o value -s UUID "$EX_ROOT" 2>/dev/null || true)" ]; then
+        ex_refuse keep-uuid-mismatch "the state.json on $d names another file system (disk.rootUuid $EX_ROOT_UUID)"
+      fi
+      ;;
+  esac
+}
+
+# read_install DISK: sets the EX_ fields. Always returns 0.
+read_install() {
+  local d=$1 dir
+  EX_CODE='' EX_MSG='' EX_READ=0 EX_VERSION='' EX_PROFILES=0 EX_ROOT_UUID='' EX_ESP_UUID=''
+  EX_ROOT=$(lsblk -lnpo PATH,PARTLABEL "$d" 2>/dev/null | awk '$2 == "hinteros-root" {print $1}' | head -n1 || true)
+  EX_ESP=$(lsblk -lnpo PATH,PARTLABEL "$d" 2>/dev/null | awk '$2 == "hinteros-esp" {print $1}' | head -n1 || true)
+  if [ -z "$EX_ROOT" ] || [ -z "$EX_ESP" ]; then
+    ex_refuse keep-no-install "$d has no HinterOS install (no HinterOS partitions)"
+    return 0
+  fi
+  if [ "$(blkid -p -o value -s TYPE "$EX_ROOT" 2>/dev/null || true)" != btrfs ]; then
+    ex_refuse keep-not-btrfs "the HinterOS partition on $d is not btrfs; this install cannot be kept"
+    return 0
+  fi
+  dir=$(mktemp -d)
+  tmp_dirs+=("$dir")
+  if ! timeout -k 5 30 mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 "$EX_ROOT" "$dir" 2>/dev/null; then
+    ex_refuse keep-unreadable "the HinterOS partition on $d cannot be read"
+    return 0
+  fi
+  probe_mnt=$dir
+  read_install_at "$d" "$dir"
+  umount "$dir" 2>/dev/null || umount -l "$dir" 2>/dev/null || true
+  probe_mnt=
+}
+
+list_disks() {
+  local out d one existing='{}'
+  out=$(lsblk --json -b -o NAME,PATH,SIZE,MODEL,TRAN,TYPE,RM,MOUNTPOINTS,DISK-SEQ)
+  while IFS= read -r d; do
+    one=null
+    # In use: the installer medium, or an install that is running.
+    if [ -z "$(lsblk -rno MOUNTPOINTS "$d" 2>/dev/null | tr -d ' \n' || true)" ]; then
+      read_install "$d"
+      if [ "$EX_READ" -eq 1 ]; then
+        one=$(jq -nc --arg v "$EX_VERSION" --argjson n "$EX_PROFILES" --arg code "$EX_CODE" \
+          '{profiles: $n, schemaOk: ($code == "")} + (if $v == "" then {} else {version: $v} end)')
+      fi
+    fi
+    existing=$(jq -c --arg d "$d" --argjson one "$one" '.[$d] = $one' <<<"$existing")
+  done < <(jq -r '.blockdevices[] | select(.type == "disk") | .path' <<<"$out")
+  jq -c --argjson existing "$existing" \
+    '.blockdevices |= map(if .type == "disk" then . + {existing: $existing[.path]} else . end)' <<<"$out" >&3
+}
+
 usage() {
   cat >&2 <<'USAGE'
 usage: hinteros-install --plan FILE|- [--validate-only | --state-dir DIR]
        hinteros-install --check-newer [--channel stable|beta]
        hinteros-install --info
+       hinteros-install --list-disks
 
-Installs HinterOS on the disk named in the plan, erasing it. The plan is a JSON object, see
-the README ("Installer"). With --validate-only the plan and the machine are checked and
-nothing is touched. With --state-dir the plan is checked and the state.json files it would
+Installs HinterOS on the disk named in the plan, erasing it. With "keepData": true in the plan
+nothing is erased: the install on the disk gets a new system and boot loader. The plan is a JSON
+object, see the README ("Installer"). With --validate-only the plan and the machine are checked
+and nothing is touched. With --state-dir the plan is checked and the state.json files it would
 produce are written to DIR (for tests).
 
 --check-newer (needs the network) prints one JSON object: this installer's revision and
@@ -314,6 +447,9 @@ that follows it, that release ("newer"; else null). A plan's "rev" installs it.
 
 --info (offline, no root) prints one JSON object: this installer's revision and version and
 its default channel, {"iso":{"rev":...,"version":...},"channel":...}.
+
+--list-disks (offline) prints the block devices as lsblk's JSON, and on every disk "existing":
+the HinterOS install on it, {"version":...,"profiles":N,"schemaOk":true|false}, or null.
 USAGE
   exit 2
 }
@@ -324,6 +460,7 @@ state_dir=
 check_newer=0
 check_ch=$DEFAULT_CHANNEL
 info=0
+list=0
 while [ $# -gt 0 ]; do
   case $1 in
     --plan)
@@ -337,6 +474,10 @@ while [ $# -gt 0 ]; do
       ;;
     --info)
       info=1
+      shift
+      ;;
+    --list-disks)
+      list=1
       shift
       ;;
     --channel)
@@ -363,6 +504,11 @@ if [ "$info" -eq 1 ]; then
     && [ -z "$state_dir" ] && [ "$check_ch" = "$DEFAULT_CHANNEL" ] || usage
   jq -nc --arg irev "$ISO_REV" --arg iver "$ISO_VERSION" --arg ch "$DEFAULT_CHANNEL" \
     '{iso: {rev: $irev, version: $iver}, channel: $ch}' >&3
+  exit 0
+elif [ "$list" -eq 1 ]; then
+  [ "$check_newer" -eq 0 ] && [ -z "$plan_file" ] && [ "$validate_only" -eq 0 ] \
+    && [ -z "$state_dir" ] && [ "$check_ch" = "$DEFAULT_CHANNEL" ] || usage
+  list_disks
   exit 0
 elif [ "$check_newer" -eq 1 ]; then
   [ -z "$plan_file" ] && [ "$validate_only" -eq 0 ] && [ -z "$state_dir" ] || usage
@@ -420,7 +566,10 @@ PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   apps: (.apps // []),
   acceptedTerms: (.acceptedTerms // {}),
   rev: (.rev // null),
-  unknown: (keys - ["disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev"])
+  keepData: (.keepData // false),
+  # What a keepData plan does not take: all of it comes from the install, or does not apply.
+  notKept: [to_entries[] | select(.value != null and (.key | IN("hostname", "admin", "ssh", "base", "apps", "acceptedTerms", "rev"))) | .key],
+  unknown: (keys - ["disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev", "keepData"])
 }')
 
 # Plan-level problems, all at once: [{field, code, message}].
@@ -433,6 +582,9 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
         then bad("disk"; "disk-missing"; "disk must be a device path such as /dev/nvme0n1") else empty end),
       (if (.diskSeq | type) != "number" or .diskSeq != (.diskSeq | floor) or .diskSeq < 1
         then bad("diskSeq"; "disk-seq-invalid"; "diskSeq must be the disk sequence number of the disk (lsblk -o PATH,DISK-SEQ)") else empty end),
+      (if (.keepData | type) != "boolean"
+        then bad("keepData"; "keep-data-invalid"; "keepData must be true or false") else empty end),
+      (if .keepData == true then (.notKept[] | bad(.; "keep-data-field"; "a keepData plan does not take \(.)")) else
       (if (.hostname | type) != "string"
           or (.hostname | test("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$") | not)
         then bad("hostname"; "hostname-invalid"; "hostname must be 1-63 lowercase letters, digits or hyphens, not starting or ending with a hyphen") else empty end),
@@ -463,7 +615,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
           (if (.admin.hashedPassword | type) == "string"
               and (.admin.hashedPassword | test("^\\$[0-9a-z]+(\\$[^$:\\s]+)+$") | not)
             then bad("admin.hashedPassword"; "admin-hash-invalid"; "admin.hashedPassword is not a crypt(3) hash (mkpasswd output)") else empty end)
-        end),
+        end)
+      end),
       (if (.ssh | type) != "object" or ((.ssh.enable // false) | type) != "boolean"
         then bad("ssh.enable"; "ssh-invalid"; "ssh.enable must be true or false") else empty end),
       (if (.channel | IN("stable", "beta") | not)
@@ -516,6 +669,7 @@ report_problems "$problems"
 plan() { local o=-r; if [ "$1" = -c ]; then o=-c; shift; fi; printf '%s' "$PLAN" | jq "$o" "$1"; }
 
 disk=$(plan .disk)
+keep_data=$(plan .keepData)
 plan_seq=$(plan .diskSeq)
 hostname=$(plan .hostname)
 admin_user=$(plan .admin.user)
@@ -580,6 +734,8 @@ write_starter() { # JSON array of app ids, [DIR]
 # state, the apps being in the starter set, DIR/apps/starter.json) and stop. For the flake check
 # that has hinteros-system parse them; nothing else is checked or touched, and root is not needed.
 if [ -n "$state_dir" ]; then
+  # A keepData plan makes no state: it is the install's.
+  [ "$keep_data" = false ] || exit 0
   mkdir -p "$state_dir/system" "$state_dir/apps"
   write_state "$state_dir/system"
   write_state "$state_dir/apps"
@@ -676,7 +832,9 @@ fi
 # hinteros-root). A second disk (an old install, a USB stick) carrying those labels would make them
 # ambiguous: udev links the label to either disk, so the new file systems could be made on the
 # wrong one. Refuse before anything is touched. (The installed system mounts by UUID.)
-others=$(lsblk -J -p -o PATH,PKNAME,PARTLABEL 2>/dev/null | jq -r --arg d "$disk_real" '
+# Nothing is partitioned for a keepData plan, so the labels of another disk do not matter.
+others=
+[ "$keep_data" = true ] || others=$(lsblk -J -p -o PATH,PKNAME,PARTLABEL 2>/dev/null | jq -r --arg d "$disk_real" '
   [.. | objects | select((.partlabel // "") | test("^hinteros-(esp|root)$"))
    | select((.pkname // "") != $d) | "\(.path) (\(.partlabel))"] | join(", ")' 2>/dev/null || true)
 [ -z "$others" ] || fail 2 other-hinteros-disk "another disk already has HinterOS partitions: $others. The installer finds the new partitions by label, so two such disks are ambiguous; unplug that disk or erase it first"
@@ -686,6 +844,21 @@ if mountpoint -q "$MNT"; then
     "$(basename "$disk_real")") ;;
     *) fail 2 mnt-in-use "$MNT is mounted from $mnt_src, which is not on $disk" ;;
   esac
+fi
+# A keepData plan needs an install it can keep. (A leftover read-write mount would stop the
+# read-only one.)
+root_dev=
+esp_dev=
+if [ "$keep_data" = true ]; then
+  if mountpoint -q "$MNT"; then
+    run "Unmounting $MNT" umount -R "$MNT"
+  fi
+  read_install "$disk_real"
+  [ -z "$EX_CODE" ] || fail 2 "$EX_CODE" "$EX_MSG. Nothing was touched"
+  root_dev=$EX_ROOT
+  esp_dev=$EX_ESP
+  root_uuid=$EX_ROOT_UUID
+  esp_uuid=$EX_ESP_UUID
 fi
 
 # A newer revision than this installer's: online only, and only the channel's verified tip (the
@@ -704,7 +877,11 @@ if [ "$newer" -eq 1 ]; then
   progress validate 7 "HinterOS $install_version ($install_rev) on the $channel channel is signed by $NEWER_SIGNER and follows this installer's version"
 fi
 
-progress validate 8 "Plan accepted: install HinterOS $install_version on $disk (disk $disk_seq, $((disk_bytes / 1024 / 1024 / 1024)) GiB), host name $hostname, apps: ${apps[*]:-none}"
+if [ "$keep_data" = true ]; then
+  progress validate 8 "Plan accepted: install HinterOS $install_version on $disk (disk $disk_seq, $((disk_bytes / 1024 / 1024 / 1024)) GiB), keep all data"
+else
+  progress validate 8 "Plan accepted: install HinterOS $install_version on $disk (disk $disk_seq, $((disk_bytes / 1024 / 1024 / 1024)) GiB), host name $hostname, apps: ${apps[*]:-none}"
+fi
 
 if [ "$validate_only" -eq 1 ]; then
   progress "done" 100 "Plan and machine are fine (validate only; nothing was touched)" info "" '{"failed_apps": []}'
@@ -783,65 +960,80 @@ if [ "$newer" -eq 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------------------------
-# 2. Partition and format (disko), mounted at /mnt.
+# 2. Partition and format (disko), mounted at /mnt. A keepData plan mounts what is there instead;
+# the ESP follows just before the boot loader is written (keep_esp).
 # ---------------------------------------------------------------------------------------------
 # The last check before anything is erased: the wizard and the download may have taken long.
 if [ -n "$BEFORE_WIPE_HOOK" ]; then
   "$BASH" -c "$BEFORE_WIPE_HOOK" >>"$LOG" 2>&1 </dev/null || true
 fi
 same_disk 2 "Nothing was touched"
-progress partition 10 "Erasing and partitioning $disk"
-if mountpoint -q "$MNT"; then
-  run "Unmounting $MNT" umount -R "$MNT"
-fi
-# An earlier install on this disk: erase every signature first. disko skips mkfs on a partition
-# that still shows a file system (a new partition at the old one's offsets would keep the old
-# store), and the old labels must be gone before the new ones are made.
-# shellcheck disable=SC2329 # run via `run`
-wipe_target() {
-  local part
-  for part in $(lsblk -lnpo PATH,TYPE "$disk_real" | awk '$2 == "part" {print $1}'); do
-    wipefs -a -f "$part"
+if [ "$keep_data" = true ]; then
+  progress mount 10 "Mounting the install on $disk"
+  install -d "$MNT"
+  run "Mounting the root subvolume" mount -o subvol=root,compress=zstd:1,noatime "$root_dev" "$MNT"
+  for s in nix home srv; do
+    install -d "$MNT/$s"
+    run "Mounting the $s subvolume" mount -o "subvol=$s,compress=zstd:1,noatime" "$root_dev" "$MNT/$s"
   done
-  wipefs -a -f "$disk_real"
-  blockdev --rereadpt "$disk_real" || true
-  udevadm settle || true
-}
-run "Erasing old signatures" wipe_target
-# The disko layout names the disk /dev/hinteros-target; this link points it at the real one.
-ln -sfn "$disk_real" "$TARGET_LINK"
-run "Partitioning" "$DISKO_SCRIPT" --yes-wipe-all-disks
-rm -f "$TARGET_LINK"
-udevadm settle >>"$LOG" 2>&1 || true
-for m in "$MNT" "$MNT/boot" "$MNT/nix" "$MNT/home" "$MNT/srv"; do
-  mountpoint -q "$m" || fail 1 mount-failed "the new file systems are not mounted at $MNT ($m is not)"
-done
-# The partitions are found by label, so make sure they are the ones on the target disk and that
-# the subvolumes are new.
-same_disk 1 "It was partitioned"
-for m in "$MNT" "$MNT/boot" "$MNT/nix" "$MNT/home" "$MNT/srv"; do
-  src=$(readlink -f "$(findmnt -nvo SOURCE "$m")")
-  [ "$(lsblk -no PKNAME -p "$src" | head -n1)" = "$disk_real" ] \
-    || fail 1 wrong-partition "$m is mounted from $src, which is not on $disk; refusing to install there"
-done
-stale=$(find "$MNT" -mindepth 1 -maxdepth 1 ! -name boot ! -name nix ! -name home ! -name srv -printf '%f\n'
-  find "$MNT/nix" "$MNT/home" "$MNT/srv" -mindepth 1 -maxdepth 1 -printf '%f\n')
-[ -z "$stale" ] || fail 1 stale-filesystem "the new root file system is not empty ($(printf '%s' "$stale" | tr '\n' ' ')); an old install was not erased"
-# What the system mounts (disk.nix); -p: read the disk, not blkid's cache of the old one.
-root_uuid=$(blkid -p -o value -s UUID "$(findmnt -nvo SOURCE "$MNT")")
-esp_uuid=$(blkid -p -o value -s UUID "$(findmnt -nvo SOURCE "$MNT/boot")")
-[ -n "$root_uuid" ] && [ -n "$esp_uuid" ] \
-  || fail 1 uuid-unknown "could not read the UUIDs of the new file systems"
-progress partition 20 "Disk is partitioned and mounted"
+  install -d "$MNT/boot"
+  progress mount 20 "The install is mounted; nothing was erased"
+else
+  progress partition 10 "Erasing and partitioning $disk"
+  if mountpoint -q "$MNT"; then
+    run "Unmounting $MNT" umount -R "$MNT"
+  fi
+  # An earlier install on this disk: erase every signature first. disko skips mkfs on a partition
+  # that still shows a file system (a new partition at the old one's offsets would keep the old
+  # store), and the old labels must be gone before the new ones are made.
+  # shellcheck disable=SC2329 # run via `run`
+  wipe_target() {
+    local part
+    for part in $(lsblk -lnpo PATH,TYPE "$disk_real" | awk '$2 == "part" {print $1}'); do
+      wipefs -a -f "$part"
+    done
+    wipefs -a -f "$disk_real"
+    blockdev --rereadpt "$disk_real" || true
+    udevadm settle || true
+  }
+  run "Erasing old signatures" wipe_target
+  # The disko layout names the disk /dev/hinteros-target; this link points it at the real one.
+  ln -sfn "$disk_real" "$TARGET_LINK"
+  run "Partitioning" "$DISKO_SCRIPT" --yes-wipe-all-disks
+  rm -f "$TARGET_LINK"
+  udevadm settle >>"$LOG" 2>&1 || true
+  for m in "$MNT" "$MNT/boot" "$MNT/nix" "$MNT/home" "$MNT/srv"; do
+    mountpoint -q "$m" || fail 1 mount-failed "the new file systems are not mounted at $MNT ($m is not)"
+  done
+  # The partitions are found by label, so make sure they are the ones on the target disk and that
+  # the subvolumes are new.
+  same_disk 1 "It was partitioned"
+  for m in "$MNT" "$MNT/boot" "$MNT/nix" "$MNT/home" "$MNT/srv"; do
+    src=$(readlink -f "$(findmnt -nvo SOURCE "$m")")
+    [ "$(lsblk -no PKNAME -p "$src" | head -n1)" = "$disk_real" ] \
+      || fail 1 wrong-partition "$m is mounted from $src, which is not on $disk; refusing to install there"
+  done
+  stale=$(find "$MNT" -mindepth 1 -maxdepth 1 ! -name boot ! -name nix ! -name home ! -name srv -printf '%f\n'
+    find "$MNT/nix" "$MNT/home" "$MNT/srv" -mindepth 1 -maxdepth 1 -printf '%f\n')
+  [ -z "$stale" ] || fail 1 stale-filesystem "the new root file system is not empty ($(printf '%s' "$stale" | tr '\n' ' ')); an old install was not erased"
+  # What the system mounts (disk.nix); -p: read the disk, not blkid's cache of the old one.
+  root_uuid=$(blkid -p -o value -s UUID "$(findmnt -nvo SOURCE "$MNT")")
+  esp_uuid=$(blkid -p -o value -s UUID "$(findmnt -nvo SOURCE "$MNT/boot")")
+  [ -n "$root_uuid" ] && [ -n "$esp_uuid" ] \
+    || fail 1 uuid-unknown "could not read the UUIDs of the new file systems"
+  progress partition 20 "Disk is partitioned and mounted"
+fi
 
 # ---------------------------------------------------------------------------------------------
 # 3. The device config: /etc/hinteros (schema 2; apps are per profile).
 # ---------------------------------------------------------------------------------------------
 cfg=$MNT/etc/hinteros
-install -d -m 0755 "$MNT/etc" "$cfg" "$MNT/var/lib/hinteros"
+# (Not on a kept install: this would also set the modes of what is there.)
+[ "$keep_data" = true ] || install -d -m 0755 "$MNT/etc" "$cfg" "$MNT/var/lib/hinteros"
 
 progress facter 22 "Detecting hardware"
 facter_ok=0
+rm -f "$cfg/facter.deferred" # of the install a keepData plan keeps
 if $FACTER -o "$cfg/facter.json" >>"$LOG" 2>&1 && jq -e . "$cfg/facter.json" >/dev/null 2>&1; then
   facter_ok=1
   if [ "$online" -eq 1 ]; then
@@ -860,7 +1052,7 @@ else
 fi
 
 progress config 28 "Writing the device configuration"
-write_state
+[ "$keep_data" = true ] || write_state
 
 sed -e "s|%CHANNEL%|$channel|g" -e "s|%REPO%|$REPO_URL|g" "$TEMPLATE" >"$cfg/flake.nix"
 chmod 0644 "$cfg/flake.nix"
@@ -872,7 +1064,7 @@ write_extra() {
   printf '{ imports = [ %s ]; }\n' "${extra_mods[*]}" >"$cfg/extra.nix"
   chmod 0644 "$cfg/extra.nix"
 }
-if [ -n "${HINTEROS_INSTALL_EXTRA_MODULE:-}" ]; then
+if [ -n "${HINTEROS_INSTALL_EXTRA_MODULE:-}" ] && [ "$keep_data" = false ]; then
   # Test hook: one more NixOS module for the installed system (the VM test adds its
   # instrumentation this way). Not part of the plan; unset on real installs.
   install -m 0644 "$HINTEROS_INSTALL_EXTRA_MODULE" "$cfg/extra-module.nix"
@@ -882,6 +1074,8 @@ fi
 # Where EFI variables cannot be written (efivarfs missing or read-only) bootctl would fail the whole
 # install; the box then boots through the fallback path (EFI/BOOT/BOOTX64.EFI) instead.
 efi_override_done=0
+# An install that is kept may have it already.
+[ ! -e "$cfg/installer-overrides.nix" ] || efi_override_done=1
 efi_override() {
   [ "$efi_override_done" -eq 0 ] || return 1
   cat >"$cfg/installer-overrides.nix" <<'NIX'
@@ -891,11 +1085,16 @@ efi_override() {
 }
 NIX
   chmod 0644 "$cfg/installer-overrides.nix"
+  # A kept extra.nix stays in force.
+  if [ -e "$cfg/extra.nix" ] && [ "${#extra_mods[@]}" -eq 0 ]; then
+    mv "$cfg/extra.nix" "$cfg/extra-kept.nix"
+    extra_mods+=(./extra-kept.nix)
+  fi
   extra_mods+=(./installer-overrides.nix)
   efi_override_done=1
   write_extra
 }
-if [ ! -w /sys/firmware/efi/efivars ]; then
+if [ ! -w /sys/firmware/efi/efivars ] && [ "$efi_override_done" -eq 0 ]; then
   efi_override
   progress config 29 "EFI variables are not writable here; the boot loader goes to the fallback path only" warn efivars-unavailable
 fi
@@ -914,17 +1113,19 @@ chmod 0644 "$cfg"/facter.*  2>/dev/null || true
 
 # The admin password: a hash in a root-only file the config points at. Never in the store, never
 # in state.json.
-hash_file=$MNT/var/lib/hinteros/admin-password-hash
-(
-  umask 0077
-  if [ "$(plan '(.admin.hashedPassword // "") | length')" -gt 0 ]; then
-    plan .admin.hashedPassword | tr -d '\n' >"$hash_file"
-  else
-    plan .admin.password | tr -d '\n' | mkpasswd -m sha-512 -s | tr -d '\n' >"$hash_file"
-  fi
-)
-chmod 0600 "$hash_file"
-[ "$(wc -c <"$hash_file")" -gt 8 ] || fail 1 hash-failed "could not hash the admin password"
+if [ "$keep_data" = false ]; then
+  hash_file=$MNT/var/lib/hinteros/admin-password-hash
+  (
+    umask 0077
+    if [ "$(plan '(.admin.hashedPassword // "") | length')" -gt 0 ]; then
+      plan .admin.hashedPassword | tr -d '\n' >"$hash_file"
+    else
+      plan .admin.password | tr -d '\n' | mkpasswd -m sha-512 -s | tr -d '\n' >"$hash_file"
+    fi
+  )
+  chmod 0600 "$hash_file"
+  [ "$(wc -c <"$hash_file")" -gt 8 ] || fail 1 hash-failed "could not hash the admin password"
+fi
 # Which vendor terms the user accepted here: id -> [{version, accepted_at, by}]. Root only; the box
 # adds to it when apps are installed later. Only apps that were actually installed are recorded:
 # it starts empty and the apps stage fills it.
@@ -939,7 +1140,7 @@ write_terms() { # JSON array of installed app ids
   )
   chmod 0600 "$MNT/var/lib/hinteros/terms-accepted.json"
 }
-write_terms '[]'
+[ "$keep_data" = true ] || write_terms '[]'
 progress config 30 "Device configuration written to /etc/hinteros"
 
 # ---------------------------------------------------------------------------------------------
@@ -1218,6 +1419,20 @@ sys_build() {
   step_pct=
 }
 
+# keep_esp (keepData): a new file system on the ESP with the volume id the system mounts, so a
+# damaged ESP is repaired. Only now: up to here a failure leaves the old boot files alone.
+esp_done=0
+keep_esp() {
+  [ "$esp_done" -eq 0 ] || return 0
+  same_disk 1 "Nothing was erased"
+  run "Formatting the EFI system partition" mkfs.vfat -i "${esp_uuid//-/}" -n HINTEROSESP "$esp_dev"
+  udevadm settle >>"$LOG" 2>&1 || true
+  run "Mounting the EFI system partition" mount -t vfat -o umask=0077 "$esp_dev" "$MNT/boot"
+  [ "$(blkid -p -o value -s UUID "$esp_dev")" = "$esp_uuid" ] \
+    || fail 1 esp-failed "the EFI system partition did not get the volume id $esp_uuid"
+  esp_done=1
+}
+
 # sys_bootloader: nixos-install --system sets the target's system profile to the system built and
 # writes the boot loader (it builds nothing).
 sys_bootloader() {
@@ -1227,6 +1442,7 @@ sys_bootloader() {
   sys_stage=bootloader
   step_pct=
   progress bootloader 66 "Installing the boot loader"
+  [ "$keep_data" = false ] || keep_esp
   nix_logged quiet bootloader 66 66 "" 0 nixos-install "${flags[@]}"
   [ "$NIX_RC" -eq 0 ]
 }
@@ -1239,8 +1455,10 @@ install_system() {
 # An offline system stage installs exactly what this medium carries: the box features of the
 # picked apps on it (none: free ISO apps need none), not those of an online-only app (Steam's
 # graphics32 needs 32-bit Mesa, which is not on the medium). Such an app's features come with the
-# box's first online rebuild or update (hinteros-system adds what the profiles' envs need).
+# box's first online rebuild or update (hinteros-system adds what the profiles' envs need). A
+# keepData plan keeps the box's state.
 offline_state() {
+  [ "$keep_data" = false ] || return 0
   requirements=$(app_requirements "$(json_array "${apps[@]}" | jq -c --slurpfile cat "$APPS_JSON" \
     '[.[] | select(. as $a | $cat[0].onIso | index($a))]')")
   write_state
@@ -1336,7 +1554,9 @@ finish() { # leaves the run: flush, unmount, final line
   if ! umount -R "$MNT" >>"$LOG" 2>&1; then
     progress finalize 98 "Could not unmount $MNT cleanly; reboot after the disk activity stops" warn unmount-failed
   fi
-  if [ "$newer" -eq 1 ]; then
+  if [ "$keep_data" = true ]; then
+    msg="HinterOS $install_version is installed (revision $install_rev, from this installer). All data is kept."
+  elif [ "$newer" -eq 1 ]; then
     msg="HinterOS $install_version is installed (revision $install_rev, downloaded from the $channel channel)."
   else
     msg="HinterOS $install_version is installed (revision $install_rev, from this installer)."
@@ -1372,6 +1592,9 @@ apps_rescue() {
   write_terms '[]'
   finish
 }
+
+# A keepData plan keeps the starter set, the app envs and everything in /var/lib/hinteros.
+[ "$keep_data" = false ] || finish
 
 # The starter env (apps.md "Installer and first boot"): the same `config.hinteros.appEnv.build`
 # as on the box, against the target's configuration, built into the target's store, and set as

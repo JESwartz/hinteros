@@ -15,7 +15,7 @@ EVAL=(runtime-eval profiles-eval daemon-eval mk-device hardening-eval installer-
   offline-inputs state-check promote apps)
 
 # Area -> VM tests. A change to a test's own file always adds that test.
-INSTALLER=(install-validation install-offline install-newer installer-ui installer-save-log)
+INSTALLER=(install-validation install-offline install-keep-data install-newer installer-ui installer-save-log)
 PROFILES=(profiles-greeter profiles-switch profiles-pin profiles-lifecycle profiles-lock
   profiles-isolation guest system-authz)
 APPS=(profile-apps profile-apps-system apps-box-features store-install)

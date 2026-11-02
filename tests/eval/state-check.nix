@@ -128,6 +128,28 @@ pkgs.runCommand "hinteros-state-check"
     test "$rc" = 2 || { cat short.log; echo "a short admin password: exit $rc, not 2" >&2; exit 1; }
     grep -q '"code":"admin-password-short"' short.log || { cat short.log; exit 1; }
 
+    # keepData: only the disk, the channel and the network; no hostname, no admin account and no
+    # state of its own. What it does not take is refused; a normal plan still needs them.
+    echo '{"disk":"/dev/vdb","diskSeq":1,"keepData":true,"channel":"beta","network":"offline"}' > keep.json
+    hinteros-install --plan keep.json --state-dir states-keep > keep.log || { cat keep.log; exit 1; }
+    test ! -e states-keep
+    jq '. + {hostname: "tv"}' keep.json > keep-host.json
+    rc=0
+    hinteros-install --plan keep-host.json --state-dir states-keep > keep-host.log || rc=$?
+    test "$rc" = 2 || { cat keep-host.log; echo "keepData with a hostname: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"keep-data-field"' keep-host.log || { cat keep-host.log; exit 1; }
+    jq '.keepData = "yes"' keep.json > keep-bad.json
+    rc=0
+    hinteros-install --plan keep-bad.json --state-dir states-keep > keep-bad.log || rc=$?
+    test "$rc" = 2 || { cat keep-bad.log; exit 1; }
+    grep -q '"code":"keep-data-invalid"' keep-bad.log || { cat keep-bad.log; exit 1; }
+    jq '.keepData = false' keep.json > keep-off.json
+    rc=0
+    hinteros-install --plan keep-off.json --state-dir states-keep > keep-off.log || rc=$?
+    test "$rc" = 2 || { cat keep-off.log; exit 1; }
+    grep -q '"code":"hostname-invalid"' keep-off.log || { cat keep-off.log; exit 1; }
+    grep -q '"code":"admin-missing"' keep-off.log || { cat keep-off.log; exit 1; }
+
     # A profile's account name is no admin's.
     jq --argjson t "$terms" '. + {acceptedTerms: $t} | .admin.user = "hinteros-p1"' ${planFiles.minimal} > reserved.json
     rc=0

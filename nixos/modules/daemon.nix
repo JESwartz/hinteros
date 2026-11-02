@@ -372,6 +372,12 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # In the toplevel, so that an installer can read it off a disk without running anything there
+    # (hinteros-install --list-disks).
+    system.systemBuilderCommands = ''
+      echo ${lib.escapeShellArg config.hinteros.release.version} > $out/hinteros-version
+    '';
+
     hinteros.daemon.session.settings = {
       launcher.app_id = lib.mkDefault config.hinteros.session.launcherAppId;
       # The cage fallback (VM) has no gamescope to drive.

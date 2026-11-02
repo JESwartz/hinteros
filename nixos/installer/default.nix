@@ -757,7 +757,8 @@ in
 
         hinteros-install --plan plan.json
 
-      The disk named in the plan is erased. The log is /var/log/hinteros-install.log.
+      The disk named in the plan is erased, unless the plan has "keepData": true.
+      The log is /var/log/hinteros-install.log.
 
     '';
 

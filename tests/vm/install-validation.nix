@@ -6,7 +6,8 @@
 # (unplugged and plugged in again, so it gets a new disk sequence number under the same name) after
 # the plan was made or after the plan was checked, just before erasing. Every refusal exits 2 with
 # an error line; a marker file system on the target disk survives them all.
-# Also `--info` (the installer's revision, version and channel; offline, no root).
+# A keepData plan is refused on a disk without an install. Also `--info` (the installer's revision,
+# version and channel; offline, no root) and `--list-disks` (a disk without an install, one in use).
 { self, pkgs }:
 let
   plan =
@@ -36,6 +37,14 @@ let
 
   cases = {
     ok = plan { };
+    keep-no-install = pkgs.writeText "plan.json" (
+      builtins.toJSON {
+        disk = "/dev/vdb";
+        keepData = true;
+        channel = "stable";
+      }
+    );
+    keep-with-admin = plan { keepData = true; };
     no-password = plan {
       admin.user = "james";
     };
@@ -212,6 +221,31 @@ in
           # Every line says which phase it is in; validation is the system stage.
           assert all(l.get("phase") == "system" for l in lines), lines
           assert lines[-1]["failed_apps"] == [], lines[-1]
+
+      with subtest("keepData: an install to keep, and nothing else in the plan"):
+          refused("keep-no-install", "keep-no-install")
+          refused("keep-no-install", "keep-no-install", validate_only=False)
+          refused("keep-with-admin", "keep-data-field")
+
+      with subtest("--list-disks: lsblk's JSON, with `existing` on every disk"):
+          disks = json.loads(installer.succeed("hinteros-install --list-disks"))["blockdevices"]
+          byname = {d["name"]: d for d in disks}
+          assert byname["vdb"]["type"] == "disk" and byname["vdb"]["existing"] is None, byname
+          assert byname["vda"]["existing"] is None and byname["vda"]["mountpoints"], byname
+          assert byname["vdb"]["disk-seq"] == int(installer.succeed("cat /sys/class/block/vdb/diskseq")), byname
+          # A btrfs file system that cannot be mounted does not fail the listing, nor does a caller
+          # that cannot mount.
+          installer.succeed("parted -s /dev/vdc mklabel gpt mkpart hinteros-esp fat32 1MiB 100MiB mkpart hinteros-root btrfs 100MiB 100%")
+          installer.succeed("udevadm settle")
+          installer.succeed("mkfs.btrfs -q -f /dev/vdc2 && dd if=/dev/zero of=/dev/vdc2 bs=1M seek=1 count=300 conv=notrunc")
+          assert installer.succeed("blkid -p -o value -s TYPE /dev/vdc2").strip() == "btrfs"
+          installer.fail("mount -o ro /dev/vdc2 /mnt")
+          disks = json.loads(installer.succeed("hinteros-install --list-disks"))["blockdevices"]
+          assert {d["name"]: d for d in disks}["vdc"]["existing"] is None, disks
+          disks = json.loads(installer.succeed("runuser -u nobody -- hinteros-install --list-disks"))["blockdevices"]
+          assert {d["name"]: d for d in disks}["vdc"]["existing"] is None, disks
+          installer.fail("findmnt -rn | grep -q vdc")
+          installer.succeed("wipefs -a /dev/vdc2 /dev/vdc1 /dev/vdc && udevadm settle")
 
       with subtest("malformed fields"):
           refused("bad-hostname", "hostname-invalid")

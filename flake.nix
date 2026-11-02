@@ -253,6 +253,7 @@
         time-zone = import ./tests/vm/time-zone.nix { inherit self pkgs; };
         install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };
         install-newer = import ./tests/vm/install-newer.nix { inherit self pkgs; };
+        install-keep-data = import ./tests/vm/install-keep-data.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
