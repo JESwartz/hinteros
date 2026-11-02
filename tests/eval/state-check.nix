@@ -128,16 +128,25 @@ pkgs.runCommand "hinteros-state-check"
     test "$rc" = 2 || { cat short.log; echo "a short admin password: exit $rc, not 2" >&2; exit 1; }
     grep -q '"code":"admin-password-short"' short.log || { cat short.log; exit 1; }
 
-    # keepData: only the disk, the channel and the network; no hostname, no admin account and no
-    # state of its own. What it does not take is refused; a normal plan still needs them.
+    # keepData: the disk, the channel and the network; the hostname, admin account (password
+    # optional) and ssh only if they change. No state of its own. What it does not take (apps) is
+    # refused, a bad hostname too; a normal plan still needs them.
     echo '{"disk":"/dev/vdb","diskSeq":1,"keepData":true,"channel":"beta","network":"offline"}' > keep.json
     hinteros-install --plan keep.json --state-dir states-keep > keep.log || { cat keep.log; exit 1; }
     test ! -e states-keep
-    jq '. + {hostname: "tv"}' keep.json > keep-host.json
+    jq '. + {hostname: "tv", admin: {user: "alex"}, ssh: {enable: true}}' keep.json > keep-host.json
+    hinteros-install --plan keep-host.json --state-dir states-keep > keep-host.log || { cat keep-host.log; exit 1; }
+    test ! -e states-keep
+    jq '. + {apps: ["youtube"]}' keep.json > keep-apps.json
     rc=0
-    hinteros-install --plan keep-host.json --state-dir states-keep > keep-host.log || rc=$?
-    test "$rc" = 2 || { cat keep-host.log; echo "keepData with a hostname: exit $rc, not 2" >&2; exit 1; }
-    grep -q '"code":"keep-data-field"' keep-host.log || { cat keep-host.log; exit 1; }
+    hinteros-install --plan keep-apps.json --state-dir states-keep > keep-apps.log || rc=$?
+    test "$rc" = 2 || { cat keep-apps.log; echo "keepData with apps: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"keep-data-field"' keep-apps.log || { cat keep-apps.log; exit 1; }
+    jq '. + {hostname: "-tv"}' keep.json > keep-badhost.json
+    rc=0
+    hinteros-install --plan keep-badhost.json --state-dir states-keep > keep-badhost.log || rc=$?
+    test "$rc" = 2 || { cat keep-badhost.log; exit 1; }
+    grep -q '"code":"hostname-invalid"' keep-badhost.log || { cat keep-badhost.log; exit 1; }
     jq '.keepData = "yes"' keep.json > keep-bad.json
     rc=0
     hinteros-install --plan keep-bad.json --state-dir states-keep > keep-bad.log || rc=$?

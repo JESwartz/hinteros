@@ -1,9 +1,10 @@
 # A reinstall that keeps the data (`keepData`): the installer installs on an empty disk with no
 # network, the box boots and gets marker files in /home, /srv and /var/lib/hinteros, its ESP is
-# damaged, and a plan with only the disk and `keepData` repairs it in place. The box boots: the
-# markers and everything in /var/lib/hinteros are as they were, the ESP has its volume id again, and
-# a new generation exists (state.json changed on the box first: from the same installer and the
-# same state the system is the same, and Nix makes no new generation).
+# damaged, and a `keepData` plan repairs it in place. The plan gives the admin user and SSH on, but
+# no hostname and no password: the box keeps its own hostname and password. The box boots: the
+# markers and everything in /var/lib/hinteros are as they were, the ESP has its volume id again,
+# SSH is on, and a new generation exists (state.json changed on the box first: from the same
+# installer and the same state the system is the same, and Nix makes no new generation).
 # Also what is refused, with the disk untouched, and `hinteros-install --list-disks` on the way.
 { self, pkgs }:
 let
@@ -46,6 +47,8 @@ let
     builtins.toJSON {
       disk = "/dev/vdc";
       keepData = true;
+      admin.user = "james";
+      ssh.enable = true;
       channel = "stable";
       network = "offline";
     }
@@ -182,7 +185,7 @@ in
         before = superblock()
         existing = disk_listed()["existing"]
         print(existing)
-        assert existing == {"version": "${self.nixosConfigurations.installer.config.hinteros.release.version}", "channel": "stable", "profiles": 1, "schemaOk": True}, existing
+        assert existing == {"version": "${self.nixosConfigurations.installer.config.hinteros.release.version}", "channel": "stable", "profiles": 1, "hostname": "livingroom", "admin": "james", "ssh": False, "schemaOk": True}, existing
         assert superblock() == before
         installer.fail("findmnt -rn | grep -q vdc")
 
@@ -272,7 +275,9 @@ in
         assert target.succeed("stat -c '%U' /home/hinteros-p1").strip() == "hinteros-p1"
         assert target.succeed("hostname").strip() == "den"
         state = json.loads(target.succeed("cat /etc/hinteros/state.json"))
+        new_state["settings"]["ssh"] = {"enable": True}
         assert state == new_state, (state, new_state)
+        target.wait_for_unit("sshd.service")
         check_layout(target, state)
         for f in ("flake.nix", "flake.lock", "state.json"):
             target.succeed(f"cmp /run/current-system/hinteros/{f} /etc/hinteros/{f}")

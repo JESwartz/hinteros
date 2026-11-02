@@ -44,7 +44,8 @@ let
         channel = "stable";
       }
     );
-    keep-with-admin = plan { keepData = true; };
+    # Hostname, admin and ssh are taken; the apps are not.
+    keep-with-apps = plan { keepData = true; };
     no-password = plan {
       admin.user = "james";
     };
@@ -222,10 +223,10 @@ in
           assert all(l.get("phase") == "system" for l in lines), lines
           assert lines[-1]["failed_apps"] == [], lines[-1]
 
-      with subtest("keepData: an install to keep, and nothing else in the plan"):
+      with subtest("keepData: an install to keep, and no apps in the plan"):
           refused("keep-no-install", "keep-no-install")
           refused("keep-no-install", "keep-no-install", validate_only=False)
-          refused("keep-with-admin", "keep-data-field")
+          refused("keep-with-apps", "keep-data-field")
 
       with subtest("--list-disks: lsblk's JSON, with `existing` on every disk"):
           disks = json.loads(installer.succeed("hinteros-install --list-disks"))["blockdevices"]

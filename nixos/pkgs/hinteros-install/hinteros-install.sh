@@ -8,8 +8,10 @@
 #
 # --list-disks (offline, needs root to look inside a disk): what `lsblk --json -b` says about the
 # block devices, with on every whole disk `existing`, the HinterOS install on it:
-#   {"blockdevices":[{"name":...,"type":"disk",...,"existing":{"version":"1.0.0","channel":"stable","profiles":2,"schemaOk":true}|null}]}
-# `version` and `channel` are absent if unknown, `profiles` counts state.json's accounts,
+#   {"blockdevices":[{"name":...,"type":"disk",...,"existing":{"version":"1.0.0","channel":"stable","profiles":2,
+#     "hostname":"hinteros","admin":"alice","ssh":false,"schemaOk":true}|null}]}
+# `version`, `channel`, `hostname` and `admin` are absent if unknown, `ssh` is state.json's
+# settings.ssh.enable (false if absent), `profiles` counts state.json's accounts,
 # `schemaOk` says a keepData plan is accepted on this disk. null: no such install, the disk is in
 # use or it cannot be read. Disks are mounted read-only, one at a time; an unreadable disk never
 # fails the listing.
@@ -63,10 +65,12 @@
 # A plan with keepData: true repairs the install on the disk in place: nothing is erased. The disk
 # must hold an install this installer can read (keep-* error codes). The subvolumes are mounted,
 # /etc/hinteros gets this installer's flake.nix and flake.lock and a new hardware report (state.json
-# and extra.nix stay), a new system generation goes into the existing store and the ESP is formatted
-# again with its volume id, last of all, so a failed build leaves the boot files alone. Stages:
-# validate, mount (10-20) in place of partition, facter, config, packages, build, bootloader,
-# snapshot, finalize, done. No apps stage, no admin password, no first-boot files.
+# and extra.nix stay; the plan's optional hostname, admin.user and ssh.enable replace those settings
+# in state.json, and an optional admin.password replaces the admin password), a new system
+# generation goes into the existing store and the ESP is formatted again with its volume id, last
+# of all, so a failed build leaves the boot files alone. Stages: validate, mount (10-20) in place
+# of partition, facter, config, packages, build, bootloader, snapshot, finalize, done. No apps
+# stage, no first-boot files.
 #
 # The design is in the system repo's README ("Installer").
 set -Eeuo pipefail
@@ -328,6 +332,9 @@ EX_READ=0     # 1: state.json was read; EX_VERSION, EX_PROFILES hold
 EX_VERSION=
 EX_CHANNEL=
 EX_PROFILES=0
+EX_HOSTNAME=  # settings from state.json (empty: not set)
+EX_ADMIN=
+EX_SSH=false
 EX_ROOT=      # the partitions
 EX_ESP=
 EX_ROOT_UUID= # the UUIDs from state.json
@@ -355,6 +362,10 @@ read_install_at() {
   fi
   EX_READ=1
   EX_PROFILES=$(jq '.profiles | if type == "array" then length else 0 end' <<<"$state")
+  EX_HOSTNAME=$(jq -r '.settings | objects | .hostname | strings' <<<"$state")
+  EX_ADMIN=$(jq -r '.settings | objects | .admin | objects | .user | strings' <<<"$state")
+  EX_SSH=$(jq '.settings | objects | .ssh | objects | .enable == true' <<<"$state")
+  [ "$EX_SSH" = true ] || EX_SSH=false
   EX_CHANNEL=$(jq -r '.nodes.hinteros.original.ref | select(. == "stable" or . == "beta")' "$dir/root/etc/hinteros/flake.lock" 2>/dev/null || true)
   EX_ROOT_UUID=$(jq -r '.disk | objects | .rootUuid | strings' <<<"$state")
   EX_ESP_UUID=$(jq -r '.disk | objects | .espUuid | strings' <<<"$state")
@@ -390,6 +401,7 @@ read_install_at() {
 read_install() {
   local d=$1 dir
   EX_CODE='' EX_MSG='' EX_READ=0 EX_VERSION='' EX_CHANNEL='' EX_PROFILES=0 EX_ROOT_UUID='' EX_ESP_UUID=''
+  EX_HOSTNAME='' EX_ADMIN='' EX_SSH=false
   EX_ROOT=$(lsblk -lnpo PATH,PARTLABEL "$d" 2>/dev/null | awk '$2 == "hinteros-root" {print $1}' | head -n1 || true)
   EX_ESP=$(lsblk -lnpo PATH,PARTLABEL "$d" 2>/dev/null | awk '$2 == "hinteros-esp" {print $1}' | head -n1 || true)
   if [ -z "$EX_ROOT" ] || [ -z "$EX_ESP" ]; then
@@ -422,8 +434,11 @@ list_disks() {
       read_install "$d"
       if [ "$EX_READ" -eq 1 ]; then
         one=$(jq -nc --arg v "$EX_VERSION" --arg ch "$EX_CHANNEL" --argjson n "$EX_PROFILES" --arg code "$EX_CODE" \
-          '{profiles: $n, schemaOk: ($code == "")} + (if $v == "" then {} else {version: $v} end)
-            + (if $ch == "" then {} else {channel: $ch} end)')
+          --arg host "$EX_HOSTNAME" --arg admin "$EX_ADMIN" --argjson ssh "$EX_SSH" \
+          '{profiles: $n, ssh: $ssh, schemaOk: ($code == "")} + (if $v == "" then {} else {version: $v} end)
+            + (if $ch == "" then {} else {channel: $ch} end)
+            + (if $host == "" then {} else {hostname: $host} end)
+            + (if $admin == "" then {} else {admin: $admin} end)')
       fi
     fi
     existing=$(jq -c --arg d "$d" --argjson one "$one" '.[$d] = $one' <<<"$existing")
@@ -571,8 +586,10 @@ PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   acceptedTerms: (.acceptedTerms // {}),
   rev: (.rev // null),
   keepData: (.keepData // false),
-  # What a keepData plan does not take: all of it comes from the install, or does not apply.
-  notKept: [to_entries[] | select(.value != null and (.key | IN("hostname", "admin", "ssh", "base", "apps", "acceptedTerms", "rev"))) | .key],
+  # The fields the plan has (a keepData plan keeps the settings of the install it does not give).
+  given: [to_entries[] | select(.value != null) | .key],
+  # What a keepData plan does not take: it comes from the install, or does not apply.
+  notKept: [to_entries[] | select(.value != null and (.key | IN("base", "apps", "acceptedTerms", "rev"))) | .key],
   unknown: (keys - ["disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev", "keepData"])
 }')
 
@@ -588,11 +605,14 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
         then bad("diskSeq"; "disk-seq-invalid"; "diskSeq must be the disk sequence number of the disk (lsblk -o PATH,DISK-SEQ)") else empty end),
       (if (.keepData | type) != "boolean"
         then bad("keepData"; "keep-data-invalid"; "keepData must be true or false") else empty end),
-      (if .keepData == true then (.notKept[] | bad(.; "keep-data-field"; "a keepData plan does not take \(.)")) else
-      (if (.hostname | type) != "string"
+      (if .keepData == true then (.notKept[] | bad(.; "keep-data-field"; "a keepData plan does not take \(.)")) else empty end),
+      # A keepData plan may leave out the hostname, the admin account and its password.
+      (if .keepData == true and (.given | index("hostname") | not) then empty
+       elif (.hostname | type) != "string"
           or (.hostname | test("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$") | not)
         then bad("hostname"; "hostname-invalid"; "hostname must be 1-63 lowercase letters, digits or hyphens, not starting or ending with a hyphen") else empty end),
-      (if (.admin | type) != "object"
+      (if .keepData == true and (.given | index("admin") | not) then empty
+       elif (.admin | type) != "object"
         then bad("admin"; "admin-missing"; "an admin account (user and password) is required")
         else
           (if (.admin.user | type) != "string"
@@ -605,7 +625,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
           (if ((.admin.password | type) == "string" and (.admin.password | length) > 0)
               and ((.admin.hashedPassword | type) == "string")
             then bad("admin"; "admin-password-ambiguous"; "give either admin.password or admin.hashedPassword, not both")
-           elif ((.admin.password | type) != "string" or (.admin.password | length) == 0)
+           elif .keepData != true
+              and ((.admin.password | type) != "string" or (.admin.password | length) == 0)
               and ((.admin.hashedPassword | type) != "string" or (.admin.hashedPassword | length) == 0)
             then bad("admin.password"; "admin-password-missing"; "the admin account needs a password (admin.password or admin.hashedPassword)")
            else empty end),
@@ -619,8 +640,7 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
           (if (.admin.hashedPassword | type) == "string"
               and (.admin.hashedPassword | test("^\\$[0-9a-z]+(\\$[^$:\\s]+)+$") | not)
             then bad("admin.hashedPassword"; "admin-hash-invalid"; "admin.hashedPassword is not a crypt(3) hash (mkpasswd output)") else empty end)
-        end)
-      end),
+        end),
       (if (.ssh | type) != "object" or ((.ssh.enable // false) | type) != "boolean"
         then bad("ssh.enable"; "ssh-invalid"; "ssh.enable must be true or false") else empty end),
       (if (.channel | IN("stable", "beta") | not)
@@ -674,6 +694,7 @@ plan() { local o=-r; if [ "$1" = -c ]; then o=-c; shift; fi; printf '%s' "$PLAN"
 
 disk=$(plan .disk)
 keep_data=$(plan .keepData)
+given() { [ "$(plan "(.given | index(\"$1\")) != null")" = true ]; } # FIELD: the plan has it
 plan_seq=$(plan .diskSeq)
 hostname=$(plan .hostname)
 admin_user=$(plan .admin.user)
@@ -859,6 +880,10 @@ if [ "$keep_data" = true ]; then
   fi
   read_install "$disk_real"
   [ -z "$EX_CODE" ] || fail 2 "$EX_CODE" "$EX_MSG. Nothing was touched"
+  # The admin password file stays; an install without an admin has none to keep.
+  if given admin && [ -z "$EX_ADMIN" ] && [ "$(plan '(.admin.password // .admin.hashedPassword // "") | length')" -eq 0 ]; then
+    fail 2 admin-password-missing "the install on $disk has no admin account; the new one needs a password. Nothing was touched"
+  fi
   root_dev=$EX_ROOT
   esp_dev=$EX_ESP
   root_uuid=$EX_ROOT_UUID
@@ -882,7 +907,7 @@ if [ "$newer" -eq 1 ]; then
 fi
 
 if [ "$keep_data" = true ]; then
-  progress validate 8 "Plan accepted: install HinterOS $install_version on $disk (disk $disk_seq, $((disk_bytes / 1024 / 1024 / 1024)) GiB), keep all data"
+  progress validate 8 "Plan accepted: install HinterOS $install_version on $disk (disk $disk_seq, $((disk_bytes / 1024 / 1024 / 1024)) GiB), keep all data, host name $(given hostname && echo "$hostname" || echo "${EX_HOSTNAME:-unchanged}")"
 else
   progress validate 8 "Plan accepted: install HinterOS $install_version on $disk (disk $disk_seq, $((disk_bytes / 1024 / 1024 / 1024)) GiB), host name $hostname, apps: ${apps[*]:-none}"
 fi
@@ -1055,8 +1080,25 @@ else
   progress facter 26 "Hardware detection failed; continuing with generic hardware support" warn facter-failed
 fi
 
+# update_state (keepData): the plan's hostname, admin user and SSH setting replace those of the
+# install's state.json; everything else in it stays.
+update_state() {
+  local host=null admin=null ssh=null
+  given hostname && host=$(plan -c .hostname)
+  given admin && admin=$(plan -c .admin.user)
+  given ssh && ssh=$(plan -c .ssh.enable)
+  jq --argjson host "$host" --argjson admin "$admin" --argjson ssh "$ssh" '
+    .settings = ((.settings // {})
+      + (if $host == null then {} else {hostname: $host} end)
+      + (if $admin == null then {} else {admin: ((.settings.admin // {}) + {user: $admin})} end)
+      + (if $ssh == null then {} else {ssh: ((.settings.ssh // {}) + {enable: $ssh})} end))' \
+    "$cfg/state.json" >"$cfg/state.json.new"
+  chmod 0644 "$cfg/state.json.new"
+  mv "$cfg/state.json.new" "$cfg/state.json"
+}
+
 progress config 28 "Writing the device configuration"
-[ "$keep_data" = true ] || write_state
+if [ "$keep_data" = true ]; then update_state; else write_state; fi
 
 sed -e "s|%CHANNEL%|$channel|g" -e "s|%REPO%|$REPO_URL|g" "$TEMPLATE" >"$cfg/flake.nix"
 chmod 0644 "$cfg/flake.nix"
@@ -1117,7 +1159,8 @@ chmod 0644 "$cfg"/facter.*  2>/dev/null || true
 
 # The admin password: a hash in a root-only file the config points at. Never in the store, never
 # in state.json.
-if [ "$keep_data" = false ]; then
+# A keepData plan keeps the password unless it gives one.
+if [ "$keep_data" = false ] || [ "$(plan '(.admin.password // .admin.hashedPassword // "") | length')" -gt 0 ]; then
   hash_file=$MNT/var/lib/hinteros/admin-password-hash
   (
     umask 0077
