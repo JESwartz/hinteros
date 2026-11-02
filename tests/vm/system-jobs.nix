@@ -1,4 +1,4 @@
-# Jobs in their own units: the machinery behind rebuild, base.set and rollback, against the real
+# Jobs in their own units: the machinery behind rebuild and rollback, against the real
 # daemon, polkit, logind, systemd, `nix-env` and `switch-to-configuration`.
 #
 # STUBBED: evaluating and building the new system. The job unit's PATH starts with a stub `nix`
@@ -56,18 +56,18 @@ in
         except ValueError:
             return {"failed": out}
 
-    def call(method, params=None):
-        r = rpc(method, params)
+    def call(method, params=None, user="hinteros-p1"):
+        r = rpc(method, params, user)
         assert "response" in r and r["response"], r
         return r["response"]
 
-    def ok(method, params=None):
-        r = call(method, params)
+    def ok(method, params=None, user="hinteros-p1"):
+        r = call(method, params, user)
         assert "result" in r, (method, params, r)
         return r["result"]
 
-    def fails(method, params, code):
-        r = call(method, params)
+    def fails(method, params, code, user="hinteros-p1"):
+        r = call(method, params, user)
         assert "error" in r and r["error"]["code"] == code, (method, params, r)
         return r["error"]
 
@@ -131,7 +131,7 @@ in
         assert fails("settings.set", {"revision": "f" * 64, "changes": {}}, 3007)["data"]["reason"] == "revision"
         assert fails("settings.set", {"revision": rev, "changes": {"ssh": {"enabled": True}}}, -32602)
         # Requesting the state the box already has is not a job either.
-        assert ok("base.set", {"base": "unstable"}) == {"job_id": None}
+        assert ok("base.set", {"base": "unstable"}, user="root") == {"job_id": None}
         assert jobs() == [] or all(j["state"] != "running" for j in jobs())
 
     base_tree = tree_hash()
@@ -144,7 +144,6 @@ in
         assert job["state"] == "running" and job["kind"] == "rebuild", job
         assert machine.succeed(f"systemctl is-active hinteros-job@{j1}.service").strip() == "active"
         assert fails("rebuild", {}, 3005)["data"]["job_id"] == j1
-        assert fails("base.set", {"base": "stable", "acknowledge_downgrade": True}, 3005)["data"]["job_id"] == j1
         assert ok("jobs.cancel", {"job_id": j1}) == {"job_id": j1}
         done = wait_job(j1)
         assert done["state"] == "cancelled", done
@@ -182,11 +181,15 @@ in
         assert names[-1] == "job_finished" and mine[-1]["params"]["ok"] is True, mine
         machine.succeed(f"echo {variant} > /run/stub/toplevel")
 
-    with subtest("base.set: a state change, a new generation, a switch that restarts the service mid-job"):
-        assert fails("base.set", {"base": "stable"}, 3011)  # a downgrade needs the acknowledgement
+    with subtest("a rebuild with a new system: a new generation, a switch that restarts the service mid-job"):
+        # Only the unstable base is built for this release.
+        r = fails("base.set", {"base": "stable", "acknowledge_downgrade": True}, 4001, user="root")
+        assert r["data"] == {"service": "base", "reason": "not_built"}, r
         assert tree_hash() == base_tree
+        # A rebuild keeps /etc/hinteros: a change of it, for the rollback below to take back.
+        machine.succeed("sed -i 's/^{/{\"testMarker\":1,/' /etc/hinteros/state.json")
         pid_before = pid()
-        j3 = ok("base.set", {"base": "stable", "acknowledge_downgrade": True})["job_id"]
+        j3 = ok("rebuild")["job_id"]
         done = wait_job(j3)
         assert done["state"] == "succeeded", done
         assert done["session_restart_required"] is False, done
@@ -195,13 +198,9 @@ in
         machine.succeed("systemctl is-active hinteros-system.service")
         assert current_system() == variant
         machine.succeed("test -e /etc/hinteros-variant")
-        state = json.loads(machine.succeed("cat /etc/hinteros/state.json"))
-        assert state["base"] == "stable", state
         g = gens()
         assert len(g) == 2 and g[0]["current"] and g[0]["generation"] == gen1 + 1, g
         assert done["result"]["generation"] == gen1 + 1, done
-        assert ok("settings.get")["settings"]["base"] == "stable"
-        assert ok("system.info")["base"] == "stable"
         machine.succeed("ls /etc/hinteros | grep -qx flake.nix")
         machine.fail("test -e /var/lib/hinteros/staging")
         # The job's events reached the listener (it reconnects after the restart).
@@ -211,11 +210,11 @@ in
 
     with subtest("rollback restores the previous generation and the /etc/hinteros snapshot"):
         cur = current_gen()["generation"]
-        assert fails("rollback", {"generation": cur}, 3010)
-        assert fails("rollback", {"generation": 99}, 3010)
+        assert fails("rollback", {"generation": cur}, 3010, user="root")
+        assert fails("rollback", {"generation": 99}, 3010, user="root")
         assert tree_hash() != base_tree  # still the variant's files
         pid_before = pid()
-        j4 = ok("rollback")["job_id"]
+        j4 = ok("rollback", user="root")["job_id"]
         done = wait_job(j4)
         assert done["state"] == "succeeded", done
         assert pid() != pid_before, "the switch back should restart hinteros-system too"
@@ -239,7 +238,7 @@ in
         assert any(j == j3 for j, _ in outcomes) and any(j == j4 for j, _ in outcomes), outcomes
 
     with subtest("jobs leave /var/lib/hinteros to hinteros-system"):
-        # Jobs ran after the service restarted (base.set's switch); none took the tree back to
+        # Jobs ran after the service restarted (the rebuild's switch); none took the tree back to
         # root:root, which made systemd chown all of it and race the service's file writes.
         assert machine.succeed("stat -c %U:%G /var/lib/hinteros").strip() == "root:hinteros"
 
