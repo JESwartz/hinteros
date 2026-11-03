@@ -772,8 +772,13 @@ in
         user = "root";
         program = lib.escapeShellArgs cfg.ui.command;
         # -s: Ctrl+Alt+F2 etc. switch VTs (cage has a logind session on seat0), so a root console on
-        # tty2 is reachable while the UI runs.
-        extraArguments = [ "-s" ];
+        # tty2 is reachable while the UI runs. -m last: the UI on one display only (the default,
+        # extend, stretches it across all of them).
+        extraArguments = [
+          "-s"
+          "-m"
+          "last"
+        ];
         environment = {
           # The launcher runs on native Wayland (as on the box); software GL is allowed for machines
           # whose GPU cage cannot use. The fonts are bundled in the launcher.
