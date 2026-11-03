@@ -51,10 +51,9 @@ one consistent system.
 
 Boxes follow the `stable` or `beta` branch of this repo and only install a tip that is signed by
 a key listed in `release/allowed_signers` of the generation they are running (design:
-`distribution.md` in the docs). Versions are semver; 1.0 ships on the `unstable` nixpkgs base
-only. A box on 0.x cannot update to 1.0: the disk layout changed, so it needs a reinstall that
-erases the disk (Keep data does not accept a 0.x install). Commits on `main` are not signed; the
-owner promotes them:
+`distribution.md` in the docs). Versions are semver; 1.0 is the first public release (0.x were
+internal pre-releases) and ships on the `unstable` nixpkgs base only. Commits on `main` are not
+signed; the owner promotes them:
 
 | Path or command | What it is |
 |---|---|
@@ -87,6 +86,9 @@ The ISO boots (UEFI or BIOS, hybrid image for USB sticks) into the controller-dr
 screens: the launcher in `--installer` mode, run by cage on tty1 as root (`hinteros.installer.ui.command`),
 reading the catalog index from `/run/current-system/sw/share/hinteros/` and driving the same backend
 as below. If the UI exits, tty1 is the root console with a notice.
+
+Release ISOs are on https://hinteros.org, on the Forgejo releases page and on GitHub, each with
+`SHA256SUMS`.
 
 ### Build the ISO and write it to a USB stick
 
