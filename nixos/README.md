@@ -1,5 +1,7 @@
 # NixOS
 
+The NixOS side of [HinterOS](https://hinteros.org): modules, the installer, packages and the test VM.
+
 - `modules/`: the HinterOS NixOS modules, exported by the flake as `nixosModules`.
   - `session.nix`: greetd autologin into gamescope running the home app.
     Options: `hinteros.session.enable`, `.user` (default `hinteros-p1`), `.compositor`
