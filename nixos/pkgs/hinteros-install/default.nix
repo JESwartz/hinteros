@@ -23,6 +23,7 @@
   mkpasswd,
   networkmanager,
   nixos-install,
+  efibootmgr,
   nixos-facter,
   systemd,
   nix,
@@ -101,6 +102,7 @@ stdenvNoCC.mkDerivation {
           mkpasswd
           networkmanager
           nixos-install
+          efibootmgr
           nixos-facter
           systemd
           nix

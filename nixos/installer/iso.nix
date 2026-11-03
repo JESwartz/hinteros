@@ -1,11 +1,15 @@
 # The installer ISO: the NixOS installation CD base (UEFI and BIOS bootable, hybrid for USB) plus
 # the installer environment (default.nix).
 {
+  config,
   lib,
   pkgs,
   modulesPath,
   ...
 }:
+let
+  bootTheme = pkgs.callPackage ./boot-theme.nix { };
+in
 {
   imports = [
     "${modulesPath}/installer/cd-dvd/installation-cd-base.nix"
@@ -23,9 +27,31 @@
     edition = "hinteros";
     # Level 19 shaves a few hundred MB off but doubles the build time; level 15 is the middle.
     squashfsCompression = "zstd -Xcompression-level 15";
-    # Boot menu: "HinterOS <version> Installer" (the name is system.nixos.distroName, branding.nix).
+    # Boot menu: "HinterOS <version> Installer" (the name is system.nixos.distroName, branding.nix;
+    # the version is system.nixos.label, below).
     appendToMenuLabel = " Installer";
+    # HinterOS colors and wordmark, not the NixOS logo (boot-theme.nix).
+    grubTheme = bootTheme.grubTheme;
+    efiSplashImage = bootTheme.biosSplash;
+    splashImage = bootTheme.biosSplash;
+    syslinuxTheme = ''
+      MENU TITLE ${config.system.nixos.distroName}
+      MENU RESOLUTION 800 600
+      MENU CLEAR
+      MENU ROWS 6
+      MENU CMDLINEROW -4
+      MENU TIMEOUTROW -3
+      MENU TABMSGROW  -2
+      MENU HELPMSGROW -1
+      MENU HELPMSGENDROW -1
+      MENU MARGIN 0
+
+      ${bootTheme.syslinuxColors}
+    '';
   };
+
+  # The HinterOS release version in the boot menu and /etc/os-release, not the nixpkgs version.
+  system.nixos.label = config.hinteros.release.version;
 
   boot = {
     initrd = {

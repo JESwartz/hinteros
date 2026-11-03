@@ -1480,6 +1480,30 @@ keep_esp() {
   esp_done=1
 }
 
+# prune_boot_entries: removes the firmware boot entries of systemd-boot ("Linux Boot Manager" and
+# its fallback) whose partition is gone. Each Erase all makes a new ESP partition and bootctl adds
+# a new pair, so without this the firmware's boot menu grows by two entries per install. Some
+# firmware (Lenovo) turns such an entry into a VenHw path; it is removed too. An entry on an
+# existing partition (this disk's, another disk's) stays. Failures are only logged.
+prune_boot_entries() {
+  [ -w /sys/firmware/efi/efivars ] || return 0
+  local line num label path guid
+  while IFS= read -r line; do
+    [[ "$line" =~ ^Boot([0-9A-Fa-f]{4})\*?[[:space:]]+(Fallback\ )?Linux\ Boot\ Manager$'\t'(.*)$ ]] || continue
+    num=${BASH_REMATCH[1]}
+    label="${BASH_REMATCH[2]}Linux Boot Manager"
+    path=${BASH_REMATCH[3]}
+    if [[ "$path" =~ ^HD\([0-9]+,GPT,([0-9a-fA-F-]{36}), ]]; then
+      guid=${BASH_REMATCH[1],,}
+      [ ! -e "/dev/disk/by-partuuid/$guid" ] || continue
+    elif [[ ! "$path" =~ ^VenHw\( ]]; then
+      continue
+    fi
+    echo "removing firmware boot entry Boot$num ($label, $path): its partition is gone" >>"$LOG"
+    efibootmgr -q -b "$num" -B >>"$LOG" 2>&1 || echo "could not remove Boot$num" >>"$LOG"
+  done < <(efibootmgr -v 2>>"$LOG" || true)
+}
+
 # sys_bootloader: nixos-install --system sets the target's system profile to the system built and
 # writes the boot loader (it builds nothing).
 sys_bootloader() {
@@ -1491,7 +1515,8 @@ sys_bootloader() {
   progress bootloader 66 "Installing the boot loader"
   [ "$keep_data" = false ] || keep_esp
   nix_logged quiet bootloader 66 66 "" 0 nixos-install "${flags[@]}"
-  [ "$NIX_RC" -eq 0 ]
+  [ "$NIX_RC" -eq 0 ] || return 1
+  prune_boot_entries
 }
 
 # install_system ONLINE(0|1): the three steps; NIX_RC and sys_stage tell how far it got.
