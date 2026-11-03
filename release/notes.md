@@ -8,6 +8,20 @@ written for the person using the box.
 
 ## Unreleased
 
+- HinterOS 1.0. From this version on, updates keep your data and settings. Downloads and help:
+  https://hinteros.org.
+- Reinstall required: a box on 0.x cannot update to 1.0. Put the 1.0 installer on a USB stick
+  and install again (Erase all). Copy what you want to keep from the box first.
+- New disk layout: one btrfs file system with compression, and separate parts for the system,
+  the store, the homes and the server media (/srv). Settings → Storage shows the media. The
+  box finds its disk by its ID, so a second HinterOS disk can't confuse the start.
+- Installer: the steps are Internet, Admin account, Options, Apps, Disk and Summary. If the
+  disk has HinterOS on it, Disk comes right after Internet.
+- Installer: Keep data repairs an installed box. It installs the system again and keeps the
+  profiles, homes, settings, Wi-Fi and the admin account. Erase all starts again.
+- Installer: the boot menu shows HinterOS and its version. The installer screen uses one
+  display. Old boot entries that point to a removed disk are deleted from the firmware.
+- The boxes get HinterOS from git.hinteros.org.
 - Servers: the box can run a Jellyfin server, a Plex Media Server, Tailscale and Cloudflare
   Tunnel. Put your movies, series and music in /srv/media. HinterOS sets up Jellyfin for you.
   Only your home network and your Tailscale network can connect to Jellyfin.
