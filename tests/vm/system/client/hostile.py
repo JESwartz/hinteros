@@ -165,9 +165,10 @@ r = c.call("hello", {"api_version": "9.0", "client": {"name": "x", "version": "0
 assert r["error"], r
 c = Conn(hello=False)
 r = c.call("hello", {"api_version": "1.0", "client": {"name": "x", "version": "0"}, "uid": 0})
-# NOTE: the daemon (e0f95a2) accepts unknown fields in hello (the schema says closed); the extra
-# field is ignored, never used as an identity. Recorded, not asserted.
-print("hello with an extra field ->", "error" if "error" in r else "accepted, ignored")
+# hello is closed for a client of this version (the schema says so): an extra field such as a
+# claimed uid is invalid_params, never read as an identity.
+assert r["error"]["code"] == INVALID and "result" not in r, r
+print("ok hello with an extra field", r["error"]["code"])
 
 # Methods that do not exist (including ones the design keeps out of the API, and path-ish names).
 for method in ["ssh.keys.add", "profiles.exec", "exec", "system.exec", "", "../x",
