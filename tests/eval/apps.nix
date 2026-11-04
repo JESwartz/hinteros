@@ -832,6 +832,13 @@ let
         true
       ];
     };
+    # about:home has no search box: no extension runs there, so it would get no OSK.
+    testFirefoxHomeNoSearch = {
+      expr = (fx base).policies.FirefoxHome;
+      expected = {
+        Search = false;
+      };
+    };
     testOskExtensionOff = {
       expr = [
         oskOff.config.hinteros.firefoxKiosk.oskExtension

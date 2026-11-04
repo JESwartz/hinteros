@@ -191,6 +191,10 @@ in
         SkipOnboarding = true;
         MoreFromMozilla = false;
       };
+      # No search box on about:home / about:newtab (the catalog's Firefox app starts there).
+      # Firefox runs no extension in its about: pages, so the OSK never opens for that box; the
+      # address bar (View: Ctrl+L and the on-screen keyboard) is the one place to type.
+      FirefoxHome = lib.mkDefault { Search = false; };
       # No "save password?" prompts (the controller cannot dismiss them reliably).
       PasswordManagerEnabled = lib.mkDefault false;
       OfferToSaveLogins = lib.mkDefault false;
