@@ -13,6 +13,8 @@ let
   inherit (pkgs) lib;
   sys = (pkgs.extend self.overlays.default).hinteros-system;
   installer = self.nixosConfigurations.installer.config.hinteros.installer.package;
+  # The same installer built for the beta channel (a beta ISO).
+  betaInstaller = installer.override { defaultChannel = "beta"; };
   index = self.nixosConfigurations.installer.config.hinteros.catalog.index;
   entries = self.inputs.hinteros-catalog.catalog;
   appIds = import ../../nixos/lib/app-ids.nix entries;
@@ -165,6 +167,18 @@ pkgs.runCommand "hinteros-state-check"
     hinteros-install --plan reserved.json --state-dir states-reserved > reserved.log || rc=$?
     test "$rc" = 2 || { cat reserved.log; echo "admin user hinteros-p1: exit $rc, not 2" >&2; exit 1; }
     grep -q '"code":"admin-user-reserved"' reserved.log || { cat reserved.log; exit 1; }
+
+    # A beta installer: a plan for the stable channel needs the stable tip as `rev` (its own beta
+    # revision is no stable release); beta, the default, is fine. A stable installer on beta is fine
+    # (online-ssh above).
+    jq --argjson t "$terms" '. + {acceptedTerms: $t, channel: "stable"}' ${planFiles.minimal} > stable.json
+    rc=0
+    ${lib.getExe' betaInstaller "hinteros-install"} --plan stable.json --state-dir states-beta > stable.log || rc=$?
+    test "$rc" = 2 || { cat stable.log; echo "stable plan on a beta installer: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"channel-needs-rev"' stable.log || { cat stable.log; exit 1; }
+    jq 'del(.channel)' stable.json > beta.json
+    ${lib.getExe' betaInstaller "hinteros-install"} --plan beta.json --state-dir states-beta > beta.log || { cat beta.log; exit 1; }
+    rm -r states-beta
 
     find states -name state.json | sort
     hinteros-system check-state ${

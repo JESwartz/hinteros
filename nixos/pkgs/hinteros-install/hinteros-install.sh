@@ -770,6 +770,18 @@ if [ -n "$plan_rev" ] && [ "$plan_rev" != "$ISO_REV" ]; then
 fi
 install_rev=$ISO_REV
 install_version=$ISO_VERSION
+# A beta installer has a beta revision. On the stable channel it is not a stable release: the box
+# would show it as stable and get no stable update until stable passes it (never, after a hotfix:
+# updates within a channel are fast-forward only). So a stable plan on a beta installer needs
+# `rev`, the stable tip, which is checked below to follow this revision. A stable installer on beta
+# is fine: every beta release contains the stable releases (promote beta checks it). Run again once
+# a keepData plan has the channel of the install.
+check_channel_rev() {
+  if [ "$newer" -eq 0 ] && [ "$channel" = stable ] && [ "$DEFAULT_CHANNEL" = beta ]; then
+    fail 2 channel-needs-rev "This installer has a beta version. For the stable channel, install the newest stable version (internet connection necessary). Or select the beta channel."
+  fi
+}
+check_channel_rev
 
 # state.json (schema 2, profiles.md "Installer"): one spare account (p1) and no
 # profile (first-boot mode creates the admin profile), no apps (each profile has its own; the
@@ -980,6 +992,7 @@ if [ "$keep_data" = true ]; then
   [ -z "$EX_CODE" ] || fail 2 "$EX_CODE" "$EX_MSG. Nothing was touched"
   # A plan without a channel keeps the channel of the install (its flake.lock), else the installer's.
   if ! given channel && [ -n "$EX_CHANNEL" ]; then channel=$EX_CHANNEL; fi
+  check_channel_rev
   # The admin password file stays; an install without an admin has none to keep.
   if given admin && [ -z "$EX_ADMIN" ] && [ "$(plan '(.admin.password // .admin.hashedPassword // "") | length')" -eq 0 ]; then
     fail 2 admin-password-missing "the install on $disk has no admin account; the new one needs a password. Nothing was touched"
