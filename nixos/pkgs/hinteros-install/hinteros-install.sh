@@ -1753,8 +1753,11 @@ if [ "$NIX_RC" != 0 ]; then
   fail 1 install-failed "nixos-install failed (exit $NIX_RC): $(printf '%s' "$NIX_ERRS" | tail -n 4 | tr '\n' ' ' | cut -c1-600); see $LOG"
 fi
 # The new system is installed and its boot loader written: from here a kept install is not put
-# back.
-keep_bak=
+# back. Its copy goes now: it is on the box's root, and the EXIT trap runs after finish unmounts it.
+if [ -n "$keep_bak" ]; then
+  rm -rf "$keep_bak"
+  keep_bak=
+fi
 nix_cleanup
 step_pct=100
 progress bootloader 70 "System installed, boot loader written"

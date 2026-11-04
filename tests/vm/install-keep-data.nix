@@ -346,6 +346,8 @@ in
         # The kept extra.nix: the test's own backdoor is why this script reaches the box at all.
         target.succeed("test -e /etc/hinteros/extra.nix -a -e /etc/hinteros/extra-module.nix")
         assert target.succeed("getent shadow james").split(":")[1].startswith("$6$")
+        # The run's copy of what it changed (made on the kept root) is gone.
+        target.succeed("test -z \"$(find / -xdev -mindepth 1 -maxdepth 1 -name 'tmp.*')\"")
 
     with subtest("a new generation, and the old ones still boot"):
         assert len(target.succeed("ls -d /nix/var/nix/profiles/system-*-link").split()) == generations + 1
