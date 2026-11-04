@@ -63,7 +63,7 @@
 
     # The real launcher reached the real daemon: the home screen shows the Games row
     # (not the connecting, unreachable or version-mismatch notices), and the
-    # daemon logged a successful 0.18 handshake from the launcher.
+    # daemon logged a successful 1.0 handshake from the launcher.
     machine.wait_for_text("Games", timeout=timedelta(seconds=60))
     screen = machine.get_screen_text()
     for bad in ("Can't reach", "versions don't match", "Connecting to the"):
