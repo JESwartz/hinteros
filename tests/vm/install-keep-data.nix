@@ -128,11 +128,14 @@ in
 
     def run_install(path, env=""):
         installer.succeed("rm -f /tmp/install.rc")
-        installer.succeed(
-            f"({env} HINTEROS_INSTALL_ALLOW_BIOS=1 "
+        # In a session of its own: a run started from the driver's command shell right after a
+        # boot was gone before it could write install.rc (the install itself ended normally).
+        script = (
+            f"{env} HINTEROS_INSTALL_ALLOW_BIOS=1 "
             f"timeout 1500 hinteros-install --plan {path} >/tmp/install.out 2>/tmp/install.stderr; "
-            "echo $? >/tmp/install.rc) </dev/null >/dev/null 2>&1 &"
+            "echo $? >/tmp/install.rc"
         )
+        installer.succeed(f"setsid -f bash -c {shlex.quote(script)} </dev/null >/dev/null 2>&1")
         installer.sleep(5)
         for _ in range(60):
             if installer.execute("pgrep -f '[l]ibexec/hinteros-install'")[0] != 0:
@@ -143,7 +146,11 @@ in
         for l in lines:
             print(l)
         # Written once the run (and its exit trap) is over.
-        installer.wait_until_succeeds("test -s /tmp/install.rc", timeout=120)
+        try:
+            installer.wait_until_succeeds("test -s /tmp/install.rc", timeout=120)
+        except Exception:
+            print("NO-RC:", installer.execute("ps -eo pid,ppid,stat,args; tail -n 40 /var/log/hinteros-install.log")[1])
+            raise
         rc = int(installer.succeed("cat /tmp/install.rc").strip())
         if rc != 0:
             print("INSTALL-LOG:", installer.execute("tail -n 40 /var/log/hinteros-install.log; dmesg | tail -n 15")[1])
@@ -211,7 +218,8 @@ in
         installer.succeed("flock -x /run/hinteros-install.lock sleep 120 >/dev/null 2>&1 &")
         installer.wait_until_fails("flock -n -s /run/hinteros-install.lock true")
         assert disk_listed()["existing"] is None
-        installer.succeed("pkill -f 'flock -x /run/hinteros-install.lock'")
+        # The sleep holds the lock too.
+        installer.succeed("pkill -f '[f]lock -x /run/hinteros-install.lock'; pkill -f '^sleep 120$'")
         installer.wait_until_succeeds("flock -n /run/hinteros-install.lock true")
 
     with subtest("refused: an install this installer cannot keep"):
