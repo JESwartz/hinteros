@@ -1,8 +1,11 @@
-# hinteros-bootstrap-channel <stable|beta> <rev>: move this box onto a channel at a given signed
-# revision, outside the update UI (hinteros-docs/design/distribution.md, "Migration from today").
+# hinteros-bootstrap-channel [--allow-downgrade] <stable|beta> <rev>: move this box onto a channel
+# at a given signed revision, outside the update UI (hinteros-docs/design/distribution.md,
+# "Migration from today").
 # For a box whose running generation does not trust the release key yet (installed before the
 # first signed release) and for boxes whose update keys are out of date. Run as root (sudo) over
-# SSH by the owner, with the rev `promote` printed.
+# SSH by the owner, with the rev `promote` printed. Never back: a rev that does not descend from
+# the box's current one (its system may not read the state a newer one wrote) needs
+# --allow-downgrade.
 #
 # It does what the privileged service's update apply does: verify the rev, stage a copy of
 # /etc/hinteros, point flake.nix's hinteros input at the channel, lock it to the rev
@@ -13,7 +16,7 @@
 # share/hinteros (for tests).
 
 usage() {
-  echo "usage: sudo hinteros-bootstrap-channel <stable|beta> <rev>" >&2
+  echo "usage: sudo hinteros-bootstrap-channel [--allow-downgrade] <stable|beta> <rev>" >&2
   exit 2
 }
 die() {
@@ -22,6 +25,11 @@ die() {
 }
 info() { printf '  %s\n' "$*"; }
 
+allow_downgrade=0
+if [ "${1:-}" = --allow-downgrade ]; then
+  allow_downgrade=1
+  shift
+fi
 [ "$#" -eq 2 ] || usage
 channel=$1
 rev=$2
@@ -65,14 +73,32 @@ cleanup() {
 trap cleanup EXIT
 
 echo
-echo "Fetching $branch ..."
+echo "Fetching the channel branches ..."
 git -C "$tmp" init -q
 git -C "$tmp" fetch -q "$repo" "refs/heads/$branch:refs/remotes/origin/$branch" \
   || die "could not fetch $branch from $repo"
+# The other channels too, to tell whether the target follows this box's revision.
+while IFS= read -r b; do
+  if [ "$b" = "$branch" ] || ! [[ $b =~ ^[A-Za-z0-9._/-]+$ ]]; then continue; fi
+  git -C "$tmp" fetch -q "$repo" "refs/heads/$b:refs/remotes/origin/$b" 2>/dev/null || true
+done < <(jq -r '.branches[] | strings' "$policy/update/channels.json")
 git -C "$tmp" cat-file -e "$rev^{commit}" 2>/dev/null || die "$rev is not on $branch"
 tip=$(git -C "$tmp" rev-parse "refs/remotes/origin/$branch")
 git -C "$tmp" merge-base --is-ancestor "$rev" "$tip" || die "$rev is not on $branch"
 [ "$rev" = "$tip" ] || info "note: $rev is not the tip of $branch (the tip is $tip)"
+# Never back (as the update UI): a system older than the one that wrote the box's state may not
+# read it. A rev that does not descend from this box's revision needs --allow-downgrade.
+if [ -n "$cur_rev" ] && git -C "$tmp" cat-file -e "$cur_rev^{commit}" 2>/dev/null; then
+  if [ "$rev" = "$cur_rev" ]; then
+    info "note: this box runs $rev already"
+  elif ! git -C "$tmp" merge-base --is-ancestor "$cur_rev" "$rev"; then
+    [ "$allow_downgrade" = 1 ] \
+      || die "$rev does not follow this box's revision $cur_rev (it is older, or on another line). Its system may not read the state the newer one wrote. Nothing changed. To go back anyway, run it again with --allow-downgrade."
+    echo "WARNING: $rev does not follow this box's revision $cur_rev (--allow-downgrade)."
+  fi
+else
+  info "note: this box's revision ${cur_rev:-<none>} is on no channel branch; it cannot be checked that $rev follows it"
+fi
 
 echo
 info "commit:  $rev"
