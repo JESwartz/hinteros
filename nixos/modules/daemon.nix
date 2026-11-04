@@ -714,7 +714,8 @@ in
           Restart = "on-failure";
           RestartSec = 2;
           # It reads /etc/hinteros, /proc, the profile links and /run/current-system, and writes
-          # only /run/hinteros. Everything that changes the system happens in hinteros-job@.
+          # only /run/hinteros and its state. Everything that changes the system happens in
+          # hinteros-job@.
           ProtectSystem = "strict";
           ReadWritePaths = [
             "/run/hinteros"
