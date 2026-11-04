@@ -263,12 +263,14 @@ let
       ];
     };
     # lib.catalogIds: what the daemon's `nix eval ...#lib.catalogIds` reads from a target revision.
+    # `kind` lets it tell new apps from new services.
     testCatalogIds = {
       expr = [
         (lib.attrNames self.lib.catalogIds == lib.attrNames c.hinteros.catalog.entries)
         (lib.all (
           e:
           lib.attrNames e == [
+            "kind"
             "name"
             "status"
             "statusReason"
@@ -276,12 +278,16 @@ let
         ) (lib.attrValues self.lib.catalogIds))
         self.lib.catalogIds.crunchyroll.name
         self.lib.catalogIds.crunchyroll.status
+        self.lib.catalogIds.crunchyroll.kind
+        self.lib.catalogIds.jellyfin-server.kind
       ];
       expected = [
         true
         true
         "Crunchyroll"
         "available"
+        "app"
+        "service"
       ];
     };
     testDaemonsInSystemPath = {
