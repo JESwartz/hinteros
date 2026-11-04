@@ -86,13 +86,14 @@ warns) skips the check, after the checks by hand (`scripts/test-plan.sh full --r
 
 ## Installer
 
-The ISO boots (UEFI or BIOS, hybrid image for USB sticks) into the controller-driven installer
+The ISO (a hybrid image for USB sticks) starts in UEFI or BIOS mode, but installs only on a machine
+that started it in UEFI mode (`not-uefi`). It boots into the controller-driven installer
 screens: the launcher in `--installer` mode, run by cage on tty1 as root (`hinteros.installer.ui.command`),
 reading the catalog index from `/run/current-system/sw/share/hinteros/` and driving the same backend
 as below. If the UI exits, tty1 is the root console with a notice.
 
-Release ISOs are on https://hinteros.org, on the Forgejo releases page and on GitHub, each with
-`SHA256SUMS`.
+Release ISOs are uploaded by hand (to https://hinteros.org) with `SHA256SUMS`; the checksums are
+also in the signed tag `v<version>` that `promote tag` makes ("Check a release ISO" below).
 
 ### Check a release ISO
 
@@ -141,7 +142,7 @@ storage (usb_storage, uas, sd_mod) drivers. Installed devices boot quietly too (
 
 `cp` onto the raw device works as well as `dd`. Build from a clean, committed checkout: the ISO
 pins the generated device flake to this repository's revision, and a dirty tree has none (it gets
-a placeholder revision and is only good for tests; such an ISO is `result/iso/hinteros-installer-dirty.iso` and its boot menu says "dirty tree: tests only"). Booting the stick needs UEFI mode with Secure
+a placeholder revision and is only good for tests; such an ISO is `result/iso/hinteros-installer-dirty.iso` and its boot menu says "dirty tree: tests only"). Installing needs the stick started in UEFI mode with Secure
 Boot off (neither the ISO nor systemd-boot is signed).
 
 ### Install from the console (the first hardware test)
