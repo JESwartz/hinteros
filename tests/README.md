@@ -10,6 +10,8 @@
   - installer: `install-offline`, `install-offline-hw`, `install-offline-m900`, `install-app-failure`, `install-validation`, `install-newer`, `install-keep-data`, `installer-ui`, `installer-save-log`
   - server: `server-api`, `server-network`, `server-jellyfin`, `server-jellyfin-signin`
 
+  Not covered by a VM test yet (backlog, 1.0): an update end to end through `hinteros-job@`, that is `update.check`/`update.apply` from a signed channel repo (HOME, SSL_CERT_FILE, the fetch into the mirror, `ssh-keygen -Y verify` against the `/run/current-system` allowed_signers, the flake.lock rewrite) and `channel.set` to an older channel. Until then `daemon-eval` checks the job PATH and the allowed_signers file, and hinteros-system's `updates_are_verified` test covers the verify logic.
+
   `vm/system/` holds the shared node (`node.nix`) and the Python socket clients the system tests run inside the VM; `vm/install/` the installer tests' helpers.
 
 - `eval/`: eval-only tests (`hardening-eval`: dev assertions and SSH firewall rules; `mk-device`: mkDevice and state.json translation; `runtime-eval`: runtime/polkit/maintenance wiring; `daemon-eval`: daemon module, polkit policy, per-generation files; `state-check`: the daemon parses every state.json this repo ships or the installer writes; `apps`: app registry, streaming apps, input keys, OSK, layout, gamescope pin and patches, unfree allowlist; `profiles-eval`: accounts, guest, greeter and per-profile session wiring; `server-eval`: the M10 services, their firewall and units; `installer-iso-eval`: the ISO's own configuration; `offline-inputs`: every build-time input of an offline install is on the ISO), run by `nix flake check` and CI.
