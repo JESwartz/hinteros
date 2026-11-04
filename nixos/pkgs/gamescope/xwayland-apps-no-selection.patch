@@ -28,7 +28,21 @@ diff -ru c/src/steamcompmgr.cpp d/src/steamcompmgr.cpp
  	if (ev->requestor == ctx->ourWindow)
  	{
  		return;
-@@ -8649,6 +8660,12 @@
+@@ -6722,6 +6733,13 @@
+ 	unsigned long bytes_after;
+ 	unsigned char *data = NULL;
+ 
++	// HinterOS: nothing from an app display reaches the other displays, and only the answer to
++	// gamescope's own request counts (any client can send a SelectionNotify).
++	if ( xwayland_ctx_is_apps( ctx ) || ev->requestor != ctx->ourWindow )
++	{
++		return;
++	}
++
+ 	XGetWindowProperty(ctx->dpy, ev->requestor, ev->property, 0, 0, False, AnyPropertyType,
+ 			&actual_type, &actual_format, &nitems, &bytes_after, &data);
+ 	if (data) {
+@@ -8649,6 +8667,12 @@
  	{
  		return;
  	}

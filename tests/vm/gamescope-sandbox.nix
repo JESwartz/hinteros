@@ -11,7 +11,9 @@
 # STEAM_OVERLAY, STEAM_INPUT_FOCUS, GAMESCOPE_EXTERNAL_OVERLAY) change neither focus nor the
 # app's id nor global state, and neither do the window's set before it is mapped (an app on #3:
 # its own id, not the STEAM_GAME it claims; overlay properties do not make it an overlay); the
-# same mode control on #0 still works. A second app lands on #3
+# same mode control on #0 still works. CLIPBOARD and PRIMARY go from #0 to #1 but never to or
+# from an app display, not even through a SelectionNotify sent to gamescope (and on #0 only the
+# answer to gamescope's own request counts). A second app lands on #3
 # and cannot reach #2 either. With every app
 # display in use, apps.launch answers no_app_display; closing an app frees its display. A fake
 # Steam game lands on no app display. The number of app displays follows the profile's setting
@@ -91,6 +93,42 @@ let
         d.sync()
         while True:
             time.sleep(60)
+      '';
+  # Sends gamescope's window (_NET_SUPPORTING_WM_CHECK) a SelectionNotify it never asked for:
+  # SELECTION (CLIPBOARD or PRIMARY) is in a UTF8_STRING property on the requestor, the
+  # client's own window ("own") or gamescope's ("gamescope"; any client can set it).
+  forgeSelection =
+    pkgs.writers.writePython3Bin "forge-selection" { libraries = [ pkgs.python3Packages.xlib ]; }
+      ''
+        import sys
+        import time
+
+        from Xlib import X, Xatom, display
+        from Xlib.protocol import event
+
+        selection, who, text = sys.argv[1:]
+        d = display.Display()
+        root = d.screen().root
+        check = d.intern_atom("_NET_SUPPORTING_WM_CHECK")
+        wm = root.get_full_property(check, Xatom.WINDOW).value[0]
+        gamescope = d.create_resource_object("window", wm)
+        own = root.create_window(0, 0, 1, 1, 0, X.CopyFromParent)
+        requestor = gamescope if who == "gamescope" else own
+        prop = d.intern_atom("HINTEROS_FORGED")
+        utf8 = d.intern_atom("UTF8_STRING")
+        requestor.change_property(prop, utf8, 8, text.encode())
+        gamescope.send_event(
+            event.SelectionNotify(
+                time=X.CurrentTime,
+                requestor=requestor,
+                selection=d.intern_atom(selection),
+                target=utf8,
+                property=prop,
+            )
+        )
+        d.sync()
+        # The own window must stay until gamescope reads the property.
+        time.sleep(3)
       '';
   probe = pkgs.writeShellApplication {
     name = "hinteros-display-probe-term";
@@ -178,6 +216,7 @@ in
         pkgs.socat
         pkgs.xdotool
         pkgs.xclip
+        forgeSelection
         pkgs.xorg.xprop
         pkgs.xorg.xwininfo
         pkgs.iproute2
@@ -355,6 +394,21 @@ in
         machine.sleep(3)
         assert sel_get(":0", sel) == f"home-{sel}", (sel, "app display -> home", sel_get(":0", sel))
         assert sel_get(":3", sel) == "", (sel, "app display -> app display", sel_get(":3", sel))
+    # A SelectionNotify that gamescope did not ask for: from an app display it changes nothing
+    # (requestor the app's window or gamescope's), and on :0 only one for gamescope's own window
+    # counts. The last one is the control: it shows the forged event works.
+    def forge(display, sel, who, text):
+        machine.succeed(as_user(f"forge-selection {sel.upper()} {who} {text}", display))
+        machine.sleep(2)
+
+    for sel in ("clipboard", "primary"):
+        for display, who in ((":2", "own"), (":2", "gamescope"), (":0", "own")):
+            forge(display, sel, who, f"forged-{sel}")
+            for home_display in (":0", ":1"):
+                got = sel_get(home_display, sel)
+                assert got == f"home-{sel}", (sel, "forged from", display, who, home_display, got)
+        forge(":0", sel, "gamescope", f"forged-{sel}")
+        machine.wait_until_succeeds(as_user(f"timeout 5 xclip -o -selection {sel} | grep -qx forged-{sel}", ":1"), timeout=30)
     machine.execute("pkill -u hinteros-p1 -x xclip")
     # The app's window is still an ordinary app window with its own id.
     ok("apps.focus", {"id": "probe"})

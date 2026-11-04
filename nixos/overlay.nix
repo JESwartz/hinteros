@@ -42,7 +42,8 @@ final: prev: {
   # xwayland-apps-no-selection.patch: gamescope copied CLIPBOARD and PRIMARY from every Xwayland
   #   to every other: an app on #2 could read what the home app, the OSK or another app copied,
   #   and put text into them. Now nothing goes to or comes from #2 and later; apps on one
-  #   display still share it there (Xwayland's own selections).
+  #   display still share it there (Xwayland's own selections). gamescope takes text only from
+  #   the answer to its own request on #0 and #1: any client can send it a SelectionNotify.
   gamescope = prev.gamescope.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./pkgs/gamescope/keep-output-on-exit.patch
