@@ -105,7 +105,8 @@ in
         assert "org.hinteros.system.ssh.admin" not in pol
         for a in ACTIONS:
             v = machine.succeed(f"pkaction --action-id org.hinteros.system.{a} --verbose")
-            assert "implicit any:\n    no" in v.replace("  implicit any:     ", "  implicit any:\n    ") or "no" in v, v
+            anyv = [l.split(":", 1)[1].strip() for l in v.splitlines() if l.strip().startswith("implicit any:")]
+            assert anyv == ["no"], v
         v = machine.succeed("pkaction --action-id org.hinteros.system.ssh --verbose")
         assert v.count("auth_admin") >= 3, v
 
