@@ -122,17 +122,38 @@ let
           msg = "1 to 8 accounts";
           patch.profiles = [ ];
         }
-        {
-          msg = "unknown box feature(s) in requirements: opengl";
-          patch.requirements = [ "opengl" ];
-        }
-        {
-          msg = "unknown service id(s): youtube";
-          patch.services = [ "youtube" ];
-        }
       ];
-      expected = lib.genList (_: true) 6;
+      expected = lib.genList (_: true) 4;
     };
+    # Ids a later release may add: left out with a warning (a box on an older channel evaluates
+    # the newer state.json), not refused.
+    testUnknownIdsWarn =
+      let
+        newer = good2 // {
+          requirements = [
+            "graphics32"
+            "opengl"
+          ];
+          services = [ "youtube" ];
+        };
+        cfg = (mk newer).config;
+      in
+      {
+        expr = [
+          (failures newer)
+          (lib.any (lib.hasInfix "unknown box feature(s) in requirements, left out: opengl") cfg.warnings)
+          (lib.any (lib.hasInfix "unknown service id(s), left out: youtube") cfg.warnings)
+          (lib.elem "opengl" cfg.hinteros.boxFeatures)
+          (lib.elem "youtube" cfg.hinteros.catalog.services)
+        ];
+        expected = [
+          ""
+          true
+          true
+          false
+          false
+        ];
+      };
     testRequiredFields = {
       expr = map (f: lib.hasInfix "${f} must be" (failures (removeAttrs good2 [ f ]))) [
         "base"

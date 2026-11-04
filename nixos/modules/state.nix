@@ -2,7 +2,10 @@
 # hinteros.* and NixOS options. This is the only place that reads the state. A bad value of a
 # field it knows fails evaluation, so mistakes surface at build time, before a switch. A field it
 # does not know is ignored: a box that moves to an older channel has to evaluate the newer
-# state.json. A change that is not safe to ignore bumps schemaVersion.
+# state.json. For the same reason a value a later release may add (a box feature or service id
+# its catalog does not have, a clean-up frequency, a keep count above 10, a zone its tzdata does
+# not have) only warns and is left out (or the default is used); a value of the wrong type or
+# form still fails. A change that is not safe to ignore bumps schemaVersion.
 #
 # `profiles` are the accounts `{id}`, `requirements` the box features, `services` the catalog
 # services; each profile has its own Nix profile of apps (app-env.nix).
@@ -39,17 +42,22 @@ let
     "weekly"
     "monthly"
   ];
-  keepOk = n: builtins.isInt n && n >= 1 && n <= 10;
+  # Above 10 (a later release's limit): 10, with a warning.
+  maxKeep = 10;
+  keepOk = n: builtins.isInt n && n >= 1;
   cleanupOk = {
     enable = builtins.isBool (cleanup.enable or true);
-    frequency = lib.elem (cleanup.frequency or "weekly") cleanupFrequencies;
+    frequency = builtins.isString (cleanup.frequency or "weekly");
     keepSystem = keepOk (cleanup.keepSystem or 5);
     keepProfiles = keepOk (cleanup.keepProfiles or 5);
   };
+  # A frequency a later release adds: the default, with a warning.
+  frequencyKnown = lib.elem (cleanup.frequency or "weekly") cleanupFrequencies;
   # The time zone (time-zone.md): a zone name of tzdata, e.g. "America/Chicago"; absent means
-  # UTC. time-zone.nix applies it from the live state.json at activation, not from here.
+  # UTC. time-zone.nix applies it from the live state.json at activation, not from here (a zone
+  # this tzdata does not have: UTC).
   timeZone = settings.timeZone or null;
-  timeZoneOk = (import ../lib/time-zone.nix { inherit pkgs; }).ok timeZone;
+  tz = import ../lib/time-zone.nix { inherit pkgs; };
   disk = state.disk or null;
   # A bad value is reported below; the disk options still need a string.
   diskUuid = v: if builtins.isString v then v else "invalid";
@@ -84,20 +92,20 @@ let
     ++ (
       if builtins.isAttrs cleanup then
         lib.optional (!cleanupOk.enable) "settings.cleanup.enable must be a bool"
-        ++
-          lib.optional (!cleanupOk.frequency)
-            "settings.cleanup.frequency must be one of ${lib.concatStringsSep ", " cleanupFrequencies}, not ${builtins.toJSON cleanup.frequency}"
+        ++ lib.optional (
+          !cleanupOk.frequency
+        ) "settings.cleanup.frequency must be a string, not ${builtins.toJSON cleanup.frequency}"
         ++
           lib.optional (!cleanupOk.keepSystem)
-            "settings.cleanup.keepSystem must be a whole number from 1 to 10, not ${builtins.toJSON cleanup.keepSystem}"
+            "settings.cleanup.keepSystem must be a whole number from 1, not ${builtins.toJSON cleanup.keepSystem}"
         ++
           lib.optional (!cleanupOk.keepProfiles)
-            "settings.cleanup.keepProfiles must be a whole number from 1 to 10, not ${builtins.toJSON cleanup.keepProfiles}"
+            "settings.cleanup.keepProfiles must be a whole number from 1, not ${builtins.toJSON cleanup.keepProfiles}"
       else
         [ "settings.cleanup must be an object" ]
     )
     ++
-      lib.optional (timeZone != null && !timeZoneOk)
+      lib.optional (timeZone != null && !tz.wellFormed timeZone)
         "settings.timeZone must be a time zone name of tzdata (e.g. \"Europe/Berlin\" or \"UTC\"), not ${builtins.toJSON timeZone}"
     ++ lib.optional (admin != null && !(admin ? user)) "settings.admin needs a user"
     ++
@@ -109,13 +117,33 @@ let
     ++ lib.optional (
       disk != null && !builtins.isString (disk.espUuid or null)
     ) "disk.espUuid must be a string"
-    ++
-      lib.optional (unknownFeatures != [ ])
-        "unknown box feature(s) in requirements: ${lib.concatStringsSep ", " unknownFeatures} (known: ${lib.concatStringsSep ", " cfg.knownBoxFeatures})"
+    ++ profileProblems;
+
+  # Values a later release may add: left out (or the default), with a warning.
+  notices =
+    lib.optional (unknownFeatures != [ ])
+      "unknown box feature(s) in requirements, left out: ${lib.concatStringsSep ", " unknownFeatures} (known: ${lib.concatStringsSep ", " cfg.knownBoxFeatures})"
     ++
       lib.optional (unknownServices != [ ])
-        "unknown service id(s): ${lib.concatStringsSep ", " unknownServices} (known: ${lib.concatStringsSep ", " serviceIds})"
-    ++ profileProblems;
+        "unknown service id(s), left out: ${lib.concatStringsSep ", " unknownServices} (known: ${lib.concatStringsSep ", " serviceIds})"
+    ++ lib.optionals (builtins.isAttrs cleanup) (
+      lib.optional (cleanupOk.frequency && !frequencyKnown)
+        "unknown settings.cleanup.frequency ${builtins.toJSON cleanup.frequency}, using weekly (known: ${lib.concatStringsSep ", " cleanupFrequencies})"
+      ++
+        lib.concatMap
+          (
+            k:
+            lib.optional (cleanupOk.${k} && cleanup.${k} or 0 > maxKeep)
+              "settings.cleanup.${k} ${toString cleanup.${k}} is above ${toString maxKeep}, using ${toString maxKeep}"
+          )
+          [
+            "keepSystem"
+            "keepProfiles"
+          ]
+    )
+    ++ lib.optional (
+      tz.wellFormed timeZone && !tz.ok timeZone
+    ) "unknown settings.timeZone ${builtins.toJSON timeZone} (not in this tzdata), using UTC";
 
   sshEnable = ssh.enable or false;
 in
@@ -138,6 +166,7 @@ in
           assertion = false;
           inherit message;
         }) (map (m: "hinteros state: ${m}") problems);
+        warnings = map (m: "hinteros state: ${m}") notices;
 
         hinteros = {
           # The accounts (profiles.nix makes one Unix user each).
@@ -157,12 +186,14 @@ in
       (lib.mkIf (builtins.isAttrs cleanup) {
         hinteros.maintenance = lib.mkMerge [
           (lib.mkIf (cleanup ? enable && cleanupOk.enable) { gc.enable = cleanup.enable; })
-          (lib.mkIf (cleanup ? frequency && cleanupOk.frequency) { gc.dates = cleanup.frequency; })
+          (lib.mkIf (cleanup ? frequency && cleanupOk.frequency && frequencyKnown) {
+            gc.dates = cleanup.frequency;
+          })
           (lib.mkIf (cleanup ? keepSystem && cleanupOk.keepSystem) {
-            keepGenerations = cleanup.keepSystem;
+            keepGenerations = lib.min maxKeep cleanup.keepSystem;
           })
           (lib.mkIf (cleanup ? keepProfiles && cleanupOk.keepProfiles) {
-            keepProfileGenerations = cleanup.keepProfiles;
+            keepProfileGenerations = lib.min maxKeep cleanup.keepProfiles;
           })
         ];
       })
