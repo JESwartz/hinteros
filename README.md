@@ -342,7 +342,7 @@ Every HinterOS system (devices and the ISO) has `pciutils`, `usbutils`, `ethtool
   link`, carrier, speed, EEE, driver and firmware per interface (`ethtool`), PCI network devices
   (`lspci -nnk`), kernel log lines for NIC drivers and firmware loading, `nmcli device` and
   `general`, Wi-Fi and `rfkill`.
-- `back` (alias `installer`, ISO): from the tty2 console to the installer screens on tty1; it restarts the UI if it is not running, and a reminder is printed above every tty2 prompt. The UI's stderr goes to the journal (and so into `hinteros-save-log`'s `journal.txt`).
+- `back` (alias `installer`, ISO): from the tty2 console to the installer screens on tty1; it restarts the UI if it is not running or tty1 does not come to the front, but never while `hinteros-install` holds its lock (the UI runs the install in its own unit, so a restart would kill it), and a reminder is printed above every tty2 prompt. The UI's stderr goes to the journal (and so into `hinteros-save-log`'s `journal.txt`).
 - `hinteros-save-log /dev/sdX` (ISO): saves the install log, journal, dmesg, the `hinteros-diagnose`
   output, nmcli, lspci, lsusb, lsblk and a `nixos-facter` report in a timestamped folder on a second
   USB stick. Give the whole stick or one partition (a whole stick uses its first partition with a

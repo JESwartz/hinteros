@@ -499,16 +499,19 @@ let
   # `back` (alias `installer`): from the tty2 console back to the installer screens on tty1. If the
   # UI is not running (it exited, or crashed) it is started again first; if tty1 does not come to
   # the front (cage holds the VT in graphics mode and the switch request was lost) the UI is
-  # restarted, which takes the VT.
+  # restarted, which takes the VT. Never while hinteros-install runs: the UI starts it in the UI's
+  # own unit, so a restart would kill the install part-way (the lock is the one each install holds).
   backCommand = pkgs.writeShellApplication {
     name = "back";
     runtimeInputs = [
       pkgs.kbd
       pkgs.systemd
       pkgs.coreutils
+      pkgs.util-linux
     ];
     text = ''
       active() { [ "$(cat /sys/class/tty/tty0/active)" = tty1 ]; }
+      installing() { ! flock -n -s /run/hinteros-install.lock true 2>/dev/null; }
       if ${
         lib.boolToString (cfg.ui.command != null)
       } && ! systemctl is-active --quiet cage-tty1.service; then
@@ -520,6 +523,11 @@ let
         sleep 0.5
       done
       if ${lib.boolToString (cfg.ui.command != null)}; then
+        if installing; then
+          echo "An install runs. The installer screens do not restart during an install."
+          echo "Press Ctrl+Alt+F1 to go to them."
+          exit 1
+        fi
         systemctl restart cage-tty1.service
         sleep 1
       fi
