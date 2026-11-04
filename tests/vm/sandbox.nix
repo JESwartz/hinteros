@@ -5,10 +5,13 @@
 # the `downloads` grant, /dev/input only with `gamepad`. An apps.set_permission opt-out applies on
 # the next launch, and a required permission cannot be denied. Sound: every app can play; only
 # an app with `mic` can record (the others get the play-only socket, pulse/play).
-# System calls (seccomp filter): keyrings, io_uring, TIOCSTI/TIOCLINUX, userfaultfd, perf, the new
-# mount API, ADDR_NO_RANDOMIZE, x32 and AF_PACKET fail with the filter's errno; i386 kills; a
-# user namespace with a mount and a nested bwrap still work. The same probe outside the sandbox
-# shows the kernel alone allows them. GPU: the render node (vgem) is there, the card nodes not.
+# System calls (seccomp filter): keyrings, TIOCSTI/TIOCLINUX, userfaultfd, perf, the new mount
+# API, ADDR_NO_RANDOMIZE and AF_PACKET fail with the filter's errno; i386 kills; a user namespace
+# with a mount and a nested bwrap still work. The same probe outside the sandbox shows the kernel
+# alone allows them. io_uring and x32 fail too, but this kernel refuses them with the same errno
+# without the filter (kernel.io_uring_disabled = 2, no x32 ABI), so the probe cannot tell the
+# filter's rules for them apart: the daemon's unit tests (sandbox/seccomp.rs) check those.
+# GPU: the render node (vgem) is there, the card nodes not.
 { self, pkgs }:
 let
   # System call checks, `<check>=yes|no` (see the source).
@@ -218,14 +221,17 @@ in
             assert res[k] == ("yes" if v else "no"), (k, res)
 
     # The host has card and render nodes; outside the sandbox the kernel alone allows what the
-    # filter blocks (io_uring and x32 are off without it too).
+    # filter blocks, except io_uring and x32: the kernel gives the same errno without it, so
+    # inside the sandbox those two prove nothing about the filter (see the header).
     machine.succeed("ls /dev/dri/card* && ls /dev/dri/renderD128")
     outside = dict(line.split("=", 1) for line in machine.succeed(
         "runuser -u hinteros-p1 -- hinteros-seccomp-probe < /dev/null").split())
     print("outside the sandbox", outside)
+    kernel_off = ("io_uring_blocked", "x32_blocked")
     for k in blocked:
-        if k not in ("io_uring_blocked", "x32_blocked"):
-            assert outside[k] == "no", (k, outside)
+        # A kernel that allows io_uring or x32 again: the sandbox checks prove the filter again,
+        # so drop them from kernel_off.
+        assert outside[k] == ("yes" if k in kernel_off else "no"), (k, outside)
     assert outside["userns"] == "yes", outside
 
     # The plain app first: no permissions, so no Downloads, no /dev/input and no recording.
