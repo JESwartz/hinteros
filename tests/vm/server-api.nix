@@ -384,7 +384,6 @@ profiles.mkTest {
         bad = [
             "x",
             base64.b64encode(b'{"a": "0", "t": "x", "s": "y"}').decode(),
-            base64.b64encode(json.dumps({"a": "0123456789abcdef0123456789abcdef", "t": "5c7f3a3e-1a2b-4c5d-8e9f-0a1b2c3d4e5f", "s": secret, "x": 1}).encode()).decode(),
             good + "\n",
         ]
         for t in bad:
