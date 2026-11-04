@@ -18,14 +18,13 @@
   selfFlake ? null,
   # Extra NixOS modules (hardware profiles, the dev box's extras).
   extraModules ? [ ],
-  # nixpkgs base: "unstable" or "stable".
+  # nixpkgs base: "unstable", the only one (HinterOS has no stable base).
   base ? state.base or "unstable",
 }:
 let
   inherit (nixpkgs) lib;
 
-  # TODO(stable-base): add a second nixpkgs input (the current NixOS release) and select it
-  # here. CI must then build `stable` on both bases.
+  # One base by design: unstable nixpkgs. state.json `base` stays, so any other value fails here.
   nixpkgsFor = {
     unstable = nixpkgs;
   };

@@ -64,7 +64,7 @@ let
         "update.check" = "Check for HinterOS updates";
         "update.apply" = "Install a HinterOS update";
         rollback = "Roll back to the previous system generation";
-        channel = "Switch the update channel or the base";
+        channel = "Switch the update channel";
         "jobs.cancel" = "Cancel a running system job";
         apps = "Install or remove apps";
         # Profiles (profiles.md, "Authority"): PINs are checked by the service; polkit stays the
