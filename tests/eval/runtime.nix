@@ -220,10 +220,13 @@ let
         [
           (lib.elem "network-online.target" s.wants)
           (lib.elem "network-online.target" s.after)
+          # Not oneshot: the boot (multi-user.target) does not wait for its retries.
+          s.serviceConfig.Type
         ];
       expected = [
         false
         false
+        "exec"
       ];
     };
     testSyncCanBeDisabled = {

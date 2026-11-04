@@ -243,7 +243,8 @@ in
       # for it at every boot. The script waits for the network itself.
       unitConfig.ConditionPathExists = "${cfg.dir}/facter.deferred";
       serviceConfig = {
-        Type = "oneshot";
+        # Not oneshot: multi-user.target would wait for the retries below (minutes when offline).
+        Type = "exec";
         ExecStart = lib.getExe (
           pkgs.writeShellApplication {
             name = "hinteros-facter-release";
