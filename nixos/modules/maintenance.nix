@@ -180,7 +180,9 @@ let
       # Up without a restart for stableSeconds: a binary that crashes soon after each start
       # (and is restarted) is not "up".
       last="" since=0
-      for i in $(seq 1 ${toString (cfg.bootCounting.healthTimeoutSeconds + cfg.bootCounting.stableSeconds)}); do
+      for i in $(seq 1 ${
+        toString (cfg.bootCounting.healthTimeoutSeconds + cfg.bootCounting.stableSeconds)
+      }); do
         if now=$(up); then
           [ "$now" = "$last" ] || { last=$now since=$i; }
           if [ $((i - since)) -ge ${toString cfg.bootCounting.stableSeconds} ]; then
@@ -309,30 +311,32 @@ in
         inherit (cfg.bootCounting) tries;
       };
 
-      systemd.services.hinteros-boot-health = {
-        description = "Check that the HinterOS daemon and launcher are up";
-        before = [ "boot-complete.target" ];
-        # Every boot: also when nothing pulls in boot-complete.target (no LoaderBootCountPath,
-        # see bootHealth), this check is what marks the boot good.
-        wantedBy = [ "multi-user.target" ];
-        unitConfig.RequiresMountsFor = [ "/boot" ];
-        after = [
-          "hinteros-system.service"
-        ]
-        ++ lib.optional sessionCfg.enable "greetd.service";
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          ExecStart = lib.getExe bootHealth;
-          TimeoutStartSec = cfg.bootCounting.healthTimeoutSeconds + cfg.bootCounting.stableSeconds + 30;
+      systemd = {
+        services.hinteros-boot-health = {
+          description = "Check that the HinterOS daemon and launcher are up";
+          before = [ "boot-complete.target" ];
+          # Every boot: also when nothing pulls in boot-complete.target (no LoaderBootCountPath,
+          # see bootHealth), this check is what marks the boot good.
+          wantedBy = [ "multi-user.target" ];
+          unitConfig.RequiresMountsFor = [ "/boot" ];
+          after = [
+            "hinteros-system.service"
+          ]
+          ++ lib.optional sessionCfg.enable "greetd.service";
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = lib.getExe bootHealth;
+            TimeoutStartSec = cfg.bootCounting.healthTimeoutSeconds + cfg.bootCounting.stableSeconds + 30;
+          };
         };
-      };
-      systemd.targets.boot-complete.requires = [ "hinteros-boot-health.service" ];
-      # Never clean up during a boot that is not good yet: the trim could remove the generation
-      # boot counting falls back to (with keepSystem = 1, the only other one).
-      systemd.services.nix-gc = lib.mkIf cfg.gc.enable {
-        requisite = [ "boot-complete.target" ];
-        after = [ "boot-complete.target" ];
+        targets.boot-complete.requires = [ "hinteros-boot-health.service" ];
+        # Never clean up during a boot that is not good yet: the trim could remove the generation
+        # boot counting falls back to (with keepSystem = 1, the only other one).
+        services.nix-gc = lib.mkIf cfg.gc.enable {
+          requisite = [ "boot-complete.target" ];
+          after = [ "boot-complete.target" ];
+        };
       };
     })
 
@@ -360,9 +364,7 @@ in
         in
         ''
           if ! ${lib.getExe pkgs.gnugrep} -qsE "(^| )init=$1/init( |$)" ${entries}/nixos-*.conf; then
-            echo "error: no boot entry for $1. Only the newest ${
-              toString sdBoot.configurationLimit
-            } system generations get one." >&2
+            echo "error: no boot entry for $1. Only the newest ${toString sdBoot.configurationLimit} system generations get one." >&2
             exit 1
           fi
         '';
