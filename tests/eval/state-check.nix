@@ -7,6 +7,8 @@
 #       and plan validation) for representative plans (the picks are the starter set,
 #       not state; their box features are `requirements`),
 #   (c) the VM test fixtures (tests/vm/fixtures/*/state.json).
+# It also runs `hinteros-system check-catalog` (the same Index::parse, stricter than the catalog's
+# JSON schema) on the catalog index the system ships: one entry it refuses refuses the whole index.
 # Builds a few text files; no VM.
 { self, pkgs }:
 let
@@ -190,6 +192,8 @@ pkgs.runCommand "hinteros-state-check"
     hinteros-system check-state ${
       lib.concatStringsSep " " (map toString (deviceStates ++ fixtureStates))
     } $(find states -name state.json | sort)
+
+    hinteros-system check-catalog ${index}/share/hinteros/catalog.json
 
     # The guard guards: another schema (exit 1) and a state without a required field are rejected.
     jq '.schemaVersion = 1' states/minimal/system/state.json > bad.json
