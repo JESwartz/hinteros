@@ -100,6 +100,9 @@ let
   # Accounts (profiles.md, "Declarative accounts"): `p<N>` is the Unix user `hinteros-p<N>`.
   idOk = id: builtins.isString id && builtins.match "p[1-9][0-9]{0,2}" id != null;
   ids = map (p: p.id or null) profiles;
+  # More than 8 profiles fail on purpose, unlike the unknown values above that are left out with
+  # a warning: leaving accounts out would remove them. A release that allows more must bump
+  # schemaVersion, so an older one refuses the file as a whole.
   profileProblems =
     lib.optional (profiles == [ ] || builtins.length profiles > 8) "profiles: 1 to 8 accounts"
     ++ lib.concatMap (
