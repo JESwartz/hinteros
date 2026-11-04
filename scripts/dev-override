@@ -13,7 +13,7 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-components=(hinteros-launcher hinteros-daemon)
+components=(hinteros-launcher hinteros-daemon hinteros-catalog)
 overrides=()
 for name in "${components[@]}"; do
   dir="$root/../$name"

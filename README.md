@@ -400,7 +400,7 @@ ever on the ISO (`hinteros.forbidUnfree`).
 ## Working against local component checkouts
 
 `scripts/dev-override <nix subcommand> ...` runs a nix command with every component input
-(`hinteros-launcher`, `hinteros-daemon`) overridden by the sibling checkout `../<name>`, using
+(`hinteros-launcher`, `hinteros-daemon`, `hinteros-catalog`) overridden by the sibling checkout `../<name>`, using
 `git+file:` so untracked build output is not copied. Inputs missing from `flake.nix` or without
 a sibling directory are skipped.
 
