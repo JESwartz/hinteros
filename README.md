@@ -239,7 +239,7 @@ as `nixos-install` would (`nix build --store /mnt`, in the three steps above) an
 check that `/etc/hinteros` equals the generation's snapshot; the apps stage; unmount. Where EFI
 variables cannot be written (efivarfs missing or read-only, or the boot loader step failed once)
 `extra.nix` in the config dir sets `boot.loader.efi.canTouchEfiVariables = false` and the box boots through the
-fallback path `EFI/BOOT/BOOTX64.EFI`.
+fallback path `EFI/BOOT/BOOTX64.EFI`. After the boot loader is written, the firmware entries "Linux Boot Manager" (and its fallback) that point at a partition this run erased are removed, so the boot menu does not grow by two entries per install; entries of other disks stay, also of unplugged ones. A `VenHw` entry (some firmware turns entries into one) names no partition: it is removed only when no other disk has an EFI system partition.
 
 **nix and the network.** nix switches substitution off as soon as the machine has no network
 interface with an address ("you don't have Internet access; disabling some network-dependent

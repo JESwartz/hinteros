@@ -1084,6 +1084,7 @@ if [ -n "$BEFORE_WIPE_HOOK" ]; then
 fi
 same_disk 2 "Nothing was touched"
 other_disks
+old_partuuids=() # the target's partitions before the wipe (none for a keepData plan)
 if [ "$keep_data" = true ]; then
   progress mount 10 "Mounting the install on $disk"
   install -d "$MNT"
@@ -1134,6 +1135,8 @@ else
     blockdev --rereadpt "$disk_real" || true
     udevadm settle || true
   }
+  # The partitions about to be erased: their firmware boot entries go (prune_boot_entries).
+  mapfile -t old_partuuids < <(lsblk -lno PARTUUID "$disk_real" 2>/dev/null | sed '/^$/d' | tr 'A-F' 'a-f' || true)
   run "Erasing old signatures" wipe_target
   # The disko layout names the disk /dev/hinteros-target; this link points it at the real one.
   ln -sfn "$disk_real" "$TARGET_LINK"
@@ -1615,13 +1618,23 @@ keep_esp() {
 }
 
 # prune_boot_entries: removes the firmware boot entries of systemd-boot ("Linux Boot Manager" and
-# its fallback) whose partition is gone. Each Erase all makes a new ESP partition and bootctl adds
-# a new pair, so without this the firmware's boot menu grows by two entries per install. Some
-# firmware (Lenovo) turns such an entry into a VenHw path; it is removed too. An entry on an
-# existing partition (this disk's, another disk's) stays. Failures are only logged.
+# its fallback) that point at a partition this run erased (old_partuuids: the target's partitions
+# before the wipe, whatever system made them). Each Erase all makes a new ESP partition and bootctl
+# adds a new pair, so without this the firmware's boot menu grows by two entries per install.
+# Every systemd-boot system uses that label: an entry of another disk, also one unplugged now,
+# stays. Some firmware (Lenovo) turns an entry into a VenHw path, which names no partition; such
+# an entry goes only when no other disk has an EFI system partition (the installer medium, which
+# is mounted, does not count), so it cannot be another system's. Failures are only logged.
 prune_boot_entries() {
   [ -w /sys/firmware/efi/efivars ] || return 0
-  local line num label path guid
+  local line num label path guid venhw=1
+  if lsblk -J -p -o PATH,PARTTYPE,MOUNTPOINTS 2>>"$LOG" | jq -e --arg d "$disk_real" '
+      [.blockdevices[] | select(.path != $d)
+       | select([.. | .mountpoints? | arrays | .[] | strings] == [])
+       | .children[]? | select((.parttype // "") | ascii_downcase
+           | IN("c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "0xef"))] != []' >/dev/null 2>&1; then
+    venhw=0
+  fi
   while IFS= read -r line; do
     [[ "$line" =~ ^Boot([0-9A-Fa-f]{4})\*?[[:space:]]+(Fallback\ )?Linux\ Boot\ Manager$'\t'(.*)$ ]] || continue
     num=${BASH_REMATCH[1]}
@@ -1629,15 +1642,15 @@ prune_boot_entries() {
     path=${BASH_REMATCH[3]}
     if [[ "$path" =~ ^HD\([0-9]+,GPT,([0-9a-fA-F-]{36}), ]]; then
       guid=${BASH_REMATCH[1],,}
+      printf '%s\n' "${old_partuuids[@]}" | grep -qxF "$guid" || continue
       [ ! -e "/dev/disk/by-partuuid/$guid" ] || continue
-    elif [[ ! "$path" =~ ^VenHw\( ]]; then
+    elif [[ ! "$path" =~ ^VenHw\( ]] || [ "$venhw" -eq 0 ]; then
       continue
     fi
-    echo "removing firmware boot entry Boot$num ($label, $path): its partition is gone" >>"$LOG"
+    echo "removing firmware boot entry Boot$num ($label, $path): its partition was erased" >>"$LOG"
     efibootmgr -q -b "$num" -B >>"$LOG" 2>&1 || echo "could not remove Boot$num" >>"$LOG"
   done < <(efibootmgr -v 2>>"$LOG" || true)
 }
-
 # sys_bootloader: nixos-install --system sets the target's system profile to the system built and
 # writes the boot loader (it builds nothing).
 sys_bootloader() {
