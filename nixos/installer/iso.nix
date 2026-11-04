@@ -31,7 +31,7 @@ in
     # the version is system.nixos.label, below).
     appendToMenuLabel = " Installer";
     # HinterOS colors and wordmark, not the NixOS logo (boot-theme.nix).
-    grubTheme = bootTheme.grubTheme;
+    inherit (bootTheme) grubTheme;
     efiSplashImage = bootTheme.biosSplash;
     splashImage = bootTheme.biosSplash;
     syslinuxTheme = ''
