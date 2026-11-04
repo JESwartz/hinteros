@@ -5,7 +5,10 @@
 # markers and everything in /var/lib/hinteros are as they were, the ESP has its volume id again,
 # SSH is on, and a new generation exists (state.json changed on the box first: from the same
 # installer and the same state the system is the same, and Nix makes no new generation).
-# Also what is refused, with the disk untouched, and `hinteros-install --list-disks` on the way.
+# Before that, a keepData run that fails after formatting the ESP (a test hook replaces
+# nixos-install) puts back /etc/hinteros, the admin password hash and the boot files, and a retry
+# with its mounts still in place validates. Also what is refused, with the disk untouched, and
+# `hinteros-install --list-disks` on the way.
 { self, pkgs }:
 let
   # As in install-offline: the test driver's backdoor and a session that runs in a VM.
@@ -49,6 +52,20 @@ let
       keepData = true;
       admin.user = "james";
       ssh.enable = true;
+      channel = "stable";
+      network = "offline";
+    }
+  );
+
+  # The same with a new password, for a run that fails (the hash must be put back).
+  failPlan = pkgs.writeText "fail-plan.json" (
+    builtins.toJSON {
+      disk = "/dev/vdc";
+      keepData = true;
+      admin = {
+        user = "james";
+        password = "another-pw";
+      };
       channel = "stable";
       network = "offline";
     }
@@ -111,6 +128,7 @@ in
     ${builtins.readFile ./install/disk.py}
 
     def run_install(path, env=""):
+        installer.succeed("rm -f /tmp/install.rc")
         installer.succeed(
             f"({env} HINTEROS_INSTALL_ALLOW_BIOS=1 "
             f"timeout 1500 hinteros-install --plan {path} >/tmp/install.out 2>/tmp/install.stderr; "
@@ -125,6 +143,8 @@ in
         lines = [json.loads(l) for l in installer.succeed("cat /tmp/install.out").splitlines() if l.strip()]
         for l in lines:
             print(l)
+        # Written once the run (and its exit trap) is over.
+        installer.wait_until_succeeds("test -s /tmp/install.rc", timeout=120)
         rc = int(installer.succeed("cat /tmp/install.rc").strip())
         if rc != 0:
             print("INSTALL-LOG:", installer.execute("tail -n 40 /var/log/hinteros-install.log; dmesg | tail -n 15")[1])
@@ -238,6 +258,31 @@ in
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
+
+    with subtest("a keepData run that fails after formatting the ESP puts back what it changed"):
+        # /etc/hinteros, the admin password hash and the boot files, as the old system needs them.
+        snap = (
+            "cd /mnt && find etc/hinteros var/lib/hinteros/admin-password-hash -type f -print0 | sort -z | xargs -0 sha256sum"
+            " && find etc/hinteros | sort && cd /mnt/boot && find . -type f -print0 | sort -z | xargs -0 sha256sum"
+        )
+        mount_target()
+        installer.succeed("mount -o ro /dev/disk/by-partlabel/hinteros-esp /mnt/boot")
+        before = installer.succeed(snap)
+        installer.succeed("test -e /mnt/boot/EFI/BOOT/BOOTX64.EFI")
+        installer.succeed("umount -R /mnt")
+        copy_plan("${failPlan}", "/tmp/fail.json")
+        rc, lines = run_install("/tmp/fail.json", "HINTEROS_INSTALL_NIXOS_INSTALL=false")
+        assert rc == 1 and lines[-1]["level"] == "error" and lines[-1]["code"] == "install-failed", (rc, lines[-3:])
+        assert lines[-1]["stage"] == "bootloader", lines[-1]
+        # Left mounted by the failed run.
+        after = installer.succeed(snap)
+        assert after == before, (before, after)
+        installer.succeed("test -z \"$(find /mnt -mindepth 1 -maxdepth 1 -name 'tmp.*')\"")
+        # A retry with the failed run's mounts still in place is not refused as in use.
+        copy_plan("${keepPlan}", "/tmp/keep.json")
+        status, out = installer.execute("HINTEROS_INSTALL_ALLOW_BIOS=1 hinteros-install --plan /tmp/keep.json --validate-only 2>/dev/null")
+        assert status == 0, out
+        installer.fail("mountpoint -q /mnt")
 
     with subtest("reinstall with keepData on a damaged ESP"):
         installer.succeed("dd if=/dev/zero of=/dev/disk/by-partlabel/hinteros-esp bs=1M count=16 && sync && udevadm settle")

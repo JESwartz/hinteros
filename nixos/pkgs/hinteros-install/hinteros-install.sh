@@ -68,7 +68,8 @@
 # and extra.nix stay; the plan's optional hostname, admin.user and ssh.enable replace those settings
 # in state.json, and an optional admin.password replaces the admin password), a new system
 # generation goes into the existing store and the ESP is formatted again with its volume id, last
-# of all, so a failed build leaves the boot files alone. Stages: validate, mount (10-20) in place
+# of all. A run that fails before the new system is installed puts back /etc/hinteros, the admin
+# password and the boot files, so the old system boots as it was. Stages: validate, mount (10-20) in place
 # of partition, facter, config, packages, build, bootloader, snapshot, finalize, done. No apps
 # stage, no first-boot files.
 #
@@ -98,6 +99,9 @@ SCHEMA_VERSION=2
 DISK_LAYOUT=gpt-esp-btrfs
 # Test hook: the command that writes the hardware report (VM tests feed a fixture).
 FACTER=${HINTEROS_INSTALL_FACTER:-nixos-facter}
+# Test hook: the command that sets the system profile and writes the boot loader (VM tests make it
+# fail, to check what a failed keepData run puts back).
+NIXOS_INSTALL=${HINTEROS_INSTALL_NIXOS_INSTALL:-nixos-install}
 # Test hook: a command run just before the disk is checked for the last time and erased (VM tests
 # replace the disk there).
 BEFORE_WIPE_HOOK=${HINTEROS_INSTALL_BEFORE_WIPE:-}
@@ -184,10 +188,41 @@ repo_scheme=${REPO_URL%%://*}
 chk_dir=
 tmp_dirs=()
 probe_mnt= # a disk mounted read-only by read_install
+# keepData: until the new system is installed, a copy of what the run changes on the kept install
+# (/etc/hinteros, the admin password, the boot files once the ESP is formatted). A run that ends
+# before puts it back (restore_kept), so the old system boots as it was. Empty: nothing to put back.
+keep_bak=
+esp_touched=0 # 1: keep_esp started to format the ESP
 # shellcheck disable=SC2329 # the EXIT trap
 cleanup_tmp() {
   [ -z "$probe_mnt" ] || umount "$probe_mnt" 2>/dev/null || true
+  [ -z "$keep_bak" ] || restore_kept
   [ "${#tmp_dirs[@]}" -eq 0 ] || rm -rf "${tmp_dirs[@]}"
+}
+# shellcheck disable=SC2329 # the EXIT trap
+restore_kept() {
+  local d=$keep_bak
+  keep_bak=
+  # The run ends here whatever happens; each step is logged and the next one still runs.
+  trap - ERR
+  set +e
+  echo "the new system is not installed: putting back /etc/hinteros, the admin password and the boot files" >>"$LOG"
+  if ! { rm -rf "$cfg" && cp -a "$d/etc-hinteros" "$cfg"; } >>"$LOG" 2>&1; then
+    echo "could not put back $cfg" >>"$LOG"
+  fi
+  if [ -e "$d/admin-password-hash" ]; then
+    cp -a "$d/admin-password-hash" "$MNT/var/lib/hinteros/admin-password-hash" >>"$LOG" 2>&1
+  else
+    rm -f "$MNT/var/lib/hinteros/admin-password-hash"
+  fi
+  # A damaged ESP that did not mount had no boot files to keep: the new, empty one stays.
+  if [ "$esp_touched" -eq 1 ] && [ -d "$d/esp" ]; then
+    if ! { { mountpoint -q "$MNT/boot" || mount -t vfat -o umask=0077 "$esp_dev" "$MNT/boot"; } \
+      && find "$MNT/boot" -mindepth 1 -delete && cp -rT "$d/esp" "$MNT/boot"; } >>"$LOG" 2>&1; then
+      echo "could not put back the boot files" >>"$LOG"
+    fi
+  fi
+  sync
 }
 trap cleanup_tmp EXIT
 # Results of check_channel: the tip, and the newer release (empty: none newer).
@@ -1070,6 +1105,16 @@ fi
 cfg=$MNT/etc/hinteros
 # (Not on a kept install: this would also set the modes of what is there.)
 [ "$keep_data" = true ] || install -d -m 0755 "$MNT/etc" "$cfg" "$MNT/var/lib/hinteros"
+if [ "$keep_data" = true ]; then
+  # What a failed run puts back (restore_kept), saved on the kept disk before anything changes.
+  bak=$(mktemp -d -p "$MNT")
+  tmp_dirs+=("$bak")
+  run "Saving the device configuration" cp -a "$cfg" "$bak/etc-hinteros"
+  if [ -e "$MNT/var/lib/hinteros/admin-password-hash" ]; then
+    run "Saving the admin password" cp -a "$MNT/var/lib/hinteros/admin-password-hash" "$bak/"
+  fi
+  keep_bak=$bak
+fi
 
 progress facter 22 "Detecting hardware"
 facter_ok=0
@@ -1481,8 +1526,23 @@ sys_build() {
 # damaged ESP is repaired. Only now: up to here a failure leaves the old boot files alone.
 esp_done=0
 keep_esp() {
+  local m
   [ "$esp_done" -eq 0 ] || return 0
   same_disk 1 "Nothing was erased"
+  # The boot files as they are, for a failed run (restore_kept). A damaged ESP that does not mount
+  # has none.
+  m=$(mktemp -d)
+  tmp_dirs+=("$m")
+  if mount -t vfat -o ro "$esp_dev" "$m" >>"$LOG" 2>&1; then
+    if ! cp -rT "$m" "$keep_bak/esp" >>"$LOG" 2>&1; then
+      echo "could not save the boot files; a failed run leaves the new ESP" >>"$LOG"
+      rm -rf "$keep_bak/esp"
+    fi
+    umount "$m" >>"$LOG" 2>&1 || umount -l "$m" >>"$LOG" 2>&1 || true
+  else
+    echo "the EFI system partition does not mount: no boot files to keep" >>"$LOG"
+  fi
+  esp_touched=1
   run "Formatting the EFI system partition" mkfs.vfat -i "${esp_uuid//-/}" -n HINTEROSESP "$esp_dev"
   udevadm settle >>"$LOG" 2>&1 || true
   run "Mounting the EFI system partition" mount -t vfat -o umask=0077 "$esp_dev" "$MNT/boot"
@@ -1525,7 +1585,7 @@ sys_bootloader() {
   step_pct=
   progress bootloader 66 "Installing the boot loader"
   [ "$keep_data" = false ] || keep_esp
-  nix_logged quiet bootloader 66 66 "" 0 nixos-install "${flags[@]}"
+  nix_logged quiet bootloader 66 66 "" 0 "$NIXOS_INSTALL" "${flags[@]}"
   [ "$NIX_RC" -eq 0 ] || return 1
   prune_boot_entries
 }
@@ -1588,6 +1648,9 @@ if [ "$NIX_RC" != 0 ]; then
   nix_cleanup
   fail 1 install-failed "nixos-install failed (exit $NIX_RC): $(printf '%s' "$NIX_ERRS" | tail -n 4 | tr '\n' ' ' | cut -c1-600); see $LOG"
 fi
+# The new system is installed and its boot loader written: from here a kept install is not put
+# back.
+keep_bak=
 nix_cleanup
 step_pct=100
 progress bootloader 70 "System installed, boot loader written"
