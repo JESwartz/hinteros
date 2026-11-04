@@ -8,11 +8,12 @@
 #     `profile.current.screen_locked`), and stays locked after resume (PrepareForSleep(false)),
 #     with the inhibitor taken again for the next sleep. A wrong PIN is refused (the shared
 #     backoff applies: the fourth failure waits), the right one unlocks. An unlocked profile is
-#     not locked by a sleep.
-# SIMULATED: the sleep itself. PrepareForSleep is emitted on the system bus as logind would
-# (`busctl emit` as root); a real suspend/resume of the VM is not done. On hardware: the lock
-# screen drawn before the TV goes dark, InputPlumber in ALL mode behind it, and the wake-up
-# itself (couch checklist).
+#     not locked by a sleep. The same signal from another bus client (`busctl emit` as root)
+#     changes nothing.
+# SIMULATED: the sleep itself. `systemctl suspend` goes through logind (its PrepareForSleep
+# signals and the delay inhibitors), but systemd-suspend.service only waits a few seconds instead
+# of suspending the VM. On hardware: the lock screen drawn before the TV goes dark, InputPlumber in
+# ALL mode behind it, and the wake-up itself (couch checklist).
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
@@ -47,14 +48,37 @@ profiles.mkTest {
     };
   };
 
+  # The VM never sleeps: what logind's Suspend starts waits until the test touches
+  # /run/stub-resume (a minute at most), then logind sends PrepareForSleep(false).
+  extraModule =
+    { pkgs, ... }:
+    {
+      systemd.services.systemd-suspend.serviceConfig.ExecStart = [
+        ""
+        (pkgs.writeShellScript "stub-suspend" ''
+          for _ in $(${pkgs.coreutils}/bin/seq 300); do
+            [ -e /run/stub-resume ] && break
+            ${pkgs.coreutils}/bin/sleep 0.2
+          done
+          ${pkgs.coreutils}/bin/rm -f /run/stub-resume
+        '')
+      ];
+    };
+
   testScript = ''
     boot_box()
 
-    def sleep_signal(going):
-        machine.succeed(
-            "busctl emit /org/freedesktop/login1 org.freedesktop.login1.Manager PrepareForSleep b "
-            + ("true" if going else "false")
-        )
+    def suspend():
+        # logind sends PrepareForSleep(true) and waits for the delay inhibitors.
+        machine.succeed("systemctl suspend")
+
+    def resume():
+        # The stub suspend ends; logind sends PrepareForSleep(false).
+        machine.succeed("touch /run/stub-resume")
+
+    def fake_sleep_signal():
+        # Anyone on the system bus can emit a signal of that name; not from logind, it is ignored.
+        machine.succeed("busctl emit /org/freedesktop/login1 org.freedesktop.login1.Manager PrepareForSleep b true")
 
     def inhibitor_of(user):
         out = machine.succeed("systemd-inhibit --list --no-legend --no-pager || true")
@@ -91,13 +115,18 @@ profiles.mkTest {
         assert inhibitor_of("hinteros-p2"), machine.succeed("systemd-inhibit --list --no-pager")
         W = "/tmp/lock-p2.log"
         start_watch("hinteros-p2", W)
-        sleep_signal(True)
+        fake_sleep_signal()
+        machine.sleep(3)
+        assert lock_events(W) == [], lock_events(W)
+        assert sess_ok("hinteros-p2", "session.lock_state") == {"locked": False}
+        assert inhibitor_of("hinteros-p2"), machine.succeed("systemd-inhibit --list --no-pager")
+        suspend()
         machine.wait_until_succeeds(f"grep -q '\"locked\": true' {W}", timeout=30)
         assert sess_ok("hinteros-p2", "profile.current")["screen_locked"] is True
         assert sess_ok("hinteros-p2", "session.lock_state") == {"locked": True}
         # The delay inhibitor was let go so the box can sleep...
         machine.wait_until_fails("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=30)
-        sleep_signal(False)
+        resume()
         # ...and is taken again on resume; the lock stays up.
         machine.wait_until_succeeds("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p2", timeout=30)
         assert sess_ok("hinteros-p2", "session.lock_state") == {"locked": True}
@@ -129,10 +158,11 @@ profiles.mkTest {
         machine.wait_until_succeeds("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p3", timeout=60)
         W = "/tmp/lock-p3.log"
         start_watch("hinteros-p3", W)
-        sleep_signal(True)
-        machine.sleep(3)
-        sleep_signal(False)
-        machine.sleep(3)
+        suspend()
+        machine.wait_until_fails("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p3", timeout=30)
+        resume()
+        machine.wait_until_succeeds("systemd-inhibit --list --no-legend --no-pager | grep HinterOS | grep -q hinteros-p3", timeout=30)
+        machine.sleep(2)
         assert lock_events(W) == [], lock_events(W)
         assert sess_ok("hinteros-p3", "session.lock_state") == {"locked": False}
         assert not sess_ok("hinteros-p3", "profile.current")["screen_locked"]
