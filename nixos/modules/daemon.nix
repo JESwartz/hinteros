@@ -513,8 +513,26 @@ in
           ProtectSystem = "strict";
           ProtectHome = "read-only";
           ReadWritePaths = [ "/var/lib/hinteros" ];
+          # It walks trees the profiles control: only reading and stat (any home, whatever its
+          # modes) and writing its own root-owned file.
+          CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
+          PrivateTmp = true;
+          PrivateDevices = true;
           PrivateNetwork = true;
           NoNewPrivileges = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectKernelLogs = true;
+          ProtectControlGroups = true;
+          ProtectClock = true;
+          RestrictAddressFamilies = [ "AF_UNIX" ];
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          SystemCallFilter = [ "@system-service" ];
+          SystemCallArchitectures = "native";
           Nice = 19;
           IOSchedulingClass = "idle";
         };
