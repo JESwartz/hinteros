@@ -1,8 +1,9 @@
 # A reinstall that keeps the data (`keepData`): the installer installs on an empty disk with no
-# network, the box boots and gets marker files in /home, /srv and /var/lib/hinteros, its ESP is
-# damaged, and a `keepData` plan repairs it in place. The plan gives the admin user and SSH on, but
-# no hostname and no password: the box keeps its own hostname and password. The box boots: the
-# markers and everything in /var/lib/hinteros are as they were, the ESP has its volume id again,
+# network, the box boots and gets marker files in /home, /srv and /var/lib/hinteros and a
+# profile's permissions.json, its ESP is damaged, and a `keepData` plan repairs it in place. The
+# plan gives the admin user and SSH on, but no hostname and no password: the box keeps its own
+# hostname and password (sudo takes the old one). The box boots: the markers, permissions.json
+# and everything in /var/lib/hinteros are as they were, the ESP has its volume id again,
 # SSH is on, and a new generation exists (state.json changed on the box first: from the same
 # installer and the same state the system is the same, and Nix makes no new generation).
 # Also what is refused, with the disk untouched, and `hinteros-install --list-disks` on the way.
@@ -57,6 +58,7 @@ let
   # What the box holds that a reinstall must leave as it is.
   kept = [
     "/home/hinteros-p1/marker"
+    "/home/hinteros-p1/.local/state/hinteros/permissions.json"
     "/srv/media/marker"
     "/var/lib/hinteros/marker"
     "/var/lib/hinteros/profiles.json"
@@ -221,6 +223,8 @@ in
         check_layout(target, state)
         target.succeed(
             "echo home > /home/hinteros-p1/marker",
+            # A profile's app permission choice (an opt-out), as apps.set_permission writes it.
+            "mkdir -p /home/hinteros-p1/.local/state/hinteros && echo '{\"version\":1,\"denied\":{\"youtube\":[\"mic\"]}}' > /home/hinteros-p1/.local/state/hinteros/permissions.json && chown -R hinteros-p1: /home/hinteros-p1/.local",
             "mkdir -p /srv/media && echo srv > /srv/media/marker",
             "echo var > /var/lib/hinteros/marker",
             # A profile file, if first boot has not made one.
@@ -284,6 +288,9 @@ in
         # The kept extra.nix: the test's own backdoor is why this script reaches the box at all.
         target.succeed("test -e /etc/hinteros/extra.nix -a -e /etc/hinteros/extra-module.nix")
         assert target.succeed("getent shadow james").split(":")[1].startswith("$6$")
+        # The kept password still logs in (the plan gave none).
+        target.succeed("printf 'hunter22\\n' | runuser -u james -- sudo -S -k true")
+        target.fail("printf 'wrong\\n' | runuser -u james -- sudo -S -k true")
 
     with subtest("a new generation, and the old ones still boot"):
         assert len(target.succeed("ls -d /nix/var/nix/profiles/system-*-link").split()) == generations + 1
