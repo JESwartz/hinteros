@@ -828,26 +828,54 @@ if [ "$mem_kib" -lt $((3 * 1024 * 1024)) ]; then
   progress validate 1 "Only $((mem_kib / 1024)) MiB of memory; the install may fail on boxes with less than 4 GB" warn low-memory
 fi
 
+# wifi_uuid SSID [--active]: the UUID of the Wi-Fi profile for SSID that connected last (by its
+# TIMESTAMP; a profile that never connected, such as one left by a try with a wrong key, does not
+# count); with --active only an active connection counts. Empty: none. The SSID is read with -e no
+# and one field, so nmcli prints it as it is (no escaped ":").
+wifi_uuid() {
+  local u t ts best='' bts=0
+  while IFS=: read -r u t ts; do
+    [ "$t" = 802-11-wireless ] || continue
+    if ! [[ $ts =~ ^[0-9]+$ ]] || [ "$ts" -le "$bts" ]; then continue; fi
+    if [ "$(nmcli -g 802-11-wireless.ssid -e no connection show uuid "$u" 2>/dev/null || true)" = "$1" ]; then
+      best=$u
+      bts=$ts
+    fi
+  done < <(nmcli -t -f UUID,TYPE,TIMESTAMP connection show ${2:+"$2"} 2>/dev/null || true)
+  printf '%s' "$best"
+}
+
 # Network: bring up Wi-Fi if the plan has it, then decide online or offline.
 online=0
 if [ "$network_pref" != offline ]; then
-  if [ -n "$wifi_ssid" ]; then
+  # The UI joins the network before it runs the plan (twice: --validate-only, then the install):
+  # connecting again would drop the link it has.
+  if [ -n "$wifi_ssid" ] && [ -n "$(wifi_uuid "$wifi_ssid" --active)" ]; then
+    echo "Wi-Fi \"$wifi_ssid\" is connected already" >>"$LOG"
+  elif [ -n "$wifi_ssid" ]; then
     progress validate 2 "Connecting to Wi-Fi \"$wifi_ssid\""
     wifi_psk=$(plan '.wifi.psk // empty')
     nmcli radio wifi on >>"$LOG" 2>&1 || true
     nmcli device wifi rescan >>"$LOG" 2>&1 || true
     sleep 3
     if [ -n "$wifi_psk" ]; then
-      nmcli -w 40 device wifi connect "$wifi_ssid" password "$wifi_psk" >>"$LOG" 2>&1 \
+      # --ask: the key from stdin, not on the command line (where /proc shows it), as the UI does.
+      printf '%s\n' "$wifi_psk" | nmcli -w 40 --ask device wifi connect "$wifi_ssid" >>"$LOG" 2>&1 \
         || progress validate 2 "Could not connect to Wi-Fi \"$wifi_ssid\"" warn wifi-failed
     else
-      nmcli -w 40 device wifi connect "$wifi_ssid" >>"$LOG" 2>&1 \
+      nmcli -w 40 device wifi connect "$wifi_ssid" >>"$LOG" 2>&1 </dev/null \
         || progress validate 2 "Could not connect to Wi-Fi \"$wifi_ssid\"" warn wifi-failed
     fi
   fi
-  if curl -fsS --max-time 8 -o /dev/null "$ONLINE_PROBE" >>"$LOG" 2>&1; then
-    online=1
-  fi
+  # A Wi-Fi link may still be getting its address: a few tries.
+  for try in 1 2 3; do
+    if curl -fsS --max-time 8 -o /dev/null "$ONLINE_PROBE" >>"$LOG" 2>&1; then
+      online=1
+      break
+    fi
+    if [ -z "$wifi_ssid" ] || [ "$try" -eq 3 ]; then break; fi
+    sleep 3
+  done
 fi
 if [ "$network_pref" = online ] && [ "$online" -eq 0 ]; then
   fail 2 no-network "the plan asks for an online install but cache.nixos.org is not reachable"
@@ -1709,16 +1737,19 @@ check_snapshot "$snap"
 progress snapshot 73 "/etc/hinteros matches the installed generation"
 
 if [ -n "$wifi_ssid" ]; then
-  # Keep the connection so the box is online at first boot.
-  conn_dir=/etc/NetworkManager/system-connections
-  if [ -d "$conn_dir" ]; then
+  # Keep the connection so the box is online at first boot: the profile file of the active
+  # connection to that network, found by its UUID (not every profile that names the SSID, such as
+  # one left by a try with a wrong key; and NetworkManager escapes some SSIDs in the file).
+  conn_uuid=$(wifi_uuid "$wifi_ssid")
+  conn_file=
+  if [ -n "$conn_uuid" ]; then
+    conn_file=$(nmcli -t -e no -f UUID,FILENAME connection show 2>>"$LOG" | sed -n "s/^$conn_uuid://p" | head -n1 || true)
+  fi
+  if [ -n "$conn_file" ] && [ -f "$conn_file" ]; then
     install -d -m 0755 "$MNT/etc/NetworkManager/system-connections"
-    for f in "$conn_dir"/*; do
-      [ -f "$f" ] || continue
-      if grep -qxF "ssid=$wifi_ssid" "$f"; then
-        install -m 0600 "$f" "$MNT/etc/NetworkManager/system-connections/$(basename "$f")"
-      fi
-    done
+    install -m 0600 "$conn_file" "$MNT/etc/NetworkManager/system-connections/$(basename "$conn_file")"
+  else
+    echo "Wi-Fi \"$wifi_ssid\" has no profile that connected; the box gets no Wi-Fi profile" >>"$LOG"
   fi
 fi
 
