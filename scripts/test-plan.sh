@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-plan: which checks to run for a change, in three tiers (TESTING.md in the docs).
+# test-plan: which checks to run for a change, in three tiers.
 #
 #   scripts/test-plan.sh quick              eval checks only (a few minutes)
 #   scripts/test-plan.sh targeted [BASE]    eval checks + the VM tests for what changed since BASE
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 EVAL=(runtime-eval profiles-eval daemon-eval mk-device hardening-eval installer-iso-eval
-  offline-inputs state-check promote apps)
+  offline-inputs state-check promote apps server-eval pre-commit)
 
 # Area -> VM tests. A change to a test's own file always adds that test.
 INSTALLER=(install-validation install-offline install-keep-data install-newer installer-ui installer-save-log)
@@ -21,10 +21,12 @@ PROFILES=(profiles-greeter profiles-switch profiles-pin profiles-lifecycle profi
 APPS=(profile-apps profile-apps-system apps-box-features store-install)
 SESSION=(gamescope session-restart input-layer)
 SYSTEM=(system-authz system-jobs system-escalation polkit-agent time-zone)
+SANDBOX=(sandbox sandbox-apps sandbox-lan sandbox-pad gamescope-sandbox steam-sockets)
+SERVER=(server-api server-network server-jellyfin server-jellyfin-signin)
 # The daemon and the launcher touch nearly everything; this is the set that exercises each part
 # once (session, profiles, apps, jobs, authorization, input, installer UI).
 DAEMON=(system-authz system-jobs profiles-greeter profiles-switch profiles-pin guest profile-apps
-  session-restart gamescope input-layer runtime time-zone)
+  session-restart gamescope input-layer runtime time-zone sandbox sandbox-lan server-api)
 LAUNCHER=(installer-ui profiles-greeter gamescope typing input-layer)
 
 mode=${1:-}
@@ -73,10 +75,10 @@ case "$mode" in
           ;;
         nixos/pkgs/hinteros-install/* | nixos/installer/* | nixos/modules/disk.nix) add "${INSTALLER[@]}" ;;
         nixos/modules/profiles.nix) add "${PROFILES[@]}" ;;
-        nixos/modules/state.nix) add "${PROFILES[@]}" time-zone ;;
+        nixos/modules/state.nix) add "${PROFILES[@]}" time-zone install-validation install-keep-data ;;
         nixos/modules/time-zone.nix | nixos/lib/time-zone.nix) add time-zone ;;
         nixos/modules/device-config.nix) add config-sync time-zone ;;
-        nixos/modules/app-env.nix | nixos/modules/apps.nix | nixos/modules/box-features.nix | nixos/modules/catalog.nix) add "${APPS[@]}" ;;
+        nixos/modules/app-env.nix | nixos/modules/apps.nix | nixos/modules/box-features.nix | nixos/modules/catalog.nix) add "${APPS[@]}" "${SANDBOX[@]}" ;;
         nixos/modules/session.nix | nixos/pkgs/gamescope/*) add "${SESSION[@]}" ;;
         nixos/modules/input.nix | nixos/pkgs/inputplumber/*) add input-layer typing profiles-switch ;;
         nixos/modules/daemon.nix) add "${SYSTEM[@]}" ;;
@@ -85,6 +87,28 @@ case "$mode" in
         nixos/modules/runtime.nix | nixos/modules/network-hardware.nix) add runtime runtime-settings ;;
         nixos/modules/firefox-kiosk.nix | nixos/modules/firefox-osk-chrome.js) add tv-apps typing ;;
         nixos/pkgs/fake-steam/*) add fake-steam gamescope ;;
+        # What the installer builds from: the device flake template and lock, the ISO's offline
+        # inputs, the app lists, the release keys and version.
+        nixos/templates/* | nixos/lib/device-lock.nix | nixos/lib/offline-inputs.* | nixos/lib/allowed-signers.nix | nixos/modules/release.nix)
+          add "${INSTALLER[@]}"
+          ;;
+        nixos/lib/app-ids.nix) add "${INSTALLER[@]}" "${APPS[@]}" ;;
+        nixos/modules/generic-hardware.nix) add "${INSTALLER[@]}" install-offline-hw ;;
+        nixos/lib/mk-device.nix | nixos/lib/device-outputs.nix) add config-sync install-validation install-keep-data ;;
+        nixos/lib/app-entries.nix) add "${APPS[@]}" tv-apps ;;
+        nixos/lib/local-networks.nix) add hardening sandbox-lan ;;
+        nixos/lib/steam.nix) add steam-sockets fake-steam ;;
+        nixos/modules/server.nix | nixos/modules/jellyfin-signin.*) add "${SERVER[@]}" ;;
+        nixos/modules/branding.nix) add boot installer-ui ;;
+        nixos/modules/diagnostics.nix) add installer-save-log ;;
+        nixos/modules/video-hardware.nix | nixos/modules/default.nix | nixos/modules/overlay.nix | nixos/pkgs/placeholder-home.nix | nixos/vm/*)
+          add boot gamescope
+          ;;
+        nixos/pkgs/firefox-kiosk.nix) add tv-apps typing ;;
+        flake.nix)
+          add boot
+          echo "test-plan: flake.nix changed: check which tests it touches, or run the full tier" >&2
+          ;;
       esac
     done < <(git diff --name-only "$base"...HEAD)
     # Components: compare the locked revisions.
@@ -112,15 +136,21 @@ echo "eval: ${EVAL[*]}"
 echo "vm (${#vm[@]}): ${vm[*]:-none}"
 [ "$run" = 1 ] || exit 0
 
-T=(systemd-run --user --scope -q -p MemoryHigh=12G -p MemoryMax=16G -p CPUWeight=idle nice -n 19)
+# Throttled: a memory cap in a user scope where there is a user manager (not on every CI runner).
+T=(nice -n 19)
+if systemd-run --user --scope -q true 2>/dev/null; then
+  T=(systemd-run --user --scope -q -p MemoryHigh=12G -p MemoryMax=16G -p CPUWeight=idle nice -n 19)
+fi
+logs=${TMPDIR:-/tmp}
 failed=()
 for c in "${EVAL[@]}" "${vm[@]}"; do
   printf '== %s ... ' "$c"
   start=$(date +%s)
-  if "${T[@]}" nix build --no-link --max-jobs 1 --cores 8 ".#checks.x86_64-linux.$c" >"/tmp/test-plan.$c.log" 2>&1; then
+  if "${T[@]}" nix build --no-link --max-jobs 1 --cores 8 ".#checks.x86_64-linux.$c" >"$logs/test-plan.$c.log" 2>&1; then
     echo "ok ($(($(date +%s) - start)) s)"
   else
-    echo "FAILED ($(($(date +%s) - start)) s, log /tmp/test-plan.$c.log)"
+    echo "FAILED ($(($(date +%s) - start)) s, log $logs/test-plan.$c.log)"
+    tail -n 40 "$logs/test-plan.$c.log" | sed 's/^/   | /'
     failed+=("$c")
   fi
 done

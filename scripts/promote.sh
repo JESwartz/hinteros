@@ -11,6 +11,7 @@
 #   nix run .#promote -- beta   [--rev <main commit>] [--bootstrap] [--security <sev>] [--bump <b> | --version <v>]
 #   nix run .#promote -- stable [--rev <beta release commit>] [--expedite] [--bump <b> | --version <v>]
 #   nix run .#promote -- hotfix <branch> [--rev <commit>] [--security <sev>]
+#   nix run .#promote -- tag    [--rev <stable release commit>]
 #   common: [--dry-run] [--skip-ci] [--key <path>] [--yes]
 #
 # Versions: every release commit writes its own version to `release/version` in the signed tree,
@@ -54,12 +55,13 @@ usage: promote [--dry-run] [--skip-ci] [--key <path>]   (menus ask for all value
        promote beta   [--rev <sha>] [--bootstrap] [--security <sev>] [--bump <bump> | --version <v>] [options]
        promote stable [--rev <sha>] [--expedite] [--bump <bump> | --version <v>] [options]
        promote hotfix <branch> [--rev <sha>] [--security <sev>] [options]
+       promote tag    [--rev <stable release>] [options]   (the release ISO and its signed tag v<version>)
 options: --dry-run  --skip-ci  --key <path>  --yes
   --bump       beta: patch (default), minor or major after the current beta and stable
                stable: keep (default: the beta release's version), patch, minor or major
   --version    beta and stable: the new version (MAJOR.MINOR.PATCH)
   --dry-run    do all steps, but do not sign or push
-  --skip-ci    do not require a CI result (use until the CI runner exists)
+  --skip-ci    do not require a CI result (after the checks by hand)
   --key        the signing key file (default: $HINTEROS_RELEASE_KEY or ~/.ssh/hinteros/release_ed25519)
   --security   none, low, medium, high or critical (if not given, the script asks)
   --bootstrap  the first beta release (the beta branch does not exist)
@@ -110,7 +112,7 @@ case "${1:-}" in
     interactive=1
     set -- interactive "$@"
     ;;
-  beta | stable) mode=$1 ;;
+  beta | stable | tag) mode=$1 ;;
   hotfix)
     mode=hotfix
     [ "$#" -ge 2 ] || die "hotfix needs the branch: promote hotfix hotfix/<name>"
@@ -173,6 +175,8 @@ if [ "$interactive" = 1 ]; then
 fi
 [ "$bootstrap" = 0 ] || [ "$mode" = beta ] || die "--bootstrap only applies to promote beta"
 [ "$expedite" = 0 ] || [ "$mode" = stable ] || die "--expedite only applies to promote stable"
+[ "$mode" != tag ] || [ -z "$security$want_bump$want_version" ] \
+  || die "--security, --bump and --version do not apply to a tag (it names a stable release)"
 [ -z "$want_bump$want_version" ] || [ "$mode" != hotfix ] \
   || die "--bump and --version do not apply to a hotfix (it is the next patch)"
 [ "$want_bump" != keep ] || [ "$mode" != beta ] \
@@ -557,15 +561,14 @@ ci_check() {
   total=$(jq -r '.total_count // 0' <<<"$json")
   state=$(jq -r '.state // ""' <<<"$json")
   if [ "$total" = 0 ]; then
-    ci_skip_or_fail "$sha" "no CI result for ${sha:0:12}. There is no CI runner. Test by hand and use --skip-ci."
+    ci_skip_or_fail "$sha" "no CI result for ${sha:0:12}: no CI job ran for it. Test by hand and use --skip-ci."
     return 0
   fi
   jq -r '.statuses[] | "  [ci]   \(.context): \(.status)\(if .description then " (\(.description))" else "" end)"' <<<"$json"
   case "$state" in
     success) ok "all $total CI statuses are success" ;;
-    pending)
-      ci_skip_or_fail "$sha" "CI is 'pending'. No runner started the job. Use --skip-ci until the runner exists."
-      ;;
+    # The job is queued or still running (the full check takes hours): no result to go on.
+    pending) fail "CI is still running for ${sha:0:12} (or waits for a runner). Wait for the result, then start again." ;;
     *) fail "CI is '$state'. It must be 'success'." ;;
   esac
 }
@@ -573,26 +576,21 @@ ci_check() {
 ci_skipped() {
   warn "************************************************************************"
   warn "NO CI CHECK: nothing tested ${1:0:12}."
-  warn "Do the checks by hand before you release (TESTING.md)."
-  warn "Stop this when the Forgejo runner exists."
+  warn "Do the checks by hand before you release (scripts/test-plan.sh full --run)."
   warn "************************************************************************"
 }
 
-# No CI result (no runner yet): the menus ask whether to go on without it; otherwise refused.
+# No CI result: the menus ask whether to go on without it, for this commit only; otherwise refused.
 ci_skip_or_fail() {
   local sha=$1 why=$2 ans
   [ "$interactive" = 1 ] || fail "$why"
   warn "$why"
-  read -r -p "  Continue without CI? You must do the checks by hand (TESTING.md). [y/N] " ans || ans=
+  read -r -p "  Continue without CI for ${sha:0:12}? Do the checks by hand first (scripts/test-plan.sh full --run). [y/N] " ans || ans=
   case "$ans" in
-    y | Y | yes)
-      skip_ci=1
-      ci_skipped "$sha"
-      ;;
+    y | Y | yes) ci_skipped "$sha" ;;
     *) fail "no CI result for ${sha:0:12}" ;;
   esac
 }
-
 sev_rank() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     "" | no | none) echo 0 ;;
@@ -1060,7 +1058,7 @@ promote_stable() {
   fi
   verify "$target" "$tmp/beta.signers"
 
-  ci_check "$target" "the beta release (both bases)"
+  ci_check "$target" "the beta release"
 
   step "Changes since the last stable release"
   if [ -n "$stable_tip" ]; then
@@ -1155,10 +1153,7 @@ promote_stable() {
   fi
   info "next: merge stable into main. Then release/version on main is $new_version."
   info "Add a new '## Unreleased' section to release/notes.md before the next beta."
-  # TODO(M6 phase 3, ISO publishing): wait for CI's stable ISO, fetch its SHA256SUMS, create the
-  # signed tag v<version> carrying them (git tag -s with the release key, no agent), push it and,
-  # with a Forgejo token in the environment, create the release page.
-  warn "TODO: the script does not make the signed tag v$new_version (ISO SHA256SUMS) or the release page."
+  info "Then the release ISO and its signed tag v$new_version: nix run .#promote -- tag"
 }
 
 # --- hotfix --------------------------------------------------------------------------------
@@ -1183,7 +1178,7 @@ promote_hotfix() {
 
   local_check "$hotfix_branch" "$target"
 
-  ci_check "$target" "the hotfix (both bases)"
+  ci_check "$target" "the hotfix"
 
   step "Changes"
   list_changes "$stable_tip..$target"
@@ -1254,6 +1249,81 @@ promote_hotfix() {
   fi
   info "next: merge stable into main. Let CI run. Then release main to beta."
   info "Before that, a stable release stops, and beta boxes see stable as not a fast-forward."
+  info "Then the release ISO and its signed tag v$new_version: nix run .#promote -- tag"
+}
+
+# --- tag -----------------------------------------------------------------------------------
+
+# The release ISO of a stable release and its checksums, carried by the signed tag v<version>.
+# Users check the ISO they download against the tag, and the tag against the release key: the ISO
+# is the root of trust (its allowed_signers checks every later update).
+promote_tag() {
+  local stable_tip target v tag out iso obj
+  stable_tip=$(tip stable)
+  [ -n "$stable_tip" ] || fail "origin/stable does not exist"
+  target=$(resolve "${want_rev:-$stable_tip}")
+
+  step "Target: stable release $target"
+  info "$(g log -1 --format='%s (%an, %ad)' --date=short "$target")"
+  is_ancestor "$target" "$stable_tip" || fail "$target is not on origin/stable"
+  v=$(version_at "$target")
+  [[ $v =~ $semver_re ]] || fail "release/version of $target is '${v:-<missing>}'"
+  tag=v$v
+  ! g rev-parse -q --verify "refs/tags/$tag" >/dev/null || fail "origin already has the tag $tag"
+  ok "HinterOS $v stable, tag $tag"
+
+  # Only a release a release key signed gets a tag (a box checks a stable update the same way).
+  step "Signature of the stable release"
+  signers_of "$target" "$tmp/tag.signers"
+  verify "$target" "$tmp/tag.signers"
+  key_preflight "$tmp/tag.signers"
+
+  # From the commit, never from a work tree: an ISO built from a dirty tree pins no revision.
+  step "Build the ISO of $target"
+  if [ -n "${PROMOTE_ISO_CMD:-}" ]; then
+    out=$("$PROMOTE_ISO_CMD" "$repo" "$target") || fail "PROMOTE_ISO_CMD failed"
+  else
+    info "nix build git+file://$repo?ref=refs/heads/stable&rev=$target#iso (this takes long)"
+    out=$(nix build --no-link --print-out-paths "git+file://$repo?ref=refs/heads/stable&rev=$target#iso") \
+      || fail "the ISO did not build"
+  fi
+  iso=$out/iso/hinteros-installer.iso
+  [ -f "$iso" ] || fail "the build has no iso/hinteros-installer.iso: $out"
+  ok "ISO: $iso ($(du -h "$iso" | cut -f1))"
+  (cd "$out/iso" && sha256sum -- hinteros-installer.iso) >"$tmp/SHA256SUMS"
+  ok "SHA256SUMS: $(cat "$tmp/SHA256SUMS")"
+
+  # The message's body is SHA256SUMS as it is: `git tag -l --format='%(contents:body)' <tag>`.
+  { printf 'HinterOS %s\n\n' "$v"; cat "$tmp/SHA256SUMS"; } >"$tmp/tagmsg"
+  step "Review"
+  info "tag:       $tag -> $target"
+  info "remote:    $url"
+  [ "$dry_run" = 1 ] || info "key:       $key"
+  sed 's/^/  | /' "$tmp/tagmsg"
+  if [ "$dry_run" = 1 ]; then
+    info "dry run: no tag, no signature and no push"
+    info "would run: git push $url refs/tags/$tag (no force)"
+    return 0
+  fi
+  confirm "Sign the tag $tag and push it?"
+  info "sign with $key. ssh-keygen asks for the passphrase."
+  env -u SSH_AUTH_SOCK git -C "$repo" -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen \
+    -c "user.signingkey=$key" tag -s -F "$tmp/tagmsg" "$tag" "$target" || fail "the signature failed"
+  out=$(g -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen -c "gpg.ssh.allowedSignersFile=$tmp/tag.signers" \
+    verify-tag "$tag" 2>&1) || {
+    printf '%s\n' "$out" | sed 's/^/         /'
+    fail "the tag $tag does not verify against the release signers"
+  }
+  ok "git verify-tag $tag: good"
+  obj=$(g rev-parse "refs/tags/$tag")
+
+  step "Push the tag $tag"
+  g "${cred_args[@]}" push "$url" "refs/tags/$tag" || fail "the push failed. The script never forces a push."
+  [ "$(git ls-remote "$url" "refs/tags/$tag" | cut -f1)" = "$obj" ] || fail "after the push, origin's $tag is not $obj"
+  ok "origin/$tag = $obj"
+
+  step "Done"
+  info "upload $iso and SHA256SUMS (the tag's body) to the release pages; see the README, \"Check a release ISO\"."
 }
 
 # --- menus (no mode given) -----------------------------------------------------------------
@@ -1301,6 +1371,11 @@ choose_release() {
     labels+=("Release a hotfix branch to stable")
     modes+=(hotfix)
   fi
+  if [ -n "$stable_tip" ] && [[ $(version_at "$stable_tip") =~ $semver_re ]] \
+    && ! g rev-parse -q --verify "refs/tags/v$(version_at "$stable_tip")" >/dev/null; then
+    labels+=("Build the ISO of stable $(version_at "$stable_tip") and sign its tag v$(version_at "$stable_tip")")
+    modes+=(tag)
+  fi
   [ "${#modes[@]}" -gt 0 ] || fail "nothing to release. Beta has all of main, and stable has all of beta."
   pick "Select the release:" 1 "${labels[@]}"
   mode=${modes[picked - 1]}
@@ -1341,6 +1416,9 @@ choose_release() {
       pick "Select the hotfix branch:" 1 "${labels[@]}"
       hotfix_branch=${names[picked - 1]}
       ;;
+    tag)
+      want_rev=$stable_tip
+      ;;
   esac
 
   if [ "$dry_run" = 0 ] && [ ! -f "$key" ]; then
@@ -1357,4 +1435,5 @@ case "$mode" in
   beta) promote_beta ;;
   stable) promote_stable ;;
   hotfix) promote_hotfix ;;
+  tag) promote_tag ;;
 esac

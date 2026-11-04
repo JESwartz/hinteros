@@ -101,6 +101,22 @@
         # fields and treat an unknown `kind` as not an app).
         inherit (hinteros-catalog.lib) catalogIds;
 
+        # What the installer reads from a newer revision it installs (hinteros-install, a plan's
+        # `rev`): per catalog entry the id, whether the installer offers it, its box features and
+        # its vendor terms. An installer installs revisions newer than itself for years, so this
+        # is a compatibility interface: fields may be added (installers ignore them); `version`
+        # changes only when an older installer would misread the entries, and it refuses then.
+        # Plain data that needs no build, as catalogIds.
+        installerCatalog = {
+          version = 1;
+          entries = nixpkgs.lib.mapAttrsToList (id: e: {
+            inherit id;
+            boxFeatures = e.boxFeatures or [ ];
+            offered = (e.kind or "app") == "app" && e.status == "available" && (e.starter or null) != null;
+            terms = if (e.terms or null) == null then null else { inherit (e.terms) version title; };
+          }) hinteros-catalog.catalog;
+        };
+
         # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
         mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
 

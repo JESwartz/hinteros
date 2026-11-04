@@ -13,7 +13,8 @@
 # `version`, `channel`, `hostname` and `admin` are absent if unknown, `ssh` is state.json's
 # settings.ssh.enable (false if absent), `profiles` counts state.json's accounts,
 # `schemaOk` says a keepData plan is accepted on this disk. null: no such install, the disk is in
-# use or it cannot be read. Disks are mounted read-only, one at a time; an unreadable disk never
+# use, it cannot be read or an install runs (it holds /run/hinteros-install.lock; a listing takes
+# it shared). Disks are mounted read-only, one at a time; an unreadable disk never
 # fails the listing.
 #
 # --info (offline, instant, no root): what this installer carries, as one JSON object,
@@ -64,11 +65,13 @@
 #
 # A plan with keepData: true repairs the install on the disk in place: nothing is erased. The disk
 # must hold an install this installer can read (keep-* error codes). The subvolumes are mounted,
-# /etc/hinteros gets this installer's flake.nix and flake.lock and a new hardware report (state.json
-# and extra.nix stay; the plan's optional hostname, admin.user and ssh.enable replace those settings
-# in state.json, and an optional admin.password replaces the admin password), a new system
+# /etc/hinteros gets this installer's flake.nix and flake.lock (on the plan's channel, else the
+# install's) and a new hardware report (state.json and extra.nix stay; the plan's optional
+# hostname, admin.user and ssh.enable replace those settings in state.json, and an optional
+# admin.password replaces the admin password), a new system
 # generation goes into the existing store and the ESP is formatted again with its volume id, last
-# of all, so a failed build leaves the boot files alone. Stages: validate, mount (10-20) in place
+# of all. A run that fails before the new system is installed puts back /etc/hinteros, the admin
+# password and the boot files, so the old system boots as it was. Stages: validate, mount (10-20) in place
 # of partition, facter, config, packages, build, bootloader, snapshot, finalize, done. No apps
 # stage, no first-boot files.
 #
@@ -96,8 +99,15 @@ MIN_DISK_GIB=16
 # The state.json format and disk layout this installer writes.
 SCHEMA_VERSION=2
 DISK_LAYOUT=gpt-esp-btrfs
+# The plan format this installer reads (a plan's optional `version`, default 1). Each new plan
+# field bumps it: an older installer refuses a field it does not know, and with the version it can
+# say why (plan-newer).
+PLAN_VERSION=1
 # Test hook: the command that writes the hardware report (VM tests feed a fixture).
 FACTER=${HINTEROS_INSTALL_FACTER:-nixos-facter}
+# Test hook: the command that sets the system profile and writes the boot loader (VM tests make it
+# fail, to check what a failed keepData run puts back).
+NIXOS_INSTALL=${HINTEROS_INSTALL_NIXOS_INSTALL:-nixos-install}
 # Test hook: a command run just before the disk is checked for the last time and erased (VM tests
 # replace the disk there).
 BEFORE_WIPE_HOOK=${HINTEROS_INSTALL_BEFORE_WIPE:-}
@@ -184,10 +194,41 @@ repo_scheme=${REPO_URL%%://*}
 chk_dir=
 tmp_dirs=()
 probe_mnt= # a disk mounted read-only by read_install
+# keepData: until the new system is installed, a copy of what the run changes on the kept install
+# (/etc/hinteros, the admin password, the boot files once the ESP is formatted). A run that ends
+# before puts it back (restore_kept), so the old system boots as it was. Empty: nothing to put back.
+keep_bak=
+esp_touched=0 # 1: keep_esp started to format the ESP
 # shellcheck disable=SC2329 # the EXIT trap
 cleanup_tmp() {
   [ -z "$probe_mnt" ] || umount "$probe_mnt" 2>/dev/null || true
+  [ -z "$keep_bak" ] || restore_kept
   [ "${#tmp_dirs[@]}" -eq 0 ] || rm -rf "${tmp_dirs[@]}"
+}
+# shellcheck disable=SC2329 # the EXIT trap
+restore_kept() {
+  local d=$keep_bak
+  keep_bak=
+  # The run ends here whatever happens; each step is logged and the next one still runs.
+  trap - ERR
+  set +e
+  echo "the new system is not installed: putting back /etc/hinteros, the admin password and the boot files" >>"$LOG"
+  if ! { rm -rf "$cfg" && cp -a "$d/etc-hinteros" "$cfg"; } >>"$LOG" 2>&1; then
+    echo "could not put back $cfg" >>"$LOG"
+  fi
+  if [ -e "$d/admin-password-hash" ]; then
+    cp -a "$d/admin-password-hash" "$MNT/var/lib/hinteros/admin-password-hash" >>"$LOG" 2>&1
+  else
+    rm -f "$MNT/var/lib/hinteros/admin-password-hash"
+  fi
+  # A damaged ESP that did not mount had no boot files to keep: the new, empty one stays.
+  if [ "$esp_touched" -eq 1 ] && [ -d "$d/esp" ]; then
+    if ! { { mountpoint -q "$MNT/boot" || mount -t vfat -o umask=0077 "$esp_dev" "$MNT/boot"; } \
+      && find "$MNT/boot" -mindepth 1 -delete && cp -rT "$d/esp" "$MNT/boot"; } >>"$LOG" 2>&1; then
+      echo "could not put back the boot files" >>"$LOG"
+    fi
+  fi
+  sync
 }
 trap cleanup_tmp EXIT
 # Results of check_channel: the tip, and the newer release (empty: none newer).
@@ -382,7 +423,7 @@ read_install_at() {
       ex_refuse keep-state-unreadable "the state.json on $d has no valid schemaVersion"
       ;;
     schema)
-      ex_refuse keep-schema-newer "the install on $d is newer than this installer (state.json schema $(jq -r .schemaVersion <<<"$state"), this installer knows $SCHEMA_VERSION); use a newer installer"
+      ex_refuse keep-schema-newer "The install on $d is newer than this installer (state.json schema $(jq -r .schemaVersion <<<"$state") > $SCHEMA_VERSION). Use a newer installer"
       ;;
     layout)
       ex_refuse keep-layout "the install on $d has another disk layout, not $DISK_LAYOUT"
@@ -425,12 +466,19 @@ read_install() {
 }
 
 list_disks() {
-  local out d one existing='{}'
+  local out d one existing='{}' probe=1
+  # An install holds the lock (/run/hinteros-install.lock) exclusively from its validation to its
+  # end, and may erase a disk that is not mounted yet: no disk is mounted while it does. Listings
+  # share it, so the UI and the console can list at the same time. Without root there is no lock
+  # (and no disk can be mounted).
+  if { exec 9>>/run/hinteros-install.lock; } 2>/dev/null && ! flock -s -n 9; then
+    probe=0
+  fi
   out=$(lsblk --json -b -o NAME,PATH,SIZE,MODEL,TRAN,TYPE,RM,MOUNTPOINTS,DISK-SEQ)
   while IFS= read -r d; do
     one=null
     # In use: the installer medium, or an install that is running.
-    if [ -z "$(lsblk -rno MOUNTPOINTS "$d" 2>/dev/null | tr -d ' \n' || true)" ]; then
+    if [ "$probe" -eq 1 ] && [ -z "$(lsblk -rno MOUNTPOINTS "$d" 2>/dev/null | tr -d ' \n' || true)" ]; then
       read_install "$d"
       if [ "$EX_READ" -eq 1 ]; then
         one=$(jq -nc --arg v "$EX_VERSION" --arg ch "$EX_CHANNEL" --argjson n "$EX_PROFILES" --arg code "$EX_CODE" \
@@ -575,9 +623,16 @@ fi
 printf '%s' "$PLAN" | jq -e 'type == "object"' >/dev/null 2>&1 \
   || fail 2 plan-invalid "the plan is not a JSON object"
 
+# A plan from a newer installer (its optional `version` is higher than this one's) is refused as a
+# whole: a field this installer does not know may change what is erased, so it is never ignored.
+if printf '%s' "$PLAN" | jq -e --argjson v "$PLAN_VERSION" '(.version | type) == "number" and .version > $v' >/dev/null 2>&1; then
+  fail 2 plan-newer "This plan is for a newer installer (plan version $(printf '%s' "$PLAN" | jq .version)). Use a newer installer."
+fi
+
 # The plan with defaults filled in; every later read goes through this.
 PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   disk, diskSeq, hostname, admin, wifi,
+  version: (.version // 1),
   ssh: (.ssh // {enable: false}),
   channel: (.channel // $default_channel),
   base: (.base // "unstable"),
@@ -586,11 +641,12 @@ PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   acceptedTerms: (.acceptedTerms // {}),
   rev: (.rev // null),
   keepData: (.keepData // false),
-  # The fields the plan has (a keepData plan keeps the settings of the install it does not give).
+  # The fields the plan has (a keepData plan keeps the settings of the install it does not give;
+  # `channel` too, set from the install after the plan is checked).
   given: [to_entries[] | select(.value != null) | .key],
   # What a keepData plan does not take: it comes from the install, or does not apply.
   notKept: [to_entries[] | select(.value != null and (.key | IN("base", "apps", "acceptedTerms", "rev"))) | .key],
-  unknown: (keys - ["disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev", "keepData"])
+  unknown: (keys - ["version", "disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev", "keepData"])
 }')
 
 # Plan-level problems, all at once: [{field, code, message}].
@@ -599,6 +655,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
   | def bad(f; c; m): {field: f, code: c, message: m};
     [
       (.unknown[] | bad("."; "unknown-field"; "unknown plan field \(.)")),
+      (if (.version | type) != "number" or .version != (.version | floor) or .version < 1
+        then bad("version"; "plan-version-invalid"; "version must be a whole number, 1 or more") else empty end),
       (if (.disk | type) != "string" or (.disk | startswith("/dev/") | not)
         then bad("disk"; "disk-missing"; "disk must be a device path such as /dev/nvme0n1") else empty end),
       (if (.diskSeq | type) != "number" or .diskSeq != (.diskSeq | floor) or .diskSeq < 1
@@ -712,6 +770,20 @@ if [ -n "$plan_rev" ] && [ "$plan_rev" != "$ISO_REV" ]; then
 fi
 install_rev=$ISO_REV
 install_version=$ISO_VERSION
+# A beta installer has a beta revision. On the stable channel it is not a stable release: the box
+# would show it as stable and get no stable update until stable passes it (never, after a hotfix:
+# updates within a channel are fast-forward only). So a stable plan on a beta installer needs
+# `rev`, the stable tip, which is checked below to follow this revision. A stable installer on beta
+# is fine: every beta release contains the stable releases (promote beta checks it). Run again once
+# a keepData plan has the channel of the install (it takes no `rev`: a stable installer repairs it).
+check_channel_rev() {
+  if [ "$newer" -eq 0 ] && [ "$channel" = stable ] && [ "$DEFAULT_CHANNEL" = beta ]; then
+    [ "$keep_data" != true ] \
+      || fail 2 channel-needs-rev "This installer has a beta version. To repair this stable install, use a stable installer. Or select the beta channel."
+    fail 2 channel-needs-rev "This installer has a beta version. For the stable channel, install the newest stable version (internet connection necessary). Or select the beta channel."
+  fi
+}
+check_channel_rev
 
 # state.json (schema 2, profiles.md "Installer"): one spare account (p1) and no
 # profile (first-boot mode creates the admin profile), no apps (each profile has its own; the
@@ -771,40 +843,69 @@ fi
 # The machine.
 if [ ! -d /sys/firmware/efi ] && [ -z "${HINTEROS_INSTALL_ALLOW_BIOS:-}" ]; then
   # HINTEROS_INSTALL_ALLOW_BIOS is for the VM tests, whose installer VM is not booted via UEFI.
-  fail 2 not-uefi "this machine did not boot in UEFI mode; HinterOS installs on UEFI machines only (check the firmware boot settings)"
+  fail 2 not-uefi "This machine did not start in UEFI mode. Set UEFI boot in the firmware settings."
 fi
 
 exec 9>/run/hinteros-install.lock
-flock -n 9 || fail 2 already-running "another hinteros-install is running"
+# Exclusive; a disk listing (--list-disks) holds it shared for a moment while it looks into disks.
+flock -x -w 60 9 || fail 2 already-running "another hinteros-install is running"
 
 mem_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
 if [ "$mem_kib" -lt $((3 * 1024 * 1024)) ]; then
   progress validate 1 "Only $((mem_kib / 1024)) MiB of memory; the install may fail on boxes with less than 4 GB" warn low-memory
 fi
 
+# wifi_uuid SSID [--active]: the UUID of the Wi-Fi profile for SSID that connected last (by its
+# TIMESTAMP; a profile that never connected, such as one left by a try with a wrong key, does not
+# count); with --active only an active connection counts. Empty: none. The SSID is read with -e no
+# and one field, so nmcli prints it as it is (no escaped ":").
+wifi_uuid() {
+  local u t ts best='' bts=0
+  while IFS=: read -r u t ts; do
+    [ "$t" = 802-11-wireless ] || continue
+    if ! [[ $ts =~ ^[0-9]+$ ]] || [ "$ts" -le "$bts" ]; then continue; fi
+    if [ "$(nmcli -g 802-11-wireless.ssid -e no connection show uuid "$u" 2>/dev/null || true)" = "$1" ]; then
+      best=$u
+      bts=$ts
+    fi
+  done < <(nmcli -t -f UUID,TYPE,TIMESTAMP connection show ${2:+"$2"} 2>/dev/null || true)
+  printf '%s' "$best"
+}
+
 # Network: bring up Wi-Fi if the plan has it, then decide online or offline.
 online=0
 if [ "$network_pref" != offline ]; then
-  if [ -n "$wifi_ssid" ]; then
+  # The UI joins the network before it runs the plan (twice: --validate-only, then the install):
+  # connecting again would drop the link it has.
+  if [ -n "$wifi_ssid" ] && [ -n "$(wifi_uuid "$wifi_ssid" --active)" ]; then
+    echo "Wi-Fi \"$wifi_ssid\" is connected already" >>"$LOG"
+  elif [ -n "$wifi_ssid" ]; then
     progress validate 2 "Connecting to Wi-Fi \"$wifi_ssid\""
     wifi_psk=$(plan '.wifi.psk // empty')
     nmcli radio wifi on >>"$LOG" 2>&1 || true
     nmcli device wifi rescan >>"$LOG" 2>&1 || true
     sleep 3
     if [ -n "$wifi_psk" ]; then
-      nmcli -w 40 device wifi connect "$wifi_ssid" password "$wifi_psk" >>"$LOG" 2>&1 \
+      # --ask: the key from stdin, not on the command line (where /proc shows it), as the UI does.
+      printf '%s\n' "$wifi_psk" | nmcli -w 40 --ask device wifi connect "$wifi_ssid" >>"$LOG" 2>&1 \
         || progress validate 2 "Could not connect to Wi-Fi \"$wifi_ssid\"" warn wifi-failed
     else
-      nmcli -w 40 device wifi connect "$wifi_ssid" >>"$LOG" 2>&1 \
+      nmcli -w 40 device wifi connect "$wifi_ssid" >>"$LOG" 2>&1 </dev/null \
         || progress validate 2 "Could not connect to Wi-Fi \"$wifi_ssid\"" warn wifi-failed
     fi
   fi
-  if curl -fsS --max-time 8 -o /dev/null "$ONLINE_PROBE" >>"$LOG" 2>&1; then
-    online=1
-  fi
+  # A Wi-Fi link may still be getting its address: a few tries.
+  for try in 1 2 3; do
+    if curl -fsS --max-time 8 -o /dev/null "$ONLINE_PROBE" >>"$LOG" 2>&1; then
+      online=1
+      break
+    fi
+    if [ -z "$wifi_ssid" ] || [ "$try" -eq 3 ]; then break; fi
+    sleep 3
+  done
 fi
 if [ "$network_pref" = online ] && [ "$online" -eq 0 ]; then
-  fail 2 no-network "the plan asks for an online install but cache.nixos.org is not reachable"
+  fail 2 no-network "No internet connection. The plan needs an online install."
 fi
 if [ "$online" -eq 1 ]; then
   progress validate 4 "Online install"
@@ -816,7 +917,7 @@ if [ "$online" -eq 0 ] && [ -z "$ONLINE_APPS_HOOK" ] && [ "${#apps[@]}" -gt 0 ];
   offline_bad=$(printf '%s\n' "${apps[@]}" | jq -R . | jq -sc --slurpfile cat "$APPS_JSON" \
     '[.[] | select(. as $a | $cat[0].onIso | index($a) | not)]')
   if [ "$(printf '%s' "$offline_bad" | jq length)" -gt 0 ]; then
-    fail 2 app-needs-network "these apps are not on the installer and need a network connection: $(printf '%s' "$offline_bad" | jq -r 'join(", ")'); connect to a network or deselect them (they can be added later from the Store)"
+    fail 2 app-needs-network "These apps need the internet: $(printf '%s' "$offline_bad" | jq -r 'join(", ")'). Connect to a network or remove them."
   fi
 fi
 
@@ -842,12 +943,15 @@ disk_desc() {
 }
 disk_seq=$(disk_seq_of "$disk_real")
 if [ "$disk_seq" != "$plan_seq" ]; then
-  fail 2 disk-changed "the disk changed: $disk is now disk ${disk_seq:-unknown} ($(disk_desc "$disk_real")), not disk $plan_seq of the plan. Nothing was touched. Select the disk again"
+  echo "disk-changed: $disk is disk ${disk_seq:-unknown} ($(disk_desc "$disk_real")); the plan has disk $plan_seq" >>"$LOG"
+  fail 2 disk-changed "$disk is not the disk in the plan. Nothing was touched. Select the disk again."
 fi
 # Mounted anywhere (the installer medium, an old install)? Leftovers of an earlier run of this
-# script under /mnt are fine; they are unmounted before partitioning.
-in_use=$(lsblk -rno MOUNTPOINTS "$disk_real" | tr ' ' '\n' | sed '/^$/d' | { grep -Ev "^$MNT(/|$)" || true; })
-[ -z "$in_use" ] || fail 2 disk-in-use "$disk is in use (mounted at: $(printf '%s' "$in_use" | tr '\n' ' ')); it may be the installer medium"
+# script under /mnt are fine; they are unmounted before partitioning. JSON: in raw output lsblk
+# joins the mount points of one device with an escaped newline (\x0a), so they cannot be split.
+in_use=$(lsblk -J -o MOUNTPOINTS "$disk_real" | jq -r '.. | .mountpoints? | arrays | .[] | strings' \
+  | { grep -Ev "^$MNT(/|$)" || true; })
+[ -z "$in_use" ] || fail 2 disk-in-use "$disk is in use (mounted at: $(printf '%s' "$in_use" | tr '\n' ' ' | sed 's/ $//')). Select another disk."
 disk_bytes=$(blockdev --getsize64 "$disk_real")
 disk_was="disk $disk_seq, $disk_real, $(disk_desc "$disk_real")"
 if [ "$disk_bytes" -lt $((MIN_DISK_GIB * 1024 * 1024 * 1024)) ]; then
@@ -857,12 +961,20 @@ fi
 # hinteros-root). A second disk (an old install, a USB stick) carrying those labels would make them
 # ambiguous: udev links the label to either disk, so the new file systems could be made on the
 # wrong one. Refuse before anything is touched. (The installed system mounts by UUID.)
-# Nothing is partitioned for a keepData plan, so the labels of another disk do not matter.
-others=
-[ "$keep_data" = true ] || others=$(lsblk -J -p -o PATH,PKNAME,PARTLABEL 2>/dev/null | jq -r --arg d "$disk_real" '
-  [.. | objects | select((.partlabel // "") | test("^hinteros-(esp|root)$"))
-   | select((.pkname // "") != $d) | "\(.path) (\(.partlabel))"] | join(", ")' 2>/dev/null || true)
-[ -z "$others" ] || fail 2 other-hinteros-disk "another disk already has HinterOS partitions: $others. The installer finds the new partitions by label, so two such disks are ambiguous; unplug that disk or erase it first"
+# Nothing is partitioned for a keepData plan, so the labels of another disk do not matter. Checked
+# again just before the disk is erased (a disk can be plugged in while the wizard or a download
+# runs).
+other_disks() {
+  local others
+  [ "$keep_data" = false ] || return 0
+  others=$(lsblk -J -p -o PATH,PKNAME,PARTLABEL 2>/dev/null | jq -r --arg d "$disk_real" '
+    [.. | objects | select((.partlabel // "") | test("^hinteros-(esp|root)$"))
+     | select((.pkname // "") != $d) | "\(.path) (\(.partlabel))"] | join(", ")' 2>/dev/null || true)
+  [ -n "$others" ] || return 0
+  echo "other disks with HinterOS partition labels (the partitioning script finds its partitions by label): $others" >>"$LOG"
+  fail 2 other-hinteros-disk "Another disk has HinterOS partitions: $others. Disconnect it or erase it."
+}
+other_disks
 if mountpoint -q "$MNT"; then
   mnt_src=$(findmnt -nvo SOURCE "$MNT")
   case $(lsblk -rno PKNAME "$mnt_src" 2>/dev/null | head -n1) in
@@ -880,6 +992,9 @@ if [ "$keep_data" = true ]; then
   fi
   read_install "$disk_real"
   [ -z "$EX_CODE" ] || fail 2 "$EX_CODE" "$EX_MSG. Nothing was touched"
+  # A plan without a channel keeps the channel of the install (its flake.lock), else the installer's.
+  if ! given channel && [ -n "$EX_CHANNEL" ]; then channel=$EX_CHANNEL; fi
+  check_channel_rev
   # The admin password file stays; an install without an admin has none to keep.
   if given admin && [ -z "$EX_ADMIN" ] && [ "$(plan '(.admin.password // .admin.hashedPassword // "") | length')" -eq 0 ]; then
     fail 2 admin-password-missing "the install on $disk has no admin account; the new one needs a password. Nothing was touched"
@@ -894,7 +1009,7 @@ fi
 # UI's word for it is not enough; the channel may also have moved on since it asked).
 if [ "$newer" -eq 1 ]; then
   [ "$online" -eq 1 ] \
-    || fail 2 rev-needs-network "the newer HinterOS ($plan_rev) is not on this installer and needs a network connection; connect to a network or install the version on this installer"
+    || fail 2 rev-needs-network "The newer HinterOS needs an internet connection. Connect to a network or install the version on this installer."
   progress validate 6 "Checking the newer HinterOS on the $channel channel"
   check_channel "$channel" 2
   if [ "$NEWER_REV" != "$plan_rev" ]; then
@@ -926,7 +1041,8 @@ same_disk() {
   [ -n "$now" ] && [ -b "$now" ] && seq=$(disk_seq_of "$now")
   if [ "$now" != "$disk_real" ] || [ "$seq" != "$disk_seq" ] \
     || [ "$(blockdev --getsize64 "$now" 2>/dev/null || true)" != "$disk_bytes" ]; then
-    fail "$1" disk-changed "the disk changed: $disk was $disk_was; now it is ${seq:+disk $seq, }${now:-not there}. $2. Select the disk again"
+    echo "disk-changed: $disk was $disk_was; now it is ${seq:+disk $seq, }${now:-not there}" >>"$LOG"
+    fail "$1" disk-changed "$disk changed. $2. Select the disk again."
   fi
 }
 
@@ -953,22 +1069,20 @@ if [ "$newer" -eq 1 ]; then
   locked=$(jq -r '.nodes[.nodes[.root].inputs.hinteros].locked.rev // ""' "$staged/flake/flake.lock")
   [ "$locked" = "$install_rev" ] \
     || fail 1 fetch-failed "the downloaded HinterOS is locked at '$locked', not $install_rev; nothing was touched"
-  # That revision's catalog, in the shape of the Store index the rest of this script reads.
-  # shellcheck disable=SC2016 # Nix, not shell
-  catalog_apply='es: {
-    entries = map (id: let e = es.${id}; in {
-      inherit id;
-      boxFeatures = e.boxFeatures or [ ];
-      offered = (e.kind or "app") == "app" && e.status == "available" && (e.starter or null) != null;
-      terms = if (e.terms or null) == null then null else { inherit (e.terms) version title; };
-    }) (builtins.attrNames es);
-  }'
-  echo "+ nix eval (the catalog of $install_rev)" >>"$LOG"
-  if ! timeout -k 10 900 nix --extra-experimental-features 'nix-command flakes' eval --json \
-    --option substitute true --no-update-lock-file \
-    "path:$staged/flake#nixosConfigurations.hinteros.config.hinteros.catalog.entries" \
-    --apply "$catalog_apply" >"$staged/catalog.json" 2>>"$LOG" </dev/null; then
-    fail 1 fetch-failed "could not read the app catalog of HinterOS $install_version; nothing was touched; see $LOG"
+  # That revision's catalog for installers (its flake's lib.installerCatalog: id, offered,
+  # boxFeatures, terms per entry), through the lock just made. It is in the shape of the Store index
+  # the rest of this script reads; fields this installer does not know are ignored, and a format it
+  # does not know (`version`) is refused.
+  echo "+ nix eval (lib.installerCatalog of $install_rev)" >>"$LOG"
+  if ! timeout -k 10 900 nix --extra-experimental-features 'nix-command flakes' eval --json --impure \
+    --option substitute true --expr "(builtins.getFlake \"path:$staged/flake\").inputs.hinteros.lib.installerCatalog" \
+    >"$staged/catalog.json" 2>>"$LOG" </dev/null; then
+    fail 1 fetch-failed "Could not read the app list of HinterOS $install_version. Nothing was touched."
+  fi
+  cat_version=$(jq -r '.version' "$staged/catalog.json" 2>>"$LOG" || true)
+  if [ "$cat_version" != 1 ] || ! jq -e '.entries | type == "array"' "$staged/catalog.json" >/dev/null 2>&1; then
+    echo "lib.installerCatalog of $install_rev has version '$cat_version'; this installer reads 1" >>"$LOG"
+    fail 1 fetch-failed "This installer cannot read the app list of HinterOS $install_version. Install the version on this installer."
   fi
   CATALOG_INDEX=$staged/catalog.json
   # Picked apps that revision no longer offers, or whose vendor terms changed since the ones
@@ -997,6 +1111,8 @@ if [ -n "$BEFORE_WIPE_HOOK" ]; then
   "$BASH" -c "$BEFORE_WIPE_HOOK" >>"$LOG" 2>&1 </dev/null || true
 fi
 same_disk 2 "Nothing was touched"
+other_disks
+old_partuuids=() # the target's partitions before the wipe (none for a keepData plan)
 if [ "$keep_data" = true ]; then
   progress mount 10 "Mounting the install on $disk"
   install -d "$MNT"
@@ -1015,9 +1131,31 @@ else
   # An earlier install on this disk: erase every signature first. disko skips mkfs on a partition
   # that still shows a file system (a new partition at the old one's offsets would keep the old
   # store), and the old labels must be gone before the new ones are made.
+  # release_holders NAME: stops what is stacked on the block device NAME, top first: device-mapper
+  # and RAID devices of an old system's LVM, RAID or encryption that the installer's udev rules
+  # started (mounted ones were refused at validation). Else the erased signatures stay in use and
+  # the new partition table cannot be read. (Called from wipe_target, where set -e does not apply.)
+  # shellcheck disable=SC2329 # run via wipe_target
+  release_holders() {
+    local h
+    for h in "/sys/class/block/$1/holders/"*; do
+      [ -e "$h" ] || continue
+      h=$(basename "$h")
+      release_holders "$h" || return 1
+      echo "stopping $h, which uses $1"
+      case $h in
+        dm-*) dmsetup remove --retry "$(cat "/sys/class/block/$h/dm/name")" || return 1 ;;
+        md*) mdadm --stop "/dev/$h" || return 1 ;;
+        *) return 1 ;;
+      esac
+    done
+  }
   # shellcheck disable=SC2329 # run via `run`
   wipe_target() {
     local part
+    for part in "$disk_real" $(lsblk -lnpo PATH,TYPE "$disk_real" | awk '$2 == "part" {print $1}'); do
+      release_holders "$(basename "$part")" || return 1
+    done
     for part in $(lsblk -lnpo PATH,TYPE "$disk_real" | awk '$2 == "part" {print $1}'); do
       wipefs -a -f "$part"
     done
@@ -1025,6 +1163,8 @@ else
     blockdev --rereadpt "$disk_real" || true
     udevadm settle || true
   }
+  # The partitions about to be erased: their firmware boot entries go (prune_boot_entries).
+  mapfile -t old_partuuids < <(lsblk -lno PARTUUID "$disk_real" 2>/dev/null | sed '/^$/d' | tr 'A-F' 'a-f' || true)
   run "Erasing old signatures" wipe_target
   # The disko layout names the disk /dev/hinteros-target; this link points it at the real one.
   ln -sfn "$disk_real" "$TARGET_LINK"
@@ -1059,6 +1199,16 @@ fi
 cfg=$MNT/etc/hinteros
 # (Not on a kept install: this would also set the modes of what is there.)
 [ "$keep_data" = true ] || install -d -m 0755 "$MNT/etc" "$cfg" "$MNT/var/lib/hinteros"
+if [ "$keep_data" = true ]; then
+  # What a failed run puts back (restore_kept), saved on the kept disk before anything changes.
+  bak=$(mktemp -d -p "$MNT")
+  tmp_dirs+=("$bak")
+  run "Saving the device configuration" cp -a "$cfg" "$bak/etc-hinteros"
+  if [ -e "$MNT/var/lib/hinteros/admin-password-hash" ]; then
+    run "Saving the admin password" cp -a "$MNT/var/lib/hinteros/admin-password-hash" "$bak/"
+  fi
+  keep_bak=$bak
+fi
 
 progress facter 22 "Detecting hardware"
 facter_ok=0
@@ -1470,8 +1620,23 @@ sys_build() {
 # damaged ESP is repaired. Only now: up to here a failure leaves the old boot files alone.
 esp_done=0
 keep_esp() {
+  local m
   [ "$esp_done" -eq 0 ] || return 0
   same_disk 1 "Nothing was erased"
+  # The boot files as they are, for a failed run (restore_kept). A damaged ESP that does not mount
+  # has none.
+  m=$(mktemp -d)
+  tmp_dirs+=("$m")
+  if mount -t vfat -o ro "$esp_dev" "$m" >>"$LOG" 2>&1; then
+    if ! cp -rT "$m" "$keep_bak/esp" >>"$LOG" 2>&1; then
+      echo "could not save the boot files; a failed run leaves the new ESP" >>"$LOG"
+      rm -rf "$keep_bak/esp"
+    fi
+    umount "$m" >>"$LOG" 2>&1 || umount -l "$m" >>"$LOG" 2>&1 || true
+  else
+    echo "the EFI system partition does not mount: no boot files to keep" >>"$LOG"
+  fi
+  esp_touched=1
   run "Formatting the EFI system partition" mkfs.vfat -i "${esp_uuid//-/}" -n HINTEROSESP "$esp_dev"
   udevadm settle >>"$LOG" 2>&1 || true
   run "Mounting the EFI system partition" mount -t vfat -o umask=0077 "$esp_dev" "$MNT/boot"
@@ -1481,13 +1646,23 @@ keep_esp() {
 }
 
 # prune_boot_entries: removes the firmware boot entries of systemd-boot ("Linux Boot Manager" and
-# its fallback) whose partition is gone. Each Erase all makes a new ESP partition and bootctl adds
-# a new pair, so without this the firmware's boot menu grows by two entries per install. Some
-# firmware (Lenovo) turns such an entry into a VenHw path; it is removed too. An entry on an
-# existing partition (this disk's, another disk's) stays. Failures are only logged.
+# its fallback) that point at a partition this run erased (old_partuuids: the target's partitions
+# before the wipe, whatever system made them). Each Erase all makes a new ESP partition and bootctl
+# adds a new pair, so without this the firmware's boot menu grows by two entries per install.
+# Every systemd-boot system uses that label: an entry of another disk, also one unplugged now,
+# stays. Some firmware (Lenovo) turns an entry into a VenHw path, which names no partition; such
+# an entry goes only when no other disk has an EFI system partition (the installer medium, which
+# is mounted, does not count), so it cannot be another system's. Failures are only logged.
 prune_boot_entries() {
   [ -w /sys/firmware/efi/efivars ] || return 0
-  local line num label path guid
+  local line num label path guid venhw=1
+  if lsblk -J -p -o PATH,PARTTYPE,MOUNTPOINTS 2>>"$LOG" | jq -e --arg d "$disk_real" '
+      [.blockdevices[] | select(.path != $d)
+       | select([.. | .mountpoints? | arrays | .[] | strings] == [])
+       | .children[]? | select((.parttype // "") | ascii_downcase
+           | IN("c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "0xef"))] != []' >/dev/null 2>&1; then
+    venhw=0
+  fi
   while IFS= read -r line; do
     [[ "$line" =~ ^Boot([0-9A-Fa-f]{4})\*?[[:space:]]+(Fallback\ )?Linux\ Boot\ Manager$'\t'(.*)$ ]] || continue
     num=${BASH_REMATCH[1]}
@@ -1495,15 +1670,15 @@ prune_boot_entries() {
     path=${BASH_REMATCH[3]}
     if [[ "$path" =~ ^HD\([0-9]+,GPT,([0-9a-fA-F-]{36}), ]]; then
       guid=${BASH_REMATCH[1],,}
+      printf '%s\n' "${old_partuuids[@]}" | grep -qxF "$guid" || continue
       [ ! -e "/dev/disk/by-partuuid/$guid" ] || continue
-    elif [[ ! "$path" =~ ^VenHw\( ]]; then
+    elif [[ ! "$path" =~ ^VenHw\( ]] || [ "$venhw" -eq 0 ]; then
       continue
     fi
-    echo "removing firmware boot entry Boot$num ($label, $path): its partition is gone" >>"$LOG"
+    echo "removing firmware boot entry Boot$num ($label, $path): its partition was erased" >>"$LOG"
     efibootmgr -q -b "$num" -B >>"$LOG" 2>&1 || echo "could not remove Boot$num" >>"$LOG"
   done < <(efibootmgr -v 2>>"$LOG" || true)
 }
-
 # sys_bootloader: nixos-install --system sets the target's system profile to the system built and
 # writes the boot loader (it builds nothing).
 sys_bootloader() {
@@ -1514,7 +1689,7 @@ sys_bootloader() {
   step_pct=
   progress bootloader 66 "Installing the boot loader"
   [ "$keep_data" = false ] || keep_esp
-  nix_logged quiet bootloader 66 66 "" 0 nixos-install "${flags[@]}"
+  nix_logged quiet bootloader 66 66 "" 0 "$NIXOS_INSTALL" "${flags[@]}"
   [ "$NIX_RC" -eq 0 ] || return 1
   prune_boot_entries
 }
@@ -1577,6 +1752,12 @@ if [ "$NIX_RC" != 0 ]; then
   nix_cleanup
   fail 1 install-failed "nixos-install failed (exit $NIX_RC): $(printf '%s' "$NIX_ERRS" | tail -n 4 | tr '\n' ' ' | cut -c1-600); see $LOG"
 fi
+# The new system is installed and its boot loader written: from here a kept install is not put
+# back. Its copy goes now: it is on the box's root, and the EXIT trap runs after finish unmounts it.
+if [ -n "$keep_bak" ]; then
+  rm -rf "$keep_bak"
+  keep_bak=
+fi
 nix_cleanup
 step_pct=100
 progress bootloader 70 "System installed, boot loader written"
@@ -1600,16 +1781,19 @@ check_snapshot "$snap"
 progress snapshot 73 "/etc/hinteros matches the installed generation"
 
 if [ -n "$wifi_ssid" ]; then
-  # Keep the connection so the box is online at first boot.
-  conn_dir=/etc/NetworkManager/system-connections
-  if [ -d "$conn_dir" ]; then
+  # Keep the connection so the box is online at first boot: the profile file of the active
+  # connection to that network, found by its UUID (not every profile that names the SSID, such as
+  # one left by a try with a wrong key; and NetworkManager escapes some SSIDs in the file).
+  conn_uuid=$(wifi_uuid "$wifi_ssid")
+  conn_file=
+  if [ -n "$conn_uuid" ]; then
+    conn_file=$(nmcli -t -e no -f UUID,FILENAME connection show 2>>"$LOG" | sed -n "s/^$conn_uuid://p" | head -n1 || true)
+  fi
+  if [ -n "$conn_file" ] && [ -f "$conn_file" ]; then
     install -d -m 0755 "$MNT/etc/NetworkManager/system-connections"
-    for f in "$conn_dir"/*; do
-      [ -f "$f" ] || continue
-      if grep -qxF "ssid=$wifi_ssid" "$f"; then
-        install -m 0600 "$f" "$MNT/etc/NetworkManager/system-connections/$(basename "$f")"
-      fi
-    done
+    install -m 0600 "$conn_file" "$MNT/etc/NetworkManager/system-connections/$(basename "$conn_file")"
+  else
+    echo "Wi-Fi \"$wifi_ssid\" has no profile that connected; the box gets no Wi-Fi profile" >>"$LOG"
   fi
 fi
 

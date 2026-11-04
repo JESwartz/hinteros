@@ -1,12 +1,22 @@
-# Runs `nix flake check` on the self-hosted runner (host executor, shared Nix
-# store, /dev/kvm for VM tests). Only pushes to this repo's own branches
-# trigger it; pull requests from forks never run here (TESTING.md, "Runner
-# security"). Checkout uses plain git so the host needs no Node.js.
+# Runs the system checks on the self-hosted runner (host executor, shared Nix store, /dev/kvm for
+# VM tests). Only pushes to this repo's own branches trigger it; pull requests from forks never run
+# here, so the runner only runs code from this repo's branches. Checkout uses plain git so the
+# host needs no Node.js.
+#
+# The full suite (every VM test, the ISO closure) takes hours and the host's memory is shared, so
+# the checks go through scripts/test-plan.sh: one at a time, throttled. A branch push runs the
+# targeted tier (the eval checks and the VM tests of what changed since main); main and the
+# channel branches, which promote releases from, run every check. A newer push to a branch cancels
+# the run for the older one.
 name: check
 
 on:
   push:
     branches: ["**"]
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -15,7 +25,13 @@ jobs:
       - name: checkout
         run: |
           git init -q .
-          git fetch -q --depth 1 "${{ github.server_url }}/${{ github.repository }}.git" "${{ github.sha }}"
-          git checkout -q FETCH_HEAD
-      - name: nix flake check
-        run: nix flake check -L --keep-going
+          git fetch -q "${{ github.server_url }}/${{ github.repository }}.git" \
+            "${{ github.sha }}" "+refs/heads/main:refs/remotes/origin/main"
+          git checkout -q "${{ github.sha }}"
+      - name: checks
+        run: |
+          case "${{ github.ref_name }}" in
+            main | beta | stable) tier=full ;;
+            *) tier=targeted ;;
+          esac
+          scripts/test-plan.sh "$tier" --run
