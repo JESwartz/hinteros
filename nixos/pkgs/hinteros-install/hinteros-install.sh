@@ -65,9 +65,10 @@
 #
 # A plan with keepData: true repairs the install on the disk in place: nothing is erased. The disk
 # must hold an install this installer can read (keep-* error codes). The subvolumes are mounted,
-# /etc/hinteros gets this installer's flake.nix and flake.lock and a new hardware report (state.json
-# and extra.nix stay; the plan's optional hostname, admin.user and ssh.enable replace those settings
-# in state.json, and an optional admin.password replaces the admin password), a new system
+# /etc/hinteros gets this installer's flake.nix and flake.lock (on the plan's channel, else the
+# install's) and a new hardware report (state.json and extra.nix stay; the plan's optional
+# hostname, admin.user and ssh.enable replace those settings in state.json, and an optional
+# admin.password replaces the admin password), a new system
 # generation goes into the existing store and the ESP is formatted again with its volume id, last
 # of all. A run that fails before the new system is installed puts back /etc/hinteros, the admin
 # password and the boot files, so the old system boots as it was. Stages: validate, mount (10-20) in place
@@ -629,7 +630,8 @@ PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   acceptedTerms: (.acceptedTerms // {}),
   rev: (.rev // null),
   keepData: (.keepData // false),
-  # The fields the plan has (a keepData plan keeps the settings of the install it does not give).
+  # The fields the plan has (a keepData plan keeps the settings of the install it does not give;
+  # `channel` too, set from the install after the plan is checked).
   given: [to_entries[] | select(.value != null) | .key],
   # What a keepData plan does not take: it comes from the install, or does not apply.
   notKept: [to_entries[] | select(.value != null and (.key | IN("base", "apps", "acceptedTerms", "rev"))) | .key],
@@ -934,6 +936,8 @@ if [ "$keep_data" = true ]; then
   fi
   read_install "$disk_real"
   [ -z "$EX_CODE" ] || fail 2 "$EX_CODE" "$EX_MSG. Nothing was touched"
+  # A plan without a channel keeps the channel of the install (its flake.lock), else the installer's.
+  if ! given channel && [ -n "$EX_CHANNEL" ]; then channel=$EX_CHANNEL; fi
   # The admin password file stays; an install without an admin has none to keep.
   if given admin && [ -z "$EX_ADMIN" ] && [ "$(plan '(.admin.password // .admin.hashedPassword // "") | length')" -eq 0 ]; then
     fail 2 admin-password-missing "the install on $disk has no admin account; the new one needs a password. Nothing was touched"

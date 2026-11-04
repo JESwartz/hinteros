@@ -42,7 +42,8 @@ let
         user = "james";
         password = "hunter22";
       };
-      channel = "stable";
+      # Not the installer's channel: a keepData plan without one keeps it.
+      channel = "beta";
       apps = [ "youtube" ];
     }
   );
@@ -52,7 +53,6 @@ let
       keepData = true;
       admin.user = "james";
       ssh.enable = true;
-      channel = "stable";
       network = "offline";
     }
   );
@@ -66,7 +66,6 @@ let
         user = "james";
         password = "another-pw";
       };
-      channel = "stable";
       network = "offline";
     }
   );
@@ -205,7 +204,7 @@ in
         before = superblock()
         existing = disk_listed()["existing"]
         print(existing)
-        assert existing == {"version": "${self.nixosConfigurations.installer.config.hinteros.release.version}", "channel": "stable", "profiles": 1, "hostname": "livingroom", "admin": "james", "ssh": False, "schemaOk": True}, existing
+        assert existing == {"version": "${self.nixosConfigurations.installer.config.hinteros.release.version}", "channel": "beta", "profiles": 1, "hostname": "livingroom", "admin": "james", "ssh": False, "schemaOk": True}, existing
         assert superblock() == before
         installer.fail("findmnt -rn | grep -q vdc")
         # While an install holds the lock (it may erase a disk any moment), no disk is looked into.
@@ -332,6 +331,10 @@ in
         check_layout(target, state)
         for f in ("flake.nix", "flake.lock", "state.json"):
             target.succeed(f"cmp /run/current-system/hinteros/{f} /etc/hinteros/{f}")
+        # The plan names no channel: the box stays on its own (beta), not the installer's.
+        target.succeed("grep -qF 'ref=beta\"' /etc/hinteros/flake.nix")
+        lock = json.loads(target.succeed("cat /etc/hinteros/flake.lock"))
+        assert lock["nodes"]["hinteros"]["original"]["ref"] == "beta", lock["nodes"]["hinteros"]
         # The kept extra.nix: the test's own backdoor is why this script reaches the box at all.
         target.succeed("test -e /etc/hinteros/extra.nix -a -e /etc/hinteros/extra-module.nix")
         assert target.succeed("getent shadow james").split(":")[1].startswith("$6$")
