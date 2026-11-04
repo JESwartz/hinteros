@@ -315,8 +315,8 @@ in
         services.hinteros-boot-health = {
           description = "Check that the HinterOS daemon and launcher are up";
           before = [ "boot-complete.target" ];
-          # Every boot: also when nothing pulls in boot-complete.target (no LoaderBootCountPath,
-          # see bootHealth), this check is what marks the boot good.
+          # Every boot: also when systemd-bless-boot does not run (no LoaderBootCountPath, see
+          # bootHealth), this check is what marks the boot good.
           wantedBy = [ "multi-user.target" ];
           unitConfig.RequiresMountsFor = [ "/boot" ];
           after = [
@@ -330,9 +330,17 @@ in
             TimeoutStartSec = cfg.bootCounting.healthTimeoutSeconds + cfg.bootCounting.stableSeconds + 30;
           };
         };
-        targets.boot-complete.requires = [ "hinteros-boot-health.service" ];
+        targets.boot-complete = {
+          requires = [ "hinteros-boot-health.service" ];
+          # Every boot, not only when systemd-bless-boot pulls it in: that is only on the first
+          # boot of an entry (later ones have no counter, so no LoaderBootCountPath), and never on
+          # firmware that drops the variable. nix-gc needs the target (below). multi-user.target
+          # already waits for hinteros-boot-health, so the boot takes no longer.
+          wantedBy = [ "multi-user.target" ];
+        };
         # Never clean up during a boot that is not good yet: the trim could remove the generation
-        # boot counting falls back to (with keepSystem = 1, the only other one).
+        # boot counting falls back to (with keepSystem = 1, the only other one). A failed check
+        # fails the target, so there is no clean-up on that boot.
         services.nix-gc = lib.mkIf cfg.gc.enable {
           requisite = [ "boot-complete.target" ];
           after = [ "boot-complete.target" ];

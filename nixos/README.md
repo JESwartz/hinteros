@@ -173,7 +173,8 @@ Xwaylands' memory.
   (`/nix/var/nix/profiles/hinteros/{apps/<user>,starter}`) to the newest
   `keepProfileGenerations` (`keepProfiles`, default 5; the current one always stays), then runs
   `nix-collect-garbage`, all under the flock `cleanupLock` (`/run/lock/hinteros-cleanup.lock`),
-  so two never overlap. With boot counting, `nix-gc` is `Requisite=boot-complete.target`: no
+  so two never overlap. With boot counting, `nix-gc` is `Requisite=boot-complete.target`, which
+  `multi-user.target` wants on every boot (not only when `systemd-bless-boot` runs): no
   clean-up during a boot that is not good yet. The daemon's manual clean-up jobs (their own trim, boot menu rewrite and
   `nix-store --gc`) are serialised with it by Nix's profile and GC locks; they may also take
   `cleanupLock` or run `cleanupPackage`. The timer rewrites no boot entry: entries are the newest
@@ -182,7 +183,8 @@ Xwaylands' memory.
   systemd-boot's `configurationLimit` follows `keepGenerations` either way. A switch to a
   generation outside it (a rollback past the newest `configurationLimit`) fails in the boot
   loader install (`extraInstallCommands`), before activation: it would get no entry, and the next
-  boot would start the newest one. Also `nix.optimise`; `nix-gc` and `nix-optimise` run with
+  boot would start the newest one; the daemon lists and offers only generations with an entry.
+  Also `nix.optimise`; `nix-gc` and `nix-optimise` run with
   `Nice=19` and `IOSchedulingClass=idle`. `hinteros-disk-check` logs a warning (identifier
   `hinteros-disk-check`, priority 4) below `diskCheck.minFreeGiB`.
 
