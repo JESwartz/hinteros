@@ -219,7 +219,7 @@ never cost the user the system:
 **What it does.** Validate the plan and the machine (including: no other disk may carry the
 partition labels `hinteros-esp` / `hinteros-root`, because the partitioning script finds them by label;
 `other-hinteros-disk`; and it must still be the disk the plan was made for, `diskSeq`); check
-that again right before erasing (`disk-changed`); erase old signatures on the target and partition with disko (GPT, a 1 GiB
+that again right before erasing (`disk-changed`, `other-hinteros-disk`); stop the device-mapper and RAID devices an old system left active on the target (LVM, md), erase old signatures on it and partition with disko (GPT, a 1 GiB
 ESP and one btrfs file system with the subvolumes `root` (`/`, with `/var`), `nix`, `home` and `srv`,
 `compress=zstd:1,noatime`, no snapshots, no encryption; the installed system mounts them by UUID,
 `state.json` `disk.rootUuid` and `disk.espUuid`, read with `blkid` after formatting), then check that

@@ -1074,9 +1074,31 @@ else
   # An earlier install on this disk: erase every signature first. disko skips mkfs on a partition
   # that still shows a file system (a new partition at the old one's offsets would keep the old
   # store), and the old labels must be gone before the new ones are made.
+  # release_holders NAME: stops what is stacked on the block device NAME, top first: device-mapper
+  # and RAID devices of an old system's LVM, RAID or encryption that the installer's udev rules
+  # started (mounted ones were refused at validation). Else the erased signatures stay in use and
+  # the new partition table cannot be read. (Called from wipe_target, where set -e does not apply.)
+  # shellcheck disable=SC2329 # run via wipe_target
+  release_holders() {
+    local h
+    for h in "/sys/class/block/$1/holders/"*; do
+      [ -e "$h" ] || continue
+      h=$(basename "$h")
+      release_holders "$h" || return 1
+      echo "stopping $h, which uses $1"
+      case $h in
+        dm-*) dmsetup remove --retry "$(cat "/sys/class/block/$h/dm/name")" || return 1 ;;
+        md*) mdadm --stop "/dev/$h" || return 1 ;;
+        *) return 1 ;;
+      esac
+    done
+  }
   # shellcheck disable=SC2329 # run via `run`
   wipe_target() {
     local part
+    for part in "$disk_real" $(lsblk -lnpo PATH,TYPE "$disk_real" | awk '$2 == "part" {print $1}'); do
+      release_holders "$(basename "$part")" || return 1
+    done
     for part in $(lsblk -lnpo PATH,TYPE "$disk_real" | awk '$2 == "part" {print $1}'); do
       wipefs -a -f "$part"
     done

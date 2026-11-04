@@ -24,6 +24,8 @@
   networkmanager,
   nixos-install,
   efibootmgr,
+  lvm2,
+  mdadm,
   nixos-facter,
   systemd,
   nix,
@@ -103,6 +105,8 @@ stdenvNoCC.mkDerivation {
           networkmanager
           nixos-install
           efibootmgr
+          lvm2 # dmsetup
+          mdadm
           nixos-facter
           systemd
           nix
