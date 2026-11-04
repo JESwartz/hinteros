@@ -4,6 +4,7 @@
 # `hinteros-p1`, the admin, locked with PIN 2468; p2 = `hinteros-p2`, unlocked, no PIN; the guest. A
 # client of the greeter daemon's socket stands in for the picker's buttons
 # (tests/vm/system/client/greeter.py), one of a profile's daemon for the launcher (session.py):
+#   - the greeter daemon, killed, starts again (greeterDaemon in session.nix supervises it);
 #   - at the picker, the admin p1 with five wrong PINs (never a wait: no admin backoff), then the
 #     right one;
 #   - switches with session.switch_profile, each straight from one session to the next with no
@@ -214,6 +215,13 @@ in
         modes = {e["HINTEROS_SPLASH_MODE"] for e in splash_entries() if "HINTEROS_SPLASH" in e}
         print(f"framebuffer: {fb!r}; splash modes: {modes}")
         assert modes == ({"framebuffer"} if fb else {"console"}), (fb, splash_entries())
+
+    with subtest("the greeter's daemon starts again after a crash (the picker below uses it)"):
+        daemon = "pgrep -u hinteros-greeter -f 'bin/hinteros-session --greeter'"
+        pid = machine.succeed(daemon).strip()
+        machine.succeed(f"kill -KILL {pid}")
+        machine.wait_until_succeeds(f"{daemon} | grep -vx {pid}", timeout=30)
+        picker_up()
 
     with subtest("the picker: the admin profile's PIN; wrong ones never lock it out"):
         before, painted = len(splashes()), len(painters())

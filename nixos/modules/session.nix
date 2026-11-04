@@ -241,10 +241,21 @@ let
   # greeter mode, and the session daemon in greeter mode as a child of the greeter session (so it
   # inherits GREETD_SOCK). The profile session it starts is always `sessionLink`.
   daemonExe = lib.getExe config.hinteros.daemon.session.package;
+  # No unit supervises the greeter's daemon, so this does (as Restart=on-failure, RestartSec=2 for
+  # a profile's): it starts again after a failure while the compositor, this script's PID after
+  # the exec, runs. Without it a crash would leave the picker on screen with no input and no login,
+  # and the greeter session would never end for greetd to start a new one.
   greeterDaemon = pkgs.writeShellScript "hinteros-greeter-daemon" ''
-    ${
-      lib.optionalString (cfg.compositor == "cage") "DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 "
-    }${daemonExe} --greeter --config ${config.hinteros.daemon.sessionConfigFile} &
+    compositor=$$
+    (
+      while :; do
+        ${
+          lib.optionalString (cfg.compositor == "cage") "DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 "
+        }${daemonExe} --greeter --config ${config.hinteros.daemon.sessionConfigFile} && exit 0
+        sleep 2
+        kill -0 "$compositor" 2>/dev/null || exit 0
+      done
+    ) &
     exec "$@"
   '';
   pickerCommand = lib.escapeShellArgs (
