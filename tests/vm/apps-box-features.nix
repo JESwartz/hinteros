@@ -85,14 +85,14 @@ profiles.mkTest {
         e = sys_err(user, "apps.install", {"ids": ["steam"], "revision": mine["revision"]}, 3014)
         assert e["data"]["id"] == "steam", e
         version = e["data"]["version"]
-        j = sys_ok(user, "apps.install", {"ids": ["steam"], "revision": mine["revision"], "accepted_terms": {"steam": version}})["job_id"]
+        j = start_job(user, "apps.install", {"ids": ["steam"], "revision": mine["revision"], "accepted_terms": {"steam": version}})
         done = wait_job(user, j)
         assert done["state"] == "succeeded" and done["kind"] == "apps_install", done
         return version
 
     def remove_steam(user):
         mine = sys_ok(user, "apps.list")
-        j = sys_ok(user, "apps.remove", {"ids": ["steam"], "revision": mine["revision"], "delete_data": False})["job_id"]
+        j = start_job(user, "apps.remove", {"ids": ["steam"], "revision": mine["revision"], "delete_data": False})
         done = wait_job(user, j)
         assert done["state"] == "succeeded" and done["kind"] == "apps_remove", done
 
@@ -137,7 +137,7 @@ profiles.mkTest {
         e = sys_err("hinteros-p2", "rollback", {"generation": old[0]["generation"]}, 3016)
         assert e["data"] == {"pin": "admin"}, e
         stub_build(systems["box"])
-        j = sys_ok("hinteros-p2", "rollback", {"generation": old[0]["generation"], "admin_pin": "2468"})["job_id"]
+        j = start_job("hinteros-p2", "rollback", {"generation": old[0]["generation"], "admin_pin": "2468"})
         done = wait_job("hinteros-p2", j)
         assert done["state"] == "succeeded" and done["kind"] == "rollback", done
         assert done["result"]["features_readded"] == FEATURES, done
@@ -161,7 +161,7 @@ profiles.mkTest {
 
     with subtest("the next system job that rebuilds anyway drops them"):
         stub_build(systems[""])
-        j = sys_ok("hinteros-p1", "rebuild")["job_id"]
+        j = start_job("hinteros-p1", "rebuild")
         done = wait_job("hinteros-p1", j)
         assert done["state"] == "succeeded", done
         assert state_json()["requirements"] == [], state_json()

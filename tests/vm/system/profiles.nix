@@ -354,6 +354,18 @@ rec {
             time.sleep(1)
         raise AssertionError("jobs still running")
 
+    def start_job(user, method, params=None):
+        """sys_ok of a method that starts a job; returns its job_id. The launcher's update check
+        at session start is a job of its own and may start at any moment after enter() or
+        switch() (jobs_idle cannot see it coming): on job_busy, wait for it and try again."""
+        for _ in range(5):
+            r = sysrpc(user, method, params)
+            if r.get("error", {}).get("code") != 3005:
+                break
+            jobs_idle(user)
+        assert "result" in r and r["result"]["job_id"], (user, method, params, r)
+        return r["result"]["job_id"]
+
     def session_of(user):
         """`user`'s session is up (its daemon and compositor) and the picker is gone."""
         machine.wait_until_succeeds(f"test -S {sock(user)}", timeout=180)
