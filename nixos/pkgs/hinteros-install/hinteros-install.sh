@@ -845,8 +845,10 @@ if [ "$disk_seq" != "$plan_seq" ]; then
   fail 2 disk-changed "the disk changed: $disk is now disk ${disk_seq:-unknown} ($(disk_desc "$disk_real")), not disk $plan_seq of the plan. Nothing was touched. Select the disk again"
 fi
 # Mounted anywhere (the installer medium, an old install)? Leftovers of an earlier run of this
-# script under /mnt are fine; they are unmounted before partitioning.
-in_use=$(lsblk -rno MOUNTPOINTS "$disk_real" | tr ' ' '\n' | sed '/^$/d' | { grep -Ev "^$MNT(/|$)" || true; })
+# script under /mnt are fine; they are unmounted before partitioning. JSON: in raw output lsblk
+# joins the mount points of one device with an escaped newline (\x0a), so they cannot be split.
+in_use=$(lsblk -J -o MOUNTPOINTS "$disk_real" | jq -r '.. | .mountpoints? | arrays | .[] | strings' \
+  | { grep -Ev "^$MNT(/|$)" || true; })
 [ -z "$in_use" ] || fail 2 disk-in-use "$disk is in use (mounted at: $(printf '%s' "$in_use" | tr '\n' ' ')); it may be the installer medium"
 disk_bytes=$(blockdev --getsize64 "$disk_real")
 disk_was="disk $disk_seq, $disk_real, $(disk_desc "$disk_real")"
@@ -857,12 +859,20 @@ fi
 # hinteros-root). A second disk (an old install, a USB stick) carrying those labels would make them
 # ambiguous: udev links the label to either disk, so the new file systems could be made on the
 # wrong one. Refuse before anything is touched. (The installed system mounts by UUID.)
-# Nothing is partitioned for a keepData plan, so the labels of another disk do not matter.
-others=
-[ "$keep_data" = true ] || others=$(lsblk -J -p -o PATH,PKNAME,PARTLABEL 2>/dev/null | jq -r --arg d "$disk_real" '
-  [.. | objects | select((.partlabel // "") | test("^hinteros-(esp|root)$"))
-   | select((.pkname // "") != $d) | "\(.path) (\(.partlabel))"] | join(", ")' 2>/dev/null || true)
-[ -z "$others" ] || fail 2 other-hinteros-disk "another disk already has HinterOS partitions: $others. The installer finds the new partitions by label, so two such disks are ambiguous; unplug that disk or erase it first"
+# Nothing is partitioned for a keepData plan, so the labels of another disk do not matter. Checked
+# again just before the disk is erased (a disk can be plugged in while the wizard or a download
+# runs).
+other_disks() {
+  local others
+  [ "$keep_data" = false ] || return 0
+  others=$(lsblk -J -p -o PATH,PKNAME,PARTLABEL 2>/dev/null | jq -r --arg d "$disk_real" '
+    [.. | objects | select((.partlabel // "") | test("^hinteros-(esp|root)$"))
+     | select((.pkname // "") != $d) | "\(.path) (\(.partlabel))"] | join(", ")' 2>/dev/null || true)
+  [ -n "$others" ] || return 0
+  echo "other disks with HinterOS partition labels (the partitioning script finds its partitions by label): $others" >>"$LOG"
+  fail 2 other-hinteros-disk "Another disk has HinterOS partitions: $others. Disconnect it or erase it."
+}
+other_disks
 if mountpoint -q "$MNT"; then
   mnt_src=$(findmnt -nvo SOURCE "$MNT")
   case $(lsblk -rno PKNAME "$mnt_src" 2>/dev/null | head -n1) in
@@ -997,6 +1007,7 @@ if [ -n "$BEFORE_WIPE_HOOK" ]; then
   "$BASH" -c "$BEFORE_WIPE_HOOK" >>"$LOG" 2>&1 </dev/null || true
 fi
 same_disk 2 "Nothing was touched"
+other_disks
 if [ "$keep_data" = true ]; then
   progress mount 10 "Mounting the install on $disk"
   install -d "$MNT"

@@ -4,8 +4,10 @@
 # malformed fields, a `rev` that is malformed or needs a network (the installer's own revision
 # validates offline), a plan whose diskSeq is missing or not the disk's, and a disk replaced
 # (unplugged and plugged in again, so it gets a new disk sequence number under the same name) after
-# the plan was made or after the plan was checked, just before erasing. Every refusal exits 2 with
-# an error line; a marker file system on the target disk survives them all.
+# the plan was made or after the plan was checked, just before erasing (also a second disk with
+# HinterOS partition labels plugged in then). Every refusal exits 2 with an error line; a marker
+# file system on the target disk survives them all. Leftover mounts of an earlier run under /mnt
+# do not count as in use.
 # A keepData plan is refused on a disk without an install. Also `--info` (the installer's revision,
 # version and channel; offline, no root) and `--list-disks` (a disk without an install, one in use).
 { self, pkgs }:
@@ -222,6 +224,22 @@ in
           # Every line says which phase it is in; validation is the system stage.
           assert all(l.get("phase") == "system" for l in lines), lines
           assert lines[-1]["failed_apps"] == [], lines[-1]
+          # Plugged in after the plan was checked, just before erasing (the test hook runs then):
+          # refused before the target is touched.
+          status, lines = run(
+              "ok",
+              "HINTEROS_INSTALL_ALLOW_BIOS=1 HINTEROS_INSTALL_BEFORE_WIPE="
+              "'parted -s /dev/vdc mklabel gpt mkpart hinteros-root ext4 1MiB 100% && udevadm settle'",
+              validate_only=False,
+          )
+          print("labels plugged in before erasing", status, lines)
+          assert status == 2 and lines[-1]["code"] == "other-hinteros-disk", lines[-1]
+          assert any(l["stage"] == "validate" and l["percent"] == 8 for l in lines), lines
+          assert not any(l["stage"] in ("partition", "packages", "build", "bootloader", "done") for l in lines), lines
+          assert 'LABEL="marker"' in installer.succeed("blkid /dev/vdb")
+          installer.succeed("test -z \"$(lsblk -nro NAME /dev/vdb | tail -n +2)\"")
+          installer.fail("mountpoint -q /mnt")
+          installer.succeed("wipefs -a /dev/vdc && udevadm settle")
 
       with subtest("keepData: an install to keep, and no apps in the plan"):
           refused("keep-no-install", "keep-no-install")
@@ -320,5 +338,21 @@ in
           assert status == 2, status
           assert 'LABEL="marker"' in installer.succeed("blkid /dev/vdb")
           installer.fail("mountpoint -q /mnt")
+
+      with subtest("leftover mounts of an earlier run under /mnt do not make the disk in use"):
+          # Last: this replaces the marker. One file system mounted twice under /mnt, as the btrfs
+          # root of a failed run is (/mnt, /mnt/nix, ...): lsblk lists both on one device.
+          installer.succeed(
+              "parted -s /dev/vdb mklabel gpt mkpart leftover ext4 1MiB 100% && udevadm settle",
+              "mkfs.ext4 -q /dev/vdb1 && mkdir -p /mnt && mount /dev/vdb1 /mnt && mkdir -p /mnt/nix && mount /dev/vdb1 /mnt/nix",
+          )
+          status, lines = run("ok", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+          assert status == 0 and lines[-1]["stage"] == "done", lines
+          # Mounted anywhere else, it is in use.
+          installer.succeed("mkdir -p /tmp/target && mount /dev/vdb1 /tmp/target")
+          status, lines = run("ok", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+          assert status == 2 and lines[-1]["code"] == "disk-in-use", lines
+          assert "/tmp/target" in lines[-1]["message"], lines[-1]
+          installer.succeed("umount /tmp/target && umount -R /mnt")
     '';
 }
