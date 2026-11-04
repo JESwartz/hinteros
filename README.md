@@ -64,6 +64,7 @@ signed; the owner promotes them:
 | `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. Only `release/version` differs from the tree: the next patch after the current beta and stable, whichever is higher (0.7.1, 0.7.2, 0.7.3 on top of 0.7.0; `--bump minor`, `--bump major` or `--version <v>` for another, the menu asks with the next patch as default). A box shows the version and the commit: `0.7.2.<commit> beta`. The very first one needs `--bootstrap` |
 | `nix run .#promote -- stable [--rev <beta release>]` | Shows the changes since the last stable release and asks for the version: the beta release's own by default (beta 0.7.3 → 0.7.3 stable; patch, minor, major after the newest beta, or typed; `--bump <b>` or `--version <v>` without asking), then signs a commit on top of the beta release that only writes it to `release/version` and names the notes section, after the dogfood confirmation (`--expedite` for high/critical security releases). A box shows `0.8.0 stable`. Then merge `stable` into `main` |
 | `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable`, as the next patch after the current stable and beta, so that no beta number is taken twice (stable 0.7.1, beta 0.7.3: hotfix 0.7.4; the branch leaves `release/version` alone and adds an `## Unreleased` notes section; `Security:` severity required); then merge `stable` into `main` |
+| `nix run .#promote -- tag [--rev <stable release>]` | After a stable release (or a hotfix): builds the release ISO from that commit (`nix build git+file:...?rev=<commit>#iso`, never from a work tree), writes its `SHA256SUMS` and makes the signed tag `v<version>` on the commit, signed with the release key (no agent) and verified against the release's `release/allowed_signers`; the tag's message body is `SHA256SUMS` itself. It shows the tag for review, asks, and pushes it (never forced). The menus offer it while the stable release has no tag. Upload the ISO and `SHA256SUMS` by hand (see "Check a release ISO") |
 | `sudo hinteros-bootstrap-channel <stable\|beta> <rev>` | On a box, over SSH: move it onto a channel at a rev once, outside the update UI (boxes installed before they trusted the release key). A box whose system predates the script runs it from that very rev: `sudo nix run "git+https://git.hinteros.org/hinteros.git?ref=beta&rev=<rev>#hinteros-bootstrap-channel" -- beta <rev>` |
 
 Run `promote` in your checkout of this repo. It does not trust the remote for what it signs (the
@@ -81,7 +82,7 @@ signing and pushing. The commit it releases needs a green CI status (Forgejo's c
 `.forgejo/workflows/check.yml`): a pending one (the check still runs, or waits for a runner) stops
 it; with no status at all the menus ask whether to go on for that commit only. `--skip-ci` (it
 warns) skips the check, after the checks by hand (`scripts/test-plan.sh full --run`). The signed
-`v<version>` tag with the ISO checksums is not automated yet.
+`v<version>` tag with the ISO checksums is `promote tag`; uploading the ISO is by hand.
 
 ## Installer
 
@@ -92,6 +93,24 @@ as below. If the UI exits, tty1 is the root console with a notice.
 
 Release ISOs are on https://hinteros.org, on the Forgejo releases page and on GitHub, each with
 `SHA256SUMS`.
+
+### Check a release ISO
+
+Each release ISO's SHA256 checksum is in the signed tag `v<version>` of this repo (`promote tag`):
+the tag ties the ISO to the release key, and the ISO's own `release/allowed_signers` then checks
+every update of the boxes it installs. Before you write a downloaded ISO to a stick:
+
+```
+git clone https://git.hinteros.org/hinteros.git && cd hinteros
+git show v1.0.0:release/allowed_signers | grep -v '^#' \
+  | sed 's/^\([^ ]*\) /\1 namespaces="git" /' > /tmp/hinteros.signers
+git -c gpg.ssh.allowedSignersFile=/tmp/hinteros.signers verify-tag v1.0.0   # Good "git" signature
+ssh-keygen -lf <(git show v1.0.0:release/allowed_signers | grep -v '^#' | cut -d' ' -f2-3)
+git tag -l --format='%(contents:body)' v1.0.0 > SHA256SUMS
+sha256sum -c SHA256SUMS   # next to the downloaded hinteros-installer.iso
+```
+
+The key fingerprint must be the release key's above (`SHA256:NuERttXtUYjtSTqt7kHUqs7TW6rWSHjHOIUlOOADpCE`).
 
 ### Build the ISO and write it to a USB stick
 
