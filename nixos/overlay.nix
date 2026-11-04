@@ -15,6 +15,12 @@ final: prev: {
   # "content type" as the kernel has it, so the next DRM master takes over with a fastset.
   # While running gamescope still frees buffers with RmFB: it relies on that turning off the
   # plane of a window that went away (CLOSEFB there left a dead Steam frame on screen).
+  # The patch drops all of finish_drm's reset commit, so what gamescope set at runtime stays on
+  # the output for the next master: Colorspace, HDR_OUTPUT_METADATA, VRR_ENABLED, the CRTC's
+  # GAMMA_LUT, DEGAMMA_LUT and CTM, and on AMD the plane colour LUTs and transfer functions. The
+  # next gamescope sets them all again; the console splash and fbdev keep them. A box that ran
+  # HDR or VRR can show the console with those colours. (Resetting them here could need the same
+  # full modeset on i915, as an infoframe change, and is not tested on hardware.)
   #
   # The app sandbox's display split (design/sandbox.md, step 3: home app and OSK on Xwayland
   # #0, Steam games on #1, apps on #2):
@@ -33,6 +39,12 @@ final: prev: {
   #   GAMESCOPE_EXTERNAL_OVERLAY, STEAM_INPUT_FOCUS) or change global settings (FPS, VRR,
   #   scaling, modes, screenshots). On #2 and later (any number of app displays) only the window
   #   properties of ordinary X11 apps count now; their app id comes from the process tree.
+  # xwayland-apps-no-selection.patch: gamescope copied CLIPBOARD and PRIMARY from every Xwayland
+  #   to every other: an app on #2 could read what the home app, the OSK or another app copied,
+  #   and put text into them. Now nothing goes to or comes from #2 and later; apps on one
+  #   display still share it there (Xwayland's own selections). On #0 and #1 only a
+  #   SelectionNotify for gamescope's own window counts (a client there can already set the
+  #   selection itself).
   gamescope = prev.gamescope.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./pkgs/gamescope/keep-output-on-exit.patch
@@ -40,6 +52,7 @@ final: prev: {
       ./pkgs/gamescope/xwayland-size-all.patch
       ./pkgs/gamescope/xwayland-apps-no-input-emulation.patch
       ./pkgs/gamescope/xwayland-apps-no-control.patch
+      ./pkgs/gamescope/xwayland-apps-no-selection.patch
     ];
   });
 

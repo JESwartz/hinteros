@@ -9,7 +9,11 @@
 # type into the home app. Steam's and gamescope's control properties set on #2 (its root:
 # GAMESCOPECTRL_BASELAYER_APPID, mode control, new Xwayland; the app's window: STEAM_GAME,
 # STEAM_OVERLAY, STEAM_INPUT_FOCUS, GAMESCOPE_EXTERNAL_OVERLAY) change neither focus nor the
-# app's id nor global state; the same mode control on #0 still works. A second app lands on #3
+# app's id nor global state, and neither do the window's set before it is mapped (an app on #3:
+# its own id, not the STEAM_GAME it claims; overlay properties do not make it an overlay); the
+# same mode control on #0 still works. CLIPBOARD and PRIMARY go from #0 to #1 but never to or
+# from an app display, not even through a SelectionNotify sent to gamescope (on #0 only a
+# SelectionNotify for gamescope's own window counts). A second app lands on #3
 # and cannot reach #2 either. With every app
 # display in use, apps.launch answers no_app_display; closing an app frees its display. A fake
 # Steam game lands on no app display. The number of app displays follows the profile's setting
@@ -65,6 +69,67 @@ let
       exec sleep infinity
     '';
   };
+  # An X11 client whose window has properties (NAME=VALUE, CARDINAL) set before it is mapped:
+  # what gamescope reads when it adds the window, not on a later PropertyNotify.
+  premapped =
+    pkgs.writers.writePython3Bin "premapped" { libraries = [ pkgs.python3Packages.xlib ]; }
+      ''
+        import sys
+        import time
+
+        from Xlib import Xatom, display
+
+        d = display.Display()
+        s = d.screen()
+        # Painted: gamescope does not focus a window that never showed anything.
+        w = s.root.create_window(
+            0, 0, 400, 300, 0, s.root_depth, background_pixel=s.white_pixel
+        )
+        w.set_wm_name("premapped")
+        for arg in sys.argv[1:]:
+            name, value = arg.split("=")
+            w.change_property(d.intern_atom(name), Xatom.CARDINAL, 32, [int(value)])
+        w.map()
+        d.sync()
+        while True:
+            time.sleep(60)
+      '';
+  # Sends gamescope's window (_NET_SUPPORTING_WM_CHECK) a SelectionNotify it never asked for:
+  # SELECTION (CLIPBOARD or PRIMARY) is in a UTF8_STRING property on the requestor, the
+  # client's own window ("own") or gamescope's ("gamescope"; any client can set it).
+  forgeSelection =
+    pkgs.writers.writePython3Bin "forge-selection" { libraries = [ pkgs.python3Packages.xlib ]; }
+      ''
+        import sys
+        import time
+
+        from Xlib import X, Xatom, display
+        from Xlib.protocol import event
+
+        selection, who, text = sys.argv[1:]
+        d = display.Display()
+        root = d.screen().root
+        check = d.intern_atom("_NET_SUPPORTING_WM_CHECK")
+        wm = root.get_full_property(check, Xatom.WINDOW).value[0]
+        gamescope = d.create_resource_object("window", wm)
+        own = root.create_window(0, 0, 1, 1, 0, X.CopyFromParent)
+        requestor = gamescope if who == "gamescope" else own
+        prop = d.intern_atom("HINTEROS_FORGED")
+        utf8 = d.intern_atom("UTF8_STRING")
+        requestor.change_property(prop, utf8, 8, text.encode())
+        gamescope.send_event(
+            event.SelectionNotify(
+                time=X.CurrentTime,
+                requestor=requestor,
+                selection=d.intern_atom(selection),
+                target=utf8,
+                property=prop,
+            )
+        )
+        d.sync()
+        # The own window must stay until gamescope reads the property.
+        time.sleep(3)
+      '';
   probe = pkgs.writeShellApplication {
     name = "hinteros-display-probe-term";
     runtimeInputs = [ pkgs.xterm ];
@@ -89,7 +154,7 @@ in
         daemon = {
           enable = true;
           osk.enable = false;
-          # Five apps, four app displays.
+          # Five probe apps, four app displays; two apps that set window properties before mapping.
           session.settings.apps =
             map
               (id: {
@@ -103,7 +168,27 @@ in
                 "probe3"
                 "probe4"
                 "probe5"
-              ];
+              ]
+            ++ [
+              {
+                id = "premapped";
+                name = "premapped";
+                command = [
+                  (pkgs.lib.getExe premapped)
+                  "STEAM_GAME=7777"
+                ];
+              }
+              {
+                id = "premapped-overlay";
+                name = "premapped-overlay";
+                command = [
+                  (pkgs.lib.getExe premapped)
+                  "STEAM_OVERLAY=1"
+                  "STEAM_INPUT_FOCUS=1"
+                  "GAMESCOPE_EXTERNAL_OVERLAY=1"
+                ];
+              }
+            ];
         };
         fakeSteam.enable = true;
         session = {
@@ -130,6 +215,8 @@ in
       environment.systemPackages = [
         pkgs.socat
         pkgs.xdotool
+        pkgs.xclip
+        forgeSelection
         pkgs.xorg.xprop
         pkgs.xorg.xwininfo
         pkgs.iproute2
@@ -275,6 +362,54 @@ in
     assert str(app_id) in focusable(), ("the app's id changed", focusable())
     assert geometry("-root", ":1") == (640, 512), ("mode control from :2", geometry("-root", ":1"))
     assert machine.succeed("ls /tmp/.X11-unix").split() == sockets, "a new Xwayland from :2"
+    # The same window properties set before the window is mapped (what gamescope reads when it
+    # adds a window), by apps on the next display (:3): the app id claimed with STEAM_GAME is not
+    # taken (the window has the app's own id), and the overlay properties do not make the window
+    # an overlay (it gets focus like any app window). Each app is closed again, which frees :3.
+    for pm, claimed in (("premapped", "7777"), ("premapped-overlay", None)):
+        pm_id = ok("apps.launch", {"id": pm})["app"]["gamescope_app_id"]
+        machine.wait_until_succeeds(as_user("xwininfo -name premapped", ":3"), timeout=30)
+        wait_focused(pm_id)
+        if claimed:
+            for prop in (focused(), focusable()):
+                assert not re.search(rf"\b{claimed}\b", prop), (pm, prop)
+        ok("apps.close", {"id": pm})
+        machine.wait_until_fails("pgrep -u hinteros-p1 -f bin/premapped", timeout=30)
+        machine.wait_until_succeeds(as_user(f"! xprop -root GAMESCOPE_FOCUSABLE_APPS | grep -qw {pm_id}"), timeout=30)
+    # Clipboard and primary selection: gamescope still copies them from #0 to #1, but never to or
+    # from an app display. Apps on one display still share them there.
+    def sel_set(display, sel, text):
+        machine.succeed(as_user(f"printf {text} | xclip -selection {sel} -i >/dev/null 2>&1", display))
+
+    def sel_get(display, sel):
+        return machine.execute(as_user(f"timeout 5 xclip -o -selection {sel}", display))[1].strip()
+
+    for sel in ("clipboard", "primary"):
+        sel_set(":0", sel, f"home-{sel}")
+        machine.wait_until_succeeds(as_user(f"timeout 5 xclip -o -selection {sel} | grep -qx home-{sel}", ":1"), timeout=30)
+        machine.sleep(2)
+        assert sel_get(":2", sel) == "", (sel, "home -> app display", sel_get(":2", sel))
+        sel_set(":2", sel, f"app-{sel}")
+        assert sel_get(":2", sel) == f"app-{sel}", (sel, sel_get(":2", sel))
+        machine.sleep(3)
+        assert sel_get(":0", sel) == f"home-{sel}", (sel, "app display -> home", sel_get(":0", sel))
+        assert sel_get(":3", sel) == "", (sel, "app display -> app display", sel_get(":3", sel))
+    # A SelectionNotify that gamescope did not ask for: from an app display it changes nothing
+    # (requestor the app's window or gamescope's), and on :0 only one for gamescope's own window
+    # counts. The last one is the control: it shows the forged event works.
+    def forge(display, sel, who, text):
+        machine.succeed(as_user(f"forge-selection {sel.upper()} {who} {text}", display))
+        machine.sleep(2)
+
+    for sel in ("clipboard", "primary"):
+        for display, who in ((":2", "own"), (":2", "gamescope"), (":0", "own")):
+            forge(display, sel, who, f"forged-{sel}")
+            for home_display in (":0", ":1"):
+                got = sel_get(home_display, sel)
+                assert got == f"home-{sel}", (sel, "forged from", display, who, home_display, got)
+        forge(":0", sel, "gamescope", f"forged-{sel}")
+        machine.wait_until_succeeds(as_user(f"timeout 5 xclip -o -selection {sel} | grep -qx forged-{sel}", ":1"), timeout=30)
+    machine.execute("pkill -u hinteros-p1 -x xclip")
     # The app's window is still an ordinary app window with its own id.
     ok("apps.focus", {"id": "probe"})
     wait_focused(app_id)

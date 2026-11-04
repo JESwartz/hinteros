@@ -1,6 +1,7 @@
 /* Inside the app sandbox (VM test sandbox): one `<check>=yes|no` line per system call check.
  * "yes" means the sandbox behaves as designed: blocked calls fail with the filter's errno (not
- * the errno the kernel gives without the filter), nested sandboxes still work. */
+ * the errno the kernel gives without the filter; io_uring and x32 are the exceptions, see
+ * sandbox.nix), nested sandboxes still work. */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -62,7 +63,7 @@ int main(void) {
   check("tioclinux_blocked", fails(ioctl(null, TIOCLINUX, "x"), EPERM));
   /* UFFD_USER_MODE_ONLY: allowed for users without the filter. */
   check("userfaultfd_blocked", fails(syscall(SYS_userfaultfd, 1), EPERM));
-  /* Without the filter: EACCES (perf_event_paranoid). */
+  /* Without the filter: EFAULT (the kernel reads the NULL attr before any permission check). */
   check("perf_blocked", fails(syscall(SYS_perf_event_open, NULL, 0, -1, -1, 0), EPERM));
   /* Without the filter: EPERM (no CAP_SYS_ADMIN here). */
   check("fsopen_blocked", fails(syscall(SYS_fsopen, "tmpfs", 0), ENOSYS));

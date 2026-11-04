@@ -812,9 +812,12 @@ let
         (lib.all
           (p: lib.elem p (map baseNameOf (gs.config.hinteros.session.gamescope.package.patches or [ ])))
           [
+            "keep-output-on-exit.patch"
             "xwayland-no-abstract-socket.patch"
             "xwayland-size-all.patch"
             "xwayland-apps-no-input-emulation.patch"
+            "xwayland-apps-no-control.patch"
+            "xwayland-apps-no-selection.patch"
           ]
         )
       ];
