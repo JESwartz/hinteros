@@ -13,7 +13,8 @@
 # `version`, `channel`, `hostname` and `admin` are absent if unknown, `ssh` is state.json's
 # settings.ssh.enable (false if absent), `profiles` counts state.json's accounts,
 # `schemaOk` says a keepData plan is accepted on this disk. null: no such install, the disk is in
-# use or it cannot be read. Disks are mounted read-only, one at a time; an unreadable disk never
+# use, it cannot be read or an install runs (it holds /run/hinteros-install.lock; a listing takes
+# it shared). Disks are mounted read-only, one at a time; an unreadable disk never
 # fails the listing.
 #
 # --info (offline, instant, no root): what this installer carries, as one JSON object,
@@ -460,12 +461,19 @@ read_install() {
 }
 
 list_disks() {
-  local out d one existing='{}'
+  local out d one existing='{}' probe=1
+  # An install holds the lock (/run/hinteros-install.lock) exclusively from its validation to its
+  # end, and may erase a disk that is not mounted yet: no disk is mounted while it does. Listings
+  # share it, so the UI and the console can list at the same time. Without root there is no lock
+  # (and no disk can be mounted).
+  if { exec 9>>/run/hinteros-install.lock; } 2>/dev/null && ! flock -s -n 9; then
+    probe=0
+  fi
   out=$(lsblk --json -b -o NAME,PATH,SIZE,MODEL,TRAN,TYPE,RM,MOUNTPOINTS,DISK-SEQ)
   while IFS= read -r d; do
     one=null
     # In use: the installer medium, or an install that is running.
-    if [ -z "$(lsblk -rno MOUNTPOINTS "$d" 2>/dev/null | tr -d ' \n' || true)" ]; then
+    if [ "$probe" -eq 1 ] && [ -z "$(lsblk -rno MOUNTPOINTS "$d" 2>/dev/null | tr -d ' \n' || true)" ]; then
       read_install "$d"
       if [ "$EX_READ" -eq 1 ]; then
         one=$(jq -nc --arg v "$EX_VERSION" --arg ch "$EX_CHANNEL" --argjson n "$EX_PROFILES" --arg code "$EX_CODE" \
@@ -810,7 +818,8 @@ if [ ! -d /sys/firmware/efi ] && [ -z "${HINTEROS_INSTALL_ALLOW_BIOS:-}" ]; then
 fi
 
 exec 9>/run/hinteros-install.lock
-flock -n 9 || fail 2 already-running "another hinteros-install is running"
+# Exclusive; a disk listing (--list-disks) holds it shared for a moment while it looks into disks.
+flock -x -w 60 9 || fail 2 already-running "another hinteros-install is running"
 
 mem_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
 if [ "$mem_kib" -lt $((3 * 1024 * 1024)) ]; then

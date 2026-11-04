@@ -208,6 +208,12 @@ in
         assert existing == {"version": "${self.nixosConfigurations.installer.config.hinteros.release.version}", "channel": "stable", "profiles": 1, "hostname": "livingroom", "admin": "james", "ssh": False, "schemaOk": True}, existing
         assert superblock() == before
         installer.fail("findmnt -rn | grep -q vdc")
+        # While an install holds the lock (it may erase a disk any moment), no disk is looked into.
+        installer.succeed("flock -x /run/hinteros-install.lock sleep 120 >/dev/null 2>&1 &")
+        installer.wait_until_fails("flock -n -s /run/hinteros-install.lock true")
+        assert disk_listed()["existing"] is None
+        installer.succeed("pkill -f 'flock -x /run/hinteros-install.lock'")
+        installer.wait_until_succeeds("flock -n /run/hinteros-install.lock true")
 
     with subtest("refused: an install this installer cannot keep"):
         edit_state(".schemaVersion = 3")
