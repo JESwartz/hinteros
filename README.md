@@ -120,7 +120,7 @@ storage (usb_storage, uas, sd_mod) drivers. Installed devices boot quietly too (
 
 `cp` onto the raw device works as well as `dd`. Build from a clean, committed checkout: the ISO
 pins the generated device flake to this repository's revision, and a dirty tree has none (it gets
-a placeholder revision and is only good for tests). Booting the stick needs UEFI mode with Secure
+a placeholder revision and is only good for tests; such an ISO is `result/iso/hinteros-installer-dirty.iso` and its boot menu says "dirty tree: tests only"). Booting the stick needs UEFI mode with Secure
 Boot off (neither the ISO nor systemd-boot is signed).
 
 ### Install from the console (the first hardware test)

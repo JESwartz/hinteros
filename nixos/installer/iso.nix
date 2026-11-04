@@ -9,6 +9,9 @@
 }:
 let
   bootTheme = pkgs.callPackage ./boot-theme.nix { };
+  # Built from a dirty tree: no revision to pin (hinteros.installer.isoRev is all zeros), so only
+  # good for tests. Its file name and boot menu say so; no release is ever built like this.
+  dirty = config.hinteros.installer.isoRev == "0000000000000000000000000000000000000000";
 in
 {
   imports = [
@@ -21,7 +24,7 @@ in
     "--installer"
   ];
 
-  image.baseName = lib.mkForce "hinteros-installer";
+  image.baseName = lib.mkForce (if dirty then "hinteros-installer-dirty" else "hinteros-installer");
   isoImage = {
     volumeID = "HINTEROS";
     edition = "hinteros";
@@ -29,7 +32,7 @@ in
     squashfsCompression = "zstd -Xcompression-level 15";
     # Boot menu: "HinterOS <version> Installer" (the name is system.nixos.distroName, branding.nix;
     # the version is system.nixos.label, below).
-    appendToMenuLabel = " Installer";
+    appendToMenuLabel = if dirty then " Installer (dirty tree: tests only)" else " Installer";
     # HinterOS colors and wordmark, not the NixOS logo (boot-theme.nix).
     inherit (bootTheme) grubTheme;
     efiSplashImage = bootTheme.biosSplash;
