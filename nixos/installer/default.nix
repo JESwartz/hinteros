@@ -552,6 +552,7 @@ let
 
   examplePlan = pkgs.writeText "plan.example.json" (
     builtins.toJSON {
+      version = 1;
       disk = "/dev/nvme0n1";
       # The disk sequence number of that disk in this boot: lsblk -o PATH,DISK-SEQ.
       diskSeq = 1;

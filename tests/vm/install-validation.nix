@@ -1,7 +1,8 @@
 # hinteros-install refuses bad plans and unsuitable machines before touching the disk: missing
 # admin password (or one shorter than 8 characters), an app that needs a network while offline, a
 # disk that does not exist, is in use, is the system disk or is too small, a BIOS-booted machine,
-# malformed fields, a `rev` that is malformed or needs a network (the installer's own revision
+# malformed fields, a plan for a newer installer (`version`), a `rev` that is malformed or needs a
+# network (the installer's own revision
 # validates offline), a plan whose diskSeq is missing or not the disk's, and a disk replaced
 # (unplugged and plugged in again, so it gets a new disk sequence number under the same name) after
 # the plan was made or after the plan was checked, just before erasing (also a second disk with
@@ -111,6 +112,13 @@ let
     };
     bad-channel = plan { channel = "nightly"; };
     unknown-field = plan { wallpaper = "blue"; };
+    # The plan format: this installer reads version 1; a newer plan is refused as a whole.
+    plan-v1 = plan { version = 1; };
+    plan-newer = plan {
+      version = 2;
+      wallpaper = "blue";
+    };
+    plan-version-invalid = plan { version = "1"; };
     bad-rev = plan { rev = "HEAD"; };
     # The installer's own revision installs offline as without `rev`; another one needs a network.
     iso-rev = plan { rev = isoRev; };
@@ -272,6 +280,10 @@ in
           refused("unknown-app", "app-unknown")
           refused("bad-channel", "channel-invalid")
           refused("unknown-field", "unknown-field")
+          refused("plan-newer", "plan-newer")
+          refused("plan-version-invalid", "plan-version-invalid")
+          status, lines = run("plan-v1", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+          assert status == 0 and lines[-1]["stage"] == "done", lines
           refused("bad-rev", "rev-invalid")
 
       with subtest("plan.rev: the installer's own revision, or a newer one (online only)"):

@@ -135,6 +135,7 @@ An example is in `/etc/hinteros-installer/plan.example.json` on the ISO:
 
 ```json
 {
+  "version": 1,
   "disk": "/dev/nvme0n1",
   "diskSeq": 1,
   "hostname": "hinteros",
@@ -149,6 +150,7 @@ An example is in `/etc/hinteros-installer/plan.example.json` on the ISO:
 
 | Field | Meaning |
 |---|---|
+| `version` | Optional: the plan format, default 1 (this installer reads 1). Every new plan field bumps it. A higher version is refused as a whole (`plan-newer`, exit 2): an installer never ignores a field it does not know (`unknown-field`), because it could change what is erased. Not a whole number of 1 or more: `plan-version-invalid`. The JSON the backend prints (`--info`, `--list-disks`, `--check-newer`, progress lines) only gains fields: readers ignore fields they do not know |
 | `disk` | Whole-disk device path (`/dev/nvme0n1`, `/dev/disk/by-id/...`). Refused if it does not exist, is mounted (this includes the installer stick) or is under 16 GiB |
 | `diskSeq` | Required: the kernel's disk sequence number of that disk (`lsblk -o PATH,DISK-SEQ`, `/sys/class/block/<name>/diskseq`). Every attach gets a new one, never used again until the next boot, so a disk unplugged and another (or the same) plugged in under the same name does not match. Checked when the plan is checked, after the newer-`rev` download and again just before the disk is erased; a mismatch stops the install before anything is touched (`disk-changed`, exit 2; the UI goes back to the disk choice). Not an integer of 1 or more: `disk-seq-invalid` |
 | `hostname` | Lowercase letters, digits and hyphens |

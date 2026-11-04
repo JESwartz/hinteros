@@ -99,6 +99,10 @@ MIN_DISK_GIB=16
 # The state.json format and disk layout this installer writes.
 SCHEMA_VERSION=2
 DISK_LAYOUT=gpt-esp-btrfs
+# The plan format this installer reads (a plan's optional `version`, default 1). Each new plan
+# field bumps it: an older installer refuses a field it does not know, and with the version it can
+# say why (plan-newer).
+PLAN_VERSION=1
 # Test hook: the command that writes the hardware report (VM tests feed a fixture).
 FACTER=${HINTEROS_INSTALL_FACTER:-nixos-facter}
 # Test hook: the command that sets the system profile and writes the boot loader (VM tests make it
@@ -619,9 +623,16 @@ fi
 printf '%s' "$PLAN" | jq -e 'type == "object"' >/dev/null 2>&1 \
   || fail 2 plan-invalid "the plan is not a JSON object"
 
+# A plan from a newer installer (its optional `version` is higher than this one's) is refused as a
+# whole: a field this installer does not know may change what is erased, so it is never ignored.
+if printf '%s' "$PLAN" | jq -e --argjson v "$PLAN_VERSION" '(.version | type) == "number" and .version > $v' >/dev/null 2>&1; then
+  fail 2 plan-newer "This plan is for a newer installer (plan version $(printf '%s' "$PLAN" | jq .version)). Use a newer installer."
+fi
+
 # The plan with defaults filled in; every later read goes through this.
 PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   disk, diskSeq, hostname, admin, wifi,
+  version: (.version // 1),
   ssh: (.ssh // {enable: false}),
   channel: (.channel // $default_channel),
   base: (.base // "unstable"),
@@ -635,7 +646,7 @@ PLAN=$(printf '%s' "$PLAN" | jq -c --arg default_channel "$DEFAULT_CHANNEL" '{
   given: [to_entries[] | select(.value != null) | .key],
   # What a keepData plan does not take: it comes from the install, or does not apply.
   notKept: [to_entries[] | select(.value != null and (.key | IN("base", "apps", "acceptedTerms", "rev"))) | .key],
-  unknown: (keys - ["disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev", "keepData"])
+  unknown: (keys - ["version", "disk", "diskSeq", "hostname", "admin", "ssh", "channel", "base", "network", "apps", "wifi", "acceptedTerms", "rev", "keepData"])
 }')
 
 # Plan-level problems, all at once: [{field, code, message}].
@@ -644,6 +655,8 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
   | def bad(f; c; m): {field: f, code: c, message: m};
     [
       (.unknown[] | bad("."; "unknown-field"; "unknown plan field \(.)")),
+      (if (.version | type) != "number" or .version != (.version | floor) or .version < 1
+        then bad("version"; "plan-version-invalid"; "version must be a whole number, 1 or more") else empty end),
       (if (.disk | type) != "string" or (.disk | startswith("/dev/") | not)
         then bad("disk"; "disk-missing"; "disk must be a device path such as /dev/nvme0n1") else empty end),
       (if (.diskSeq | type) != "number" or .diskSeq != (.diskSeq | floor) or .diskSeq < 1
