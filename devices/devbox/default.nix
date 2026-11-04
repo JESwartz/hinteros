@@ -3,7 +3,9 @@
 # (the unprivileged `deploy` user, key-only SSH, passwordless sudo; the session user is not root
 # here either). It goes through mkDevice with a checked-in state file, like boxes #2 and #3 do
 # with /etc/hinteros. Add your SSH public key to hinteros.dev.deployKeys below before the first
-# deploy. See tests/couch/m0-spikes.md.
+# deploy. See tests/couch/m0-spikes.md. The M0/M1 setup (NixOS installed by hand, ext4 by label in
+# hardware.nix): never deploy it to a box the installer made (btrfs by UUID); that box follows its
+# channel.
 #
 # A function of the state (`self.lib.devices.devbox`): `nixosConfigurations.devbox` passes the
 # checked-in state.json, and the device flake embedded in every generation's snapshot

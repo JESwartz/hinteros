@@ -7,6 +7,11 @@ spike 4 (InputPlumber) and spike 5 (on-screen keyboard). Background: `hinteros-d
 
 ## 0. Deploy to the dev box
 
+This is the M0 setup: NixOS installed by hand, ext4 mounted by label (`devices/devbox/hardware.nix`).
+Never deploy `.#devbox` to a box the HinterOS installer made (btrfs subvolumes mounted by UUID,
+`state.json` with `disk`): that generation does not boot there. Such a box updates from its
+channel.
+
 1. Put your SSH public key in `hinteros.dev.deployKeys` in `devices/devbox/default.nix` (the `deploy`
    user; empty by default). The session user `hinteros-p1` has no SSH login and no sudo. Never commit keys that are not yours.
 2. First install: NixOS from any ISO on the box, then copy its
