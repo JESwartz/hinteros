@@ -160,7 +160,10 @@ Xwaylands' memory.
 - `server.nix`: the Server section (M10, design/server.md), driven by `hinteros.catalog.services` and the entries' `ports`. Firewall: `from = "any"` ports in `allowedTCPPorts`/`allowedUDPPorts`; `from = "lan"` ports only from `hinteros.ssh.allowFrom` (the same rules as SSH, `nixos/lib/local-networks.nix`, nftables or iptables) and, with `tailscale` on, on `tailscale0` (with SSH while it is on). `/srv/media` (with the session): `root:hinteros-media` 2775 with the default ACL `d:g:hinteros-media:rx`; the admin account, `jellyfin` and `plex` are in the group. `/var/lib/hinteros/services/<id>/` (0700 root) for each enabled service. Jellyfin: `hinteros-jellyfin-setup.service` (oneshot, `requiredBy` and `before` `jellyfin.service`, `PrivateNetwork`) runs the first-run wizard on its own loopback (admin `admin` with a random password, server name = hostname, remote access on), makes an API key and writes `setup-done`, `admin-password`, `api-key` (0600 root); an interrupted run starts from scratch (wipes Jellyfin's directories and the password), a Jellyfin set up without HinterOS's markers is never wiped (the setup fails and Jellyfin stays off); with `hinteros.hardware.intelVideo` VA-API transcoding on `/dev/dri/renderD128` (H.264, HEVC, VC-1, VP8 decoding), written once. The Jellyfin app's sign-in page (spike S1): jellyfin-web plus `hinteros/signin.html` and `signin.js` (`modules/jellyfin-signin.*`), a copy bound read-only (`BindReadOnlyPaths`) over the `--webdir` of the server's wrapper; the session daemon starts the app on it with the profile's token in the fragment, and the page stores jellyfin-web's login (`jellyfin_credentials`, `_deviceId2`) and opens `/web/index.html`. Plex: `plex` in `render`, `video`, `hinteros-media` (its unfree package is allowlisted by `catalog.nix` only while it is on). Tailscale: `tailscale` on the PATH of `hinteros-system` and `hinteros-job@`. Cloudflare Tunnel: `hinteros-cloudflared.service` (only while `/var/lib/hinteros/services/cloudflare-tunnel/token` exists, `LoadCredential` + `--token-file`, dynamic user, metrics on `127.0.0.1:20241`); its `ExecStartPre` loads the nftables table `inet hinteros_cloudflared` (`socket cgroupv2` on its own cgroup): the box's own addresses only on the enabled services' ports. With Jellyfin, Plex or the tunnel on, `hinteros-system` also gets `AF_INET`/`AF_INET6` with `IPAddressDeny=any`, `IPAddressAllow=localhost` (status over loopback HTTP).
 - `maintenance.nix`: `hinteros.maintenance.*`. Boot counting uses NixOS' native
   `boot.loader.systemd-boot.bootCounting`; `hinteros-boot-health` gates `boot-complete.target`
-  on the daemon and launcher, so a broken generation falls back by itself. On for every installed box
+  on the daemon and launcher being up and staying up for `bootCounting.stableSeconds` (default
+  20) with no restart (the daemon's `NRestarts`, greetd's start, the launcher's PID; the OSK, the
+  same binary with `--osk`, does not count), so a broken generation, also one that crashes soon
+  after each start, falls back by itself. On for every installed box
   (mkDevice enables it wherever systemd-boot is on); not in VMs or on the ISO. The automatic
   clean-up (state.json `settings.cleanup`, storage.md) is NixOS' `nix-gc` timer at `gc.dates`
   (`frequency`: `daily`, `weekly`, `monthly`; default weekly, persistent) running
@@ -170,14 +173,18 @@ Xwaylands' memory.
   (`/nix/var/nix/profiles/hinteros/{apps/<user>,starter}`) to the newest
   `keepProfileGenerations` (`keepProfiles`, default 5; the current one always stays), then runs
   `nix-collect-garbage`, all under the flock `cleanupLock` (`/run/lock/hinteros-cleanup.lock`),
-  so two never overlap. The daemon's manual clean-up jobs (their own trim, boot menu rewrite and
+  so two never overlap. With boot counting, `nix-gc` is `Requisite=boot-complete.target`: no
+  clean-up during a boot that is not good yet. The daemon's manual clean-up jobs (their own trim, boot menu rewrite and
   `nix-store --gc`) are serialised with it by Nix's profile and GC locks; they may also take
   `cleanupLock` or run `cleanupPackage`. The timer rewrites no boot entry: entries are the newest
-  `configurationLimit` (= `keepGenerations`) generations of the last rebuild, which its trim
-  keeps. `gc.enable` (`enable`) off: no timer. systemd-boot's
-  `configurationLimit` follows `keepGenerations` either way. Also `nix.optimise`, and
-  `hinteros-disk-check` logs a warning (identifier `hinteros-disk-check`, priority 4) below
-  `diskCheck.minFreeGiB`.
+  `configurationLimit` (= `keepGenerations`, at least 2, so boot counting always has a fallback)
+  generations of the last rebuild, which its trim keeps. `gc.enable` (`enable`) off: no timer.
+  systemd-boot's `configurationLimit` follows `keepGenerations` either way. A switch to a
+  generation outside it (a rollback past the newest `configurationLimit`) fails in the boot
+  loader install (`extraInstallCommands`), before activation: it would get no entry, and the next
+  boot would start the newest one. Also `nix.optimise`; `nix-gc` and `nix-optimise` run with
+  `Nice=19` and `IOSchedulingClass=idle`. `hinteros-disk-check` logs a warning (identifier
+  `hinteros-disk-check`, priority 4) below `diskCheck.minFreeGiB`.
 
 ## Runtime settings wiring (session API 0.7)
 

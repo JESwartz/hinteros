@@ -231,6 +231,10 @@ let
         # Runs every boot: it marks the boot good itself when the firmware drops the
         # loader's volatile variables (no LoaderBootCountPath for systemd-bless-boot).
         devbox.systemd.services.hinteros-boot-health.wantedBy
+        # No clean-up before the boot is good: it could remove the fallback.
+        devbox.systemd.services.nix-gc.requisite
+        # A switch to a generation without a boot entry fails (a rollback past the limit).
+        (has "no boot entry for $1" devbox.boot.loader.systemd-boot.extraInstallCommands)
       ];
       expected = [
         true
@@ -238,6 +242,8 @@ let
         5
         [ "hinteros-boot-health.service" ]
         [ "multi-user.target" ]
+        [ "boot-complete.target" ]
+        true
       ];
     };
     testGcKeepsGenerations = {
@@ -315,6 +321,10 @@ let
           keepSystem = 10;
           keepProfiles = 1;
         }))
+        # Boot counting keeps a generation to fall back to.
+        (cleanupOf (mkClean {
+          keepSystem = 1;
+        }))
       ];
       expected = [
         [
@@ -328,6 +338,12 @@ let
           [ "weekly" ]
           "--system 10 --profiles 1"
           10
+        ]
+        [
+          true
+          [ "weekly" ]
+          "--system 1 --profiles 5"
+          2
         ]
       ];
     };
