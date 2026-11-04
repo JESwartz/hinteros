@@ -13,9 +13,15 @@
 # `version`, `channel`, `hostname` and `admin` are absent if unknown, `ssh` is state.json's
 # settings.ssh.enable (false if absent), `profiles` counts state.json's accounts,
 # `schemaOk` says a keepData plan is accepted on this disk. null: no such install, the disk is in
-# use, it cannot be read or an install runs (it holds /run/hinteros-install.lock; a listing takes
-# it shared). Disks are mounted read-only, one at a time; an unreadable disk never
-# fails the listing.
+# use, it cannot be read, or an install runs. Disks are mounted read-only, one at a time; an
+# unreadable disk never fails the listing.
+# Locks: an install holds /run/hinteros-install.lock exclusively from its validation to its end
+# (it may erase any disk) and waits up to 100 s for listings to end. A listing takes it shared
+# without waiting; while an install holds it, no disk is looked into. Listings look into disks in
+# turn (/run/hinteros-install.probe.lock, waiting up to 45 s, else no disk is looked into), so one
+# never takes a disk that another one mounted for a disk in use; the rest runs side by side.
+# A listing stopped with SIGTERM (the UI stops a slow one) waits for the mount it was doing (up
+# to 35 s) and undoes it before it ends, with both locks held.
 #
 # --info (offline, instant, no root): what this installer carries, as one JSON object,
 #   {"iso":{"rev":...,"version":...},"channel":"stable"}
@@ -193,7 +199,8 @@ SHORT_REV=12 # as update.rs: a tip without a readable release/version is named b
 repo_scheme=${REPO_URL%%://*}
 chk_dir=
 tmp_dirs=()
-probe_mnt= # a disk mounted read-only by read_install
+probe_mnt= # a disk mounted read-only by read_install (set before the mount)
+probe_pid= # that mount, while it runs
 # keepData: until the new system is installed, a copy of what the run changes on the kept install
 # (/etc/hinteros, the admin password, the boot files once the ESP is formatted). A run that ends
 # before puts it back (restore_kept), so the old system boots as it was. Empty: nothing to put back.
@@ -201,7 +208,13 @@ keep_bak=
 esp_touched=0 # 1: keep_esp started to format the ESP
 # shellcheck disable=SC2329 # the EXIT trap
 cleanup_tmp() {
-  [ -z "$probe_mnt" ] || umount "$probe_mnt" 2>/dev/null || true
+  # Stopped during the mount: the mount can still finish, so wait for it, then undo it.
+  if [ -n "$probe_pid" ]; then
+    kill "$probe_pid" 2>/dev/null || true
+    wait "$probe_pid" 2>/dev/null || true
+  fi
+  # A lazy unmount detaches at once, so rm never reaches into the disk.
+  [ -z "$probe_mnt" ] || umount "$probe_mnt" 2>/dev/null || umount -l "$probe_mnt" 2>/dev/null || true
   [ -z "$keep_bak" ] || restore_kept
   [ "${#tmp_dirs[@]}" -eq 0 ] || rm -rf "${tmp_dirs[@]}"
 }
@@ -230,6 +243,7 @@ restore_kept() {
   fi
   sync
 }
+# Also on SIGTERM (the UI stops a slow --list-disks): bash runs it before it dies.
 trap cleanup_tmp EXIT
 # Results of check_channel: the tip, and the newer release (empty: none newer).
 TIP_REV=
@@ -455,11 +469,17 @@ read_install() {
   fi
   dir=$(mktemp -d)
   tmp_dirs+=("$dir")
-  if ! timeout -k 5 30 mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 "$EX_ROOT" "$dir" 2>/dev/null; then
+  # In the background, so that if this is stopped during the mount the EXIT trap can wait for
+  # the mount to end and undo it.
+  probe_mnt=$dir
+  timeout -k 5 30 mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 "$EX_ROOT" "$dir" 2>/dev/null &
+  probe_pid=$!
+  if ! wait "$probe_pid"; then
+    probe_pid='' probe_mnt=''
     ex_refuse keep-unreadable "the HinterOS partition on $d cannot be read"
     return 0
   fi
-  probe_mnt=$dir
+  probe_pid=
   read_install_at "$d" "$dir"
   umount "$dir" 2>/dev/null || umount -l "$dir" 2>/dev/null || true
   probe_mnt=
@@ -467,12 +487,17 @@ read_install() {
 
 list_disks() {
   local out d one existing='{}' probe=1
-  # An install holds the lock (/run/hinteros-install.lock) exclusively from its validation to its
-  # end, and may erase a disk that is not mounted yet: no disk is mounted while it does. Listings
-  # share it, so the UI and the console can list at the same time. Without root there is no lock
-  # (and no disk can be mounted).
-  if { exec 9>>/run/hinteros-install.lock; } 2>/dev/null && ! flock -s -n 9; then
-    probe=0
+  # An install holds /run/hinteros-install.lock exclusively from its validation to its end, and
+  # may erase a disk that is not mounted yet: no disk is mounted while it does. Listings share it.
+  # They look into disks in turn (the probe lock): each would take a disk that another one mounted
+  # for a disk in use. A listing that was stopped may still be undoing its mount (up to 35 s).
+  # Without root there are no locks (and no disk can be mounted).
+  if { exec 9>>/run/hinteros-install.lock; } 2>/dev/null; then
+    if ! flock -s -n 9; then
+      probe=0
+    elif ! { exec 8>>/run/hinteros-install.probe.lock; } 2>/dev/null || ! flock -x -w 45 8; then
+      probe=0
+    fi
   fi
   out=$(lsblk --json -b -o NAME,PATH,SIZE,MODEL,TRAN,TYPE,RM,MOUNTPOINTS,DISK-SEQ)
   while IFS= read -r d; do
@@ -847,8 +872,9 @@ if [ ! -d /sys/firmware/efi ] && [ -z "${HINTEROS_INSTALL_ALLOW_BIOS:-}" ]; then
 fi
 
 exec 9>/run/hinteros-install.lock
-# Exclusive; a disk listing (--list-disks) holds it shared for a moment while it looks into disks.
-flock -x -w 60 9 || fail 2 already-running "another hinteros-install is running"
+# Exclusive. A disk listing (--list-disks) holds it shared while it looks into disks; the UI stops
+# one after 60 s, and a stopped one may take 35 s more to undo its mount.
+flock -x -w 100 9 || fail 2 already-running "another hinteros-install is running"
 
 mem_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
 if [ "$mem_kib" -lt $((3 * 1024 * 1024)) ]; then

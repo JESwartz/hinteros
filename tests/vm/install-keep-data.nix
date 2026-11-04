@@ -224,6 +224,30 @@ in
         installer.succeed("pkill -f '[f]lock -x /run/hinteros-install.lock'; pkill -f '^sleep 120$'")
         installer.wait_until_succeeds("flock -n /run/hinteros-install.lock true")
 
+    with subtest("--list-disks stopped at any point leaves nothing mounted; listings look into disks in turn"):
+        # The UI stops a listing that takes too long (SIGTERM), maybe during a mount.
+        for delay in ["0", "0.05", "0.1", "0.2", "0.3", "0.5", "1"]:
+            installer.succeed(
+                f"(hinteros-install --list-disks >/dev/null 2>&1 &); sleep {delay}; "
+                "pkill -TERM -f '[l]ibexec/hinteros-install' || true"
+            )
+            installer.wait_until_fails("pgrep -f '[l]ibexec/hinteros-install'", timeout=60)
+            installer.fail("findmnt -rn | grep -q vdc")
+        # A listing waits for another one (here: a stand-in) that looks into disks, and then
+        # still finds the install: it does not take the other's mount for a disk in use.
+        installer.succeed("(flock -x /run/hinteros-install.probe.lock sleep 4 >/dev/null 2>&1 &); sleep 0.5")
+        took = installer.succeed("s=$(date +%s); hinteros-install --list-disks >/tmp/listed.json; echo $(( $(date +%s) - s ))")
+        assert int(took.strip()) >= 2, took
+        # Listings side by side: each one finds the install.
+        installer.succeed(
+            "for i in 1 2 3; do hinteros-install --list-disks >/tmp/listed.$i.json & done; wait"
+        )
+        for i in ["", ".1", ".2", ".3"]:
+            out = json.loads(installer.succeed(f"cat /tmp/listed{i}.json"))
+            vdc = {d["name"]: d for d in out["blockdevices"]}["vdc"]
+            assert vdc["existing"] is not None and vdc["existing"]["schemaOk"], (i, vdc)
+        installer.fail("findmnt -rn | grep -q vdc")
+
     with subtest("refused: an install this installer cannot keep"):
         edit_state(".schemaVersion = 3")
         refused("keep-schema-newer")
