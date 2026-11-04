@@ -1,6 +1,6 @@
 /* Inside the app sandbox (VM test sandbox): one `<check>=yes|no` line per system call check.
  * "yes" means the sandbox behaves as designed: blocked calls fail with the filter's errno (not
- * the errno the kernel gives without the filter; io_uring and x32 are the exceptions, see
+ * the errno the kernel gives without the filter; x32 is the exception, see
  * sandbox.nix), nested sandboxes still work. */
 #define _GNU_SOURCE
 #include <errno.h>
