@@ -164,8 +164,8 @@ rec {
           };
           description = ''
             What the app may use in its sandbox (the catalog's `permissions`): `gamepad`, `mic`,
-            `downloads`, each `required` or `optional` (the profile user can deny it). Written
-            to session.toml as `permissions`.
+            `downloads`, `lan`, each `required` or `optional` (the profile user can deny it).
+            Written to session.toml as `permissions`.
           '';
         };
 
