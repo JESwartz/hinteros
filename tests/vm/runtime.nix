@@ -1,7 +1,7 @@
 # Runtime settings services (NetworkManager, BlueZ, PipeWire, logind/polkit) and maintenance:
 # the services are up, the session user may manage the network and sleep/restart/power off but
-# not do anything privileged, boot-complete.target is gated on the launcher and daemon, and the
-# low-disk warning fires.
+# not do anything privileged, boot-complete.target is gated on the launcher and daemon and starts
+# every boot (so the clean-up may run), and the low-disk warning fires.
 { self, pkgs }:
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
   name = "hinteros-runtime";
@@ -76,9 +76,17 @@
     ):
         assert check(action, other) != 0, f"other users must not be allowed {action}"
 
-    # Boot counting gate: launcher and daemon are up, so the boot is good.
-    machine.succeed("systemctl start boot-complete.target")
+    # Boot counting gate: launcher and daemon are up, so the boot is good. The target is part of
+    # every boot (no systemd-bless-boot here, as on a blessed entry or firmware without
+    # LoaderBootCountPath).
+    machine.wait_for_unit("boot-complete.target")
     machine.succeed("systemctl is-active hinteros-boot-health.service")
+    # So the clean-up runs (it is Requisite= on the target): its ExecStart ran when the start time
+    # changed. The result does not matter (nix-collect-garbage may fail on the VM's host store).
+    started = "systemctl show -p ExecMainStartTimestampMonotonic --value nix-gc.service"
+    before = machine.succeed(started).strip()
+    machine.execute("systemctl start nix-gc.service")
+    assert machine.succeed(started).strip() != before, "nix-gc did not run"
 
     # Maintenance: low-disk warning at priority 4, GC trims to N generations first.
     machine.succeed("systemctl start hinteros-disk-check.service")

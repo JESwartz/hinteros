@@ -13,8 +13,10 @@
 let
   cfg = config.hinteros.deviceConfig;
 
-  # The files of a config dir that belong to a generation. facter.json describes hardware,
-  # not settings, so it is neither snapshotted nor touched by the sync.
+  # The files of a config dir that belong to a generation. facter.json describes hardware, and
+  # extra.nix (with the files it imports) this install's boot quirks; only the installer writes
+  # them (again on a keep-data install), for every generation alike. So neither is snapshotted
+  # or touched by the sync, and nothing else may write extra.nix.
   managed = [
     "flake.nix"
     "flake.lock"
@@ -237,11 +239,12 @@ in
     systemd.services.hinteros-facter-release = {
       description = "Release the deferred hardware report in ${cfg.dir} once online";
       wantedBy = [ "multi-user.target" ];
-      wants = [ "network-online.target" ];
-      after = [ "network-online.target" ];
+      # No network-online.target: a box with no deferred report (or no network) must not wait
+      # for it at every boot. The script waits for the network itself.
       unitConfig.ConditionPathExists = "${cfg.dir}/facter.deferred";
       serviceConfig = {
-        Type = "oneshot";
+        # Not oneshot: multi-user.target would wait for the retries below (minutes when offline).
+        Type = "exec";
         ExecStart = lib.getExe (
           pkgs.writeShellApplication {
             name = "hinteros-facter-release";
@@ -250,7 +253,9 @@ in
               pkgs.coreutils
             ];
             text = ''
-              curl -fsS --max-time 10 -o /dev/null https://cache.nixos.org/nix-cache-info
+              # Up to about 5 min for the network to come up at boot, then Restart below.
+              curl -fsS --max-time 10 --retry 10 --retry-delay 30 --retry-all-errors -o /dev/null \
+                https://cache.nixos.org/nix-cache-info
               rm -f ${lib.escapeShellArg cfg.dir}/facter.deferred
               echo "online: the hardware report will be applied by the next rebuild"
             '';

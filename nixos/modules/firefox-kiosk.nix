@@ -1,8 +1,8 @@
 # Firefox for the TV apps (apps.md, "Firefox kiosk apps"; spike 8 item 3):
 #   - box-wide: the enterprise policies at /etc/firefox/policies/policies.json (telemetry off,
-#     DRM and VA-API prefs, the force-installed OSK extension, and on ESR the locked
-#     `xpinstall.signatures.required = false`). Firefox reads that file whichever binary runs, so
-#     a Firefox from a profile's app env gets them. No Firefox package is in the system for it
+#     DRM and VA-API prefs, the force-installed OSK extension and no other add-on, and on ESR the
+#     locked `xpinstall.signatures.required = false`). Firefox reads that file whichever binary runs,
+#     so a Firefox from a profile's app env gets them. No Firefox package is in the system for it
 #     (no `programs.firefox`); the OSK .xpi it names is a store path in the system closure.
 #   - per app env: `mkFirefox pkgs`, Firefox (ESR by default) wrapped with the autoConfig (the
 #     OSK's privileged address-bar reporter) and the `hinteros-session` native-messaging host
@@ -224,7 +224,14 @@ in
           "xpinstall.signatures.required" = lock false;
         }
       );
-      ExtensionSettings = lib.mkIf (cfg.oskExtension != "off") {
+      # No add-on but the OSK: on ESR signatures are not checked (above), so a page must not be
+      # able to offer one.
+      ExtensionSettings = {
+        "*" = {
+          installation_mode = "blocked";
+        };
+      }
+      // lib.optionalAttrs (cfg.oskExtension != "off") {
         ${ext} = {
           installation_mode = "force_installed";
           install_url = "file://${oskXpi}";

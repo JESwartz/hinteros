@@ -1,9 +1,14 @@
-# Mini PC #1 (dev box), deployed from the desktop:
+# The dev-mode configuration (`hinteros.dev`), built and checked by the tests as
+# `nixosConfigurations.devbox`. It is not what runs on mini PC #1: that box was installed with
+# the installer and is updated like any box, from /etc/hinteros (its own state.json, with the
+# disk by UUID). Never deploy `.#devbox` to an installed box: the checked-in state.json has no
+# `disk`, so it would boot the placeholder file systems in hardware.nix.
+#
+# Only a box whose disks carry those labels takes it, through the `deploy` user (key-only SSH,
+# passwordless sudo; the session user is not root here either; add your key to
+# hinteros.dev.deployKeys below):
 #   nixos-rebuild switch --flake .#devbox --target-host deploy@<box> --sudo
-# (the unprivileged `deploy` user, key-only SSH, passwordless sudo; the session user is not root
-# here either). It goes through mkDevice with a checked-in state file, like boxes #2 and #3 do
-# with /etc/hinteros. Add your SSH public key to hinteros.dev.deployKeys below before the first
-# deploy. See tests/couch/m0-spikes.md.
+# See tests/couch/m0-spikes.md.
 #
 # A function of the state (`self.lib.devices.devbox`): `nixosConfigurations.devbox` passes the
 # checked-in state.json, and the device flake embedded in every generation's snapshot

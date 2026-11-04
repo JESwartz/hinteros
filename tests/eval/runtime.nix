@@ -210,6 +210,25 @@ let
         "oneshot"
       ];
     };
+    # The deferred-report release never pulls network-online into the boot (wait-online at every
+    # boot, also with no marker).
+    testFacterReleaseNoWaitOnline = {
+      expr =
+        let
+          s = c.systemd.services.hinteros-facter-release;
+        in
+        [
+          (lib.elem "network-online.target" s.wants)
+          (lib.elem "network-online.target" s.after)
+          # Not oneshot: the boot (multi-user.target) does not wait for its retries.
+          s.serviceConfig.Type
+        ];
+      expected = [
+        false
+        false
+        "exec"
+      ];
+    };
     testSyncCanBeDisabled = {
       expr = (mk [ { hinteros.deviceConfig.enable = false; } ]).systemd.services ? hinteros-config-sync;
       expected = false;
@@ -228,9 +247,15 @@ let
         devbox.boot.loader.systemd-boot.bootCounting.tries
         devbox.boot.loader.systemd-boot.configurationLimit
         devbox.systemd.targets.boot-complete.requires
+        # Every boot, not only the first of an entry (systemd-bless-boot): nix-gc needs it.
+        devbox.systemd.targets.boot-complete.wantedBy
         # Runs every boot: it marks the boot good itself when the firmware drops the
         # loader's volatile variables (no LoaderBootCountPath for systemd-bless-boot).
         devbox.systemd.services.hinteros-boot-health.wantedBy
+        # No clean-up before the boot is good: it could remove the fallback.
+        devbox.systemd.services.nix-gc.requisite
+        # A switch to a generation without a boot entry fails (a rollback past the limit).
+        (has "no boot entry for $1" devbox.boot.loader.systemd-boot.extraInstallCommands)
       ];
       expected = [
         true
@@ -238,6 +263,9 @@ let
         5
         [ "hinteros-boot-health.service" ]
         [ "multi-user.target" ]
+        [ "multi-user.target" ]
+        [ "boot-complete.target" ]
+        true
       ];
     };
     testGcKeepsGenerations = {
@@ -315,6 +343,10 @@ let
           keepSystem = 10;
           keepProfiles = 1;
         }))
+        # Boot counting keeps a generation to fall back to.
+        (cleanupOf (mkClean {
+          keepSystem = 1;
+        }))
       ];
       expected = [
         [
@@ -328,6 +360,12 @@ let
           [ "weekly" ]
           "--system 10 --profiles 1"
           10
+        ]
+        [
+          true
+          [ "weekly" ]
+          "--system 1 --profiles 5"
+          2
         ]
       ];
     };
@@ -354,19 +392,15 @@ let
     testCleanupInvalid = {
       expr = map (s: lib.hasInfix s.msg (cleanupFailures s.cleanup)) [
         {
-          msg = "settings.cleanup.frequency must be one of daily, weekly, monthly, not \"hourly\"";
-          cleanup.frequency = "hourly";
+          msg = "settings.cleanup.frequency must be a string, not 7";
+          cleanup.frequency = 7;
         }
         {
-          msg = "settings.cleanup.keepSystem must be a whole number from 1 to 10, not 0";
+          msg = "settings.cleanup.keepSystem must be a whole number from 1, not 0";
           cleanup.keepSystem = 0;
         }
         {
-          msg = "settings.cleanup.keepSystem must be a whole number from 1 to 10, not 11";
-          cleanup.keepSystem = 11;
-        }
-        {
-          msg = "settings.cleanup.keepProfiles must be a whole number from 1 to 10, not \"5\"";
+          msg = "settings.cleanup.keepProfiles must be a whole number from 1, not \"5\"";
           cleanup.keepProfiles = "5";
         }
         {
@@ -378,8 +412,43 @@ let
           cleanup = true;
         }
       ];
-      expected = lib.genList (_: true) 6;
+      expected = lib.genList (_: true) 5;
     };
+    # Values a later release may add: the default (or the limit) with a warning, not refused.
+    testCleanupNewerValues =
+      let
+        cfg = mkClean {
+          frequency = "hourly";
+          keepSystem = 11;
+          keepProfiles = 20;
+        };
+        warns = s: lib.any (lib.hasInfix s) cfg.warnings;
+      in
+      {
+        expr = [
+          (cleanupFailures {
+            frequency = "hourly";
+            keepSystem = 11;
+            keepProfiles = 20;
+          })
+          (cleanupOf cfg)
+          (warns "unknown settings.cleanup.frequency \"hourly\", using weekly")
+          (warns "settings.cleanup.keepSystem 11 is above 10, using 10")
+          (warns "settings.cleanup.keepProfiles 20 is above 10, using 10")
+        ];
+        expected = [
+          ""
+          [
+            true
+            [ "weekly" ]
+            "--system 10 --profiles 10"
+            10
+          ]
+          true
+          true
+          true
+        ];
+      };
 
     # The time zone (time-zone.md): NixOS does not own /etc/localtime; the activation script
     # reads the live state.json after `etc`, whatever the state says at evaluation.
@@ -428,9 +497,7 @@ let
             )
           )
           [
-            "Mars/Olympus_Mons"
             "utc"
-            "America"
             "../../etc/shadow"
             "/etc/zoneinfo/UTC"
             "America/../UTC"
@@ -441,7 +508,26 @@ let
             5
             { }
           ];
-      expected = lib.genList (_: true) 12;
+      expected = lib.genList (_: true) 10;
+    };
+    # A well-formed name this tzdata does not have (a later release's tzdata may): a warning, and
+    # activation uses UTC.
+    testTimeZoneUnknown = {
+      expr =
+        map
+          (z: [
+            (tzFailures z)
+            (lib.any (lib.hasInfix "unknown settings.timeZone ${builtins.toJSON z} (not in this tzdata), using UTC") (mkTz z)
+            .warnings)
+          ])
+          [
+            "Mars/Olympus_Mons"
+            "America"
+          ];
+      expected = lib.genList (_: [
+        ""
+        true
+      ]) 2;
     };
   };
 in

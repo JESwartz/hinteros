@@ -233,6 +233,24 @@ let
         true
       ];
     };
+    # buildAll (one nixpkgs per distinct unfree set) gives each owner the env build gives it.
+    testBuildAllSameEnvs =
+      let
+        owners = {
+          p1 = [ "steam" ];
+          p2 = [
+            "steam"
+            "youtube"
+          ];
+          p3 = [ "plex-htpc" ];
+          starter = [ "youtube" ];
+        };
+        all = base.config.hinteros.appEnv.buildAll owners;
+      in
+      {
+        expr = lib.mapAttrs (o: ids: drv all.${o} == drv (env base ids)) owners;
+        expected = lib.mapAttrs (_: _: true) owners;
+      };
     testDefaultApps = {
       expr = appsOf base;
       expected = [
@@ -825,11 +843,16 @@ let
         base.config.hinteros.firefoxKiosk.oskExtension
         (lib.hasSuffix "esr" (fx base).finalPackage.version)
         ((fx base).policies.ExtensionSettings ? "${extId}")
+        # Every other add-on is blocked: ESR checks no signatures.
+        (fx base).policies.ExtensionSettings."*".installation_mode
+        (fx oskOff).policies.ExtensionSettings."*".installation_mode
       ];
       expected = [
         "esr-unsigned"
         true
         true
+        "blocked"
+        "blocked"
       ];
     };
     testOskExtensionOff = {

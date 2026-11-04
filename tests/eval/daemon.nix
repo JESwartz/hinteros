@@ -58,6 +58,8 @@ let
         (c.systemd.user.services.hinteros-session.unitConfig ? ConditionUser)
         (lib.hasSuffix " usage" c.systemd.services.hinteros-usage.serviceConfig.ExecStart)
         c.systemd.services.hinteros-usage.serviceConfig.ProtectHome
+        # Reads homes the profiles control: read/search only, no other capability.
+        c.systemd.services.hinteros-usage.serviceConfig.CapabilityBoundingSet
         (lib.hasInfix ''action.id !== "org.hinteros.system.profiles.recover"'' rules)
         (lib.hasInfix "hinteros-greeter" rules)
         sys.SupplementaryGroups
@@ -67,6 +69,7 @@ let
         false
         true
         "read-only"
+        [ "CAP_DAC_READ_SEARCH" ]
         true
         true
         # greeter.sock's and keyboard.sock's groups (chgrp without CAP_CHOWN).
@@ -263,12 +266,14 @@ let
       ];
     };
     # lib.catalogIds: what the daemon's `nix eval ...#lib.catalogIds` reads from a target revision.
+    # `kind` lets it tell new apps from new services.
     testCatalogIds = {
       expr = [
         (lib.attrNames self.lib.catalogIds == lib.attrNames c.hinteros.catalog.entries)
         (lib.all (
           e:
           lib.attrNames e == [
+            "kind"
             "name"
             "status"
             "statusReason"
@@ -276,12 +281,16 @@ let
         ) (lib.attrValues self.lib.catalogIds))
         self.lib.catalogIds.crunchyroll.name
         self.lib.catalogIds.crunchyroll.status
+        self.lib.catalogIds.crunchyroll.kind
+        self.lib.catalogIds.jellyfin-server.kind
       ];
       expected = [
         true
         true
         "Crunchyroll"
         "available"
+        "app"
+        "service"
       ];
     };
     testDaemonsInSystemPath = {

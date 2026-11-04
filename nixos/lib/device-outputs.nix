@@ -17,7 +17,8 @@ in
     facterReport = if has "facter.json" && !has "facter.deferred" then dir + "/facter.json" else null;
     # The snapshot embedded in every generation (flake.nix, flake.lock, state.json).
     configDir = dir;
-    # What this install needs beyond the state (the installer's boot loader override).
+    # What this install needs beyond the state (the installer's boot loader override). Not in
+    # the snapshot: it belongs to the install, not to a generation (device-config.nix).
     extraModules = if has "extra.nix" then [ (dir + "/extra.nix") ] else [ ];
   };
 }

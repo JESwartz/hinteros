@@ -97,6 +97,30 @@ let
   ];
 
   results = lib.runTests {
+    # The fake Steam is for test VMs only (no state.json), never for a real device.
+    testFakeSteamNotOnDevices =
+      let
+        fakeFails =
+          state:
+          lib.any (a: !a.assertion && lib.hasPrefix "hinteros.fakeSteam" a.message)
+            (self.lib.mkDevice {
+              inherit state;
+              extraModules = [
+                { hinteros.fakeSteam.enable = true; }
+              ]
+              ++ lib.optional (state == null) { system.stateVersion = "25.11"; };
+            }).config.assertions;
+      in
+      {
+        expr = map fakeFails [
+          good
+          null
+        ];
+        expected = [
+          true
+          false
+        ];
+      };
     testSchema2Good = {
       expr = failures good2;
       expected = "";
@@ -122,17 +146,79 @@ let
           msg = "1 to 8 accounts";
           patch.profiles = [ ];
         }
+        # Each reported as a state problem, not a raw evaluation error.
         {
-          msg = "unknown box feature(s) in requirements: opengl";
-          patch.requirements = [ "opengl" ];
+          msg = "settings.admin.user deploy is reserved";
+          patch.settings.admin.user = "deploy";
         }
         {
-          msg = "unknown service id(s): youtube";
-          patch.services = [ "youtube" ];
+          msg = "settings.admin.user hinteros-p2 is reserved";
+          patch.settings.admin.user = "hinteros-p2";
+        }
+        {
+          msg = "settings.admin.user must be 1 to 32 lowercase letters";
+          patch.settings.admin.user = "Bad Name";
+        }
+        {
+          msg = "settings.admin.user must be 1 to 32 lowercase letters";
+          patch.settings.admin.user = 5;
+        }
+        {
+          msg = "settings.ssh must be an object";
+          patch.settings.ssh = true;
+        }
+        {
+          msg = "settings.ssh.enable must be a bool";
+          patch.settings.ssh.enable = "yes";
+        }
+        {
+          msg = "settings must be an object";
+          patch.settings = [ ];
+        }
+        {
+          msg = "requirements must be strings";
+          patch.requirements = [ 1 ];
+        }
+        {
+          msg = "services must be strings";
+          patch.services = [ { id = "x"; } ];
+        }
+        {
+          msg = "settings.hostname must be 1 to 63 lowercase letters";
+          patch.settings.hostname = "Living Room";
         }
       ];
-      expected = lib.genList (_: true) 6;
+      expected = lib.genList (_: true) 14;
     };
+    # Ids a later release may add: left out with a warning (a box on an older channel evaluates
+    # the newer state.json), not refused.
+    testUnknownIdsWarn =
+      let
+        newer = good2 // {
+          requirements = [
+            "graphics32"
+            "opengl"
+          ];
+          services = [ "youtube" ];
+        };
+        cfg = (mk newer).config;
+      in
+      {
+        expr = [
+          (failures newer)
+          (lib.any (lib.hasInfix "unknown box feature(s) in requirements, left out: opengl") cfg.warnings)
+          (lib.any (lib.hasInfix "unknown service id(s), left out: youtube") cfg.warnings)
+          (lib.elem "opengl" cfg.hinteros.boxFeatures)
+          (lib.elem "youtube" cfg.hinteros.catalog.services)
+        ];
+        expected = [
+          ""
+          true
+          true
+          false
+          false
+        ];
+      };
     testRequiredFields = {
       expr = map (f: lib.hasInfix "${f} must be" (failures (removeAttrs good2 [ f ]))) [
         "base"

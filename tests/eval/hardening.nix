@@ -72,6 +72,24 @@ let
       expr = failed (mk [ { users.groups.wheel.members = [ "hinteros-p1" ]; } ]);
       expected = true;
     };
+    # Profile groups are an allowlist: disk, kvm, tty ... fail, even in dev.
+    testProfileGroupAllowlist = {
+      expr = [
+        (failed (mk [ { users.users.hinteros-p1.extraGroups = [ "disk" ]; } ]))
+        (failed (mk [ { users.groups.kvm.members = [ "hinteros-p1" ]; } ]))
+        (failed (mk [
+          { hinteros.dev.enable = true; }
+          { users.users.hinteros-p1.extraGroups = [ "tty" ]; }
+        ]))
+        (failed (mk [ { users.users.bob.extraGroups = [ "disk" ]; } ]))
+      ];
+      expected = [
+        true
+        true
+        true
+        false
+      ];
+    };
     testOtherWheelMemberFails = {
       expr = failed (mk [
         {
@@ -335,6 +353,41 @@ let
           ];
       expected = true;
     };
+    # Nothing else may open the port to all sources: openFirewall, or the port in allowed ports.
+    testSshOpenToAllFails = {
+      expr = map failed [
+        (mkS sshState [
+          adminOn
+          { services.openssh.openFirewall = true; }
+        ])
+        (mkS sshState [
+          adminOn
+          {
+            networking.firewall.allowedTCPPortRanges = [
+              {
+                from = 20;
+                to = 30;
+              }
+            ];
+          }
+        ])
+        (mkS sshState [
+          adminOn
+          { networking.firewall.allowedTCPPorts = [ 8096 ]; }
+        ])
+        # One interface (tailscale0 with a server) is that interface's choice.
+        (mkS sshState [
+          adminOn
+          { networking.firewall.interfaces.tailscale0.allowedTCPPorts = [ 22 ]; }
+        ])
+      ];
+      expected = [
+        true
+        true
+        false
+        false
+      ];
+    };
     testSshFirewallIptablesRule = {
       expr =
         lib.hasInfix
@@ -392,6 +445,10 @@ let
         (lib.sort (a: b: a < b) (
           lib.attrNames (lib.filterAttrs (_: w: w.enable) (mk [ adminOn ]).security.wrappers)
         ))
+        # With the admin, users are immutable: hashedPasswordFile applies at every activation (no
+        # `passwd` wrapper either).
+        (mk [ adminOn ]).users.mutableUsers
+        c.users.mutableUsers
       ];
       expected = [
         false
@@ -403,12 +460,13 @@ let
         true
         [
           "mount"
-          "passwd"
           "sudo"
           "sudoedit"
           "umount"
           "unix_chkpwd"
         ]
+        false
+        true
       ];
     };
     testSshOffByDefault = {

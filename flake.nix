@@ -93,13 +93,13 @@
 
       lib = {
         # The catalog's ids with the little the update check needs to say which apps a new
-        # revision adds or retires: `{ <id> = { name; kind; status; statusReason; }; }`.
-        # hinteros-system evaluates it against a target revision (`nix eval --json --option
-        # allow-import-from-derivation false "<input url>&rev=<rev>#lib.catalogIds"`), so it must
-        # stay a plain attribute set that needs no build.
-        catalogIds = nixpkgs.lib.mapAttrs (_: e: {
-          inherit (e) name status statusReason;
-        }) hinteros-catalog.catalog;
+        # revision adds or retires: `{ <id> = { name; kind; status; statusReason; }; }` (the
+        # catalog's own output). hinteros-system evaluates it against a target revision (`nix eval
+        # --json --option allow-import-from-derivation false "<input url>&rev=<rev>#lib.catalogIds"`),
+        # so it must stay a plain attribute set that needs no build. After 1.0 a 1.0 daemon reads it
+        # from every later revision: keep these fields, only add new ones (readers ignore unknown
+        # fields and treat an unknown `kind` as not an app).
+        inherit (hinteros-catalog.lib) catalogIds;
 
         # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
         mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
