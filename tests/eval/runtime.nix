@@ -210,6 +210,22 @@ let
         "oneshot"
       ];
     };
+    # The deferred-report release never pulls network-online into the boot (wait-online at every
+    # boot, also with no marker).
+    testFacterReleaseNoWaitOnline = {
+      expr =
+        let
+          s = c.systemd.services.hinteros-facter-release;
+        in
+        [
+          (lib.elem "network-online.target" s.wants)
+          (lib.elem "network-online.target" s.after)
+        ];
+      expected = [
+        false
+        false
+      ];
+    };
     testSyncCanBeDisabled = {
       expr = (mk [ { hinteros.deviceConfig.enable = false; } ]).systemd.services ? hinteros-config-sync;
       expected = false;
