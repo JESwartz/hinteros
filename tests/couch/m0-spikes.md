@@ -20,7 +20,7 @@ spike 4 (InputPlumber) and spike 5 (on-screen keyboard). Background: `hinteros-d
    `ssh deploy@<box> sudo nixos-rebuild switch --rollback` or pick the previous generation at boot.
 4. Debug env for the launcher: `hinteros.session.environment.HINTEROS_FPS = "1";` in
    `devices/devbox/hardware.nix` (frame-rate overlay) and redeploy, or for one run
-   `ssh` in and start the session by hand. `GDK_BACKEND=wayland` is already the default on gamescope.
+   `ssh` in and start the session by hand. The session sets `GDK_BACKEND=x11` under gamescope (see `nixos/README.md`).
 5. The session daemon starts Steam with `-silent` (`steam.autostart` in `devices/devbox/hardware.nix`; never under a reaper). Log in to Steam once (pad-driven terminal or Remote Play) and install 2 small games (one native, one Proton). Daemon log: `journalctl --user -u hinteros-session` as the session user; its config is the store path in the unit's `ExecStart` (`--config`).
 
 ## 1. Spike 1: launcher under gamescope (HINTEROS_FPS=1)
