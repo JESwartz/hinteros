@@ -171,8 +171,8 @@ echo none >"$work/ci"
 expect_refused "use --skip-ci" beta --bootstrap --key "$work/k1" --security none
 pass "no CI statuses: refused, pointing at --skip-ci"
 echo pending >"$work/ci"
-expect_refused "CI is 'pending'" beta --bootstrap --key "$work/k1" --security none
-pass "pending CI: refused"
+expect_refused "CI is still running" beta --bootstrap --key "$work/k1" --security none
+pass "pending CI (still running): refused, no skip offered"
 echo failure >"$work/ci"
 expect_refused "CI is 'failure'" beta --bootstrap --key "$work/k1" --security none
 pass "red CI: refused"

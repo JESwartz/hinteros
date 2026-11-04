@@ -59,7 +59,7 @@ options: --dry-run  --skip-ci  --key <path>  --yes
                stable: keep (default: the beta release's version), patch, minor or major
   --version    beta and stable: the new version (MAJOR.MINOR.PATCH)
   --dry-run    do all steps, but do not sign or push
-  --skip-ci    do not require a CI result (use until the CI runner exists)
+  --skip-ci    do not require a CI result (after the checks by hand)
   --key        the signing key file (default: $HINTEROS_RELEASE_KEY or ~/.ssh/hinteros/release_ed25519)
   --security   none, low, medium, high or critical (if not given, the script asks)
   --bootstrap  the first beta release (the beta branch does not exist)
@@ -557,15 +557,14 @@ ci_check() {
   total=$(jq -r '.total_count // 0' <<<"$json")
   state=$(jq -r '.state // ""' <<<"$json")
   if [ "$total" = 0 ]; then
-    ci_skip_or_fail "$sha" "no CI result for ${sha:0:12}. There is no CI runner. Test by hand and use --skip-ci."
+    ci_skip_or_fail "$sha" "no CI result for ${sha:0:12}: no CI job ran for it. Test by hand and use --skip-ci."
     return 0
   fi
   jq -r '.statuses[] | "  [ci]   \(.context): \(.status)\(if .description then " (\(.description))" else "" end)"' <<<"$json"
   case "$state" in
     success) ok "all $total CI statuses are success" ;;
-    pending)
-      ci_skip_or_fail "$sha" "CI is 'pending'. No runner started the job. Use --skip-ci until the runner exists."
-      ;;
+    # The job is queued or still running (the full check takes hours): no result to go on.
+    pending) fail "CI is still running for ${sha:0:12} (or waits for a runner). Wait for the result, then start again." ;;
     *) fail "CI is '$state'. It must be 'success'." ;;
   esac
 }
@@ -573,26 +572,21 @@ ci_check() {
 ci_skipped() {
   warn "************************************************************************"
   warn "NO CI CHECK: nothing tested ${1:0:12}."
-  warn "Do the checks by hand before you release (TESTING.md)."
-  warn "Stop this when the Forgejo runner exists."
+  warn "Do the checks by hand before you release (scripts/test-plan.sh full --run)."
   warn "************************************************************************"
 }
 
-# No CI result (no runner yet): the menus ask whether to go on without it; otherwise refused.
+# No CI result: the menus ask whether to go on without it, for this commit only; otherwise refused.
 ci_skip_or_fail() {
   local sha=$1 why=$2 ans
   [ "$interactive" = 1 ] || fail "$why"
   warn "$why"
-  read -r -p "  Continue without CI? You must do the checks by hand (TESTING.md). [y/N] " ans || ans=
+  read -r -p "  Continue without CI for ${sha:0:12}? Do the checks by hand first (scripts/test-plan.sh full --run). [y/N] " ans || ans=
   case "$ans" in
-    y | Y | yes)
-      skip_ci=1
-      ci_skipped "$sha"
-      ;;
+    y | Y | yes) ci_skipped "$sha" ;;
     *) fail "no CI result for ${sha:0:12}" ;;
   esac
 }
-
 sev_rank() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     "" | no | none) echo 0 ;;
@@ -1060,7 +1054,7 @@ promote_stable() {
   fi
   verify "$target" "$tmp/beta.signers"
 
-  ci_check "$target" "the beta release (both bases)"
+  ci_check "$target" "the beta release"
 
   step "Changes since the last stable release"
   if [ -n "$stable_tip" ]; then
@@ -1183,7 +1177,7 @@ promote_hotfix() {
 
   local_check "$hotfix_branch" "$target"
 
-  ci_check "$target" "the hotfix (both bases)"
+  ci_check "$target" "the hotfix"
 
   step "Changes"
   list_changes "$stable_tip..$target"

@@ -60,7 +60,7 @@ signed; the owner promotes them:
 |---|---|
 | `release/version`, `release/notes.md` | The release's version (`MAJOR.MINOR.PATCH`) and the release notes, newest first, with what changed since the last stable release under `## Unreleased` on top (the release commit's message). On `main` the version is the latest stable release's (merged back from `stable`); each beta and stable release commit writes its own. Nobody changes the version by hand: `promote` does |
 | `release/allowed_signers`, `release/cache-keys` | Release signing keys and binary cache keys every generation trusts (`nixos/modules/release.nix`). Release key fingerprint: `SHA256:NuERttXtUYjtSTqt7kHUqs7TW6rWSHjHOIUlOOADpCE` (ED25519, `hinteros-release`) |
-| `nix run .#promote` | **The way to release.** Shows where `main`, `beta` and `stable` are and asks, with numbered menus: what to release where (main → beta, beta → stable, a hotfix branch → stable), which commit, the security severity, the version, and whether to edit the release notes (in `$EDITOR`). It always shows the finished commit for review and asks before signing and pushing. Takes only `--dry-run`, `--skip-ci` and `--key`; without a CI runner it asks whether to go on without CI. The rows below are the same steps with flags instead of questions, for scripts |
+| `nix run .#promote` | **The way to release.** Shows where `main`, `beta` and `stable` are and asks, with numbered menus: what to release where (main → beta, beta → stable, a hotfix branch → stable), which commit, the security severity, the version, and whether to edit the release notes (in `$EDITOR`). It always shows the finished commit for review and asks before signing and pushing. Takes only `--dry-run`, `--skip-ci` and `--key`; for a commit with no CI status at all it asks whether to go on without CI for that commit. The rows below are the same steps with flags instead of questions, for scripts |
 | `nix run .#promote -- beta [--rev <main commit>]` | A signed release commit with the tree of the `main` commit, parents `beta` and `main`, verified against the current beta's signers, pushed as a fast-forward. Only `release/version` differs from the tree: the next patch after the current beta and stable, whichever is higher (0.7.1, 0.7.2, 0.7.3 on top of 0.7.0; `--bump minor`, `--bump major` or `--version <v>` for another, the menu asks with the next patch as default). A box shows the version and the commit: `0.7.2.<commit> beta`. The very first one needs `--bootstrap` |
 | `nix run .#promote -- stable [--rev <beta release>]` | Shows the changes since the last stable release and asks for the version: the beta release's own by default (beta 0.7.3 → 0.7.3 stable; patch, minor, major after the newest beta, or typed; `--bump <b>` or `--version <v>` without asking), then signs a commit on top of the beta release that only writes it to `release/version` and names the notes section, after the dogfood confirmation (`--expedite` for high/critical security releases). A box shows `0.8.0 stable`. Then merge `stable` into `main` |
 | `nix run .#promote -- hotfix hotfix/<name>` | A signed commit with the hotfix branch's tree on top of `stable`, as the next patch after the current stable and beta, so that no beta number is taken twice (stable 0.7.1, beta 0.7.3: hotfix 0.7.4; the branch leaves `release/version` alone and adds an `## Unreleased` notes section; `Security:` severity required); then merge `stable` into `main` |
@@ -77,9 +77,11 @@ with the input's commits in between when a clone of it is next to this checkout
 that clone is a warning). `promote` works on a temporary clone of `origin`, prints every check, signs with
 `~/.ssh/hinteros/release_ed25519` (or `--key`, `$HINTEROS_RELEASE_KEY`) without ssh-agent, so
 the passphrase is asked each time, and never force-pushes. `--dry-run` does everything except
-signing and pushing. Until the Forgejo runner exists there are no green CI statuses to check:
-pass `--skip-ci` (it warns) after running the checks by hand. The signed `v<version>` tag with
-the ISO checksums is not automated yet.
+signing and pushing. The commit it releases needs a green CI status (Forgejo's combined status, from
+`.forgejo/workflows/check.yml`): a pending one (the check still runs, or waits for a runner) stops
+it; with no status at all the menus ask whether to go on for that commit only. `--skip-ci` (it
+warns) skips the check, after the checks by hand (`scripts/test-plan.sh full --run`). The signed
+`v<version>` tag with the ISO checksums is not automated yet.
 
 ## Installer
 
