@@ -97,6 +97,30 @@ let
   ];
 
   results = lib.runTests {
+    # The fake Steam is for test VMs only (no state.json), never for a real device.
+    testFakeSteamNotOnDevices =
+      let
+        fakeFails =
+          state:
+          lib.any (a: !a.assertion && lib.hasPrefix "hinteros.fakeSteam" a.message)
+            (self.lib.mkDevice {
+              inherit state;
+              extraModules = [
+                { hinteros.fakeSteam.enable = true; }
+              ]
+              ++ lib.optional (state == null) { system.stateVersion = "25.11"; };
+            }).config.assertions;
+      in
+      {
+        expr = map fakeFails [
+          good
+          null
+        ];
+        expected = [
+          true
+          false
+        ];
+      };
     testSchema2Good = {
       expr = failures good2;
       expected = "";
