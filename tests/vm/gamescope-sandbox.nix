@@ -12,8 +12,8 @@
 # app's id nor global state, and neither do the window's set before it is mapped (an app on #3:
 # its own id, not the STEAM_GAME it claims; overlay properties do not make it an overlay); the
 # same mode control on #0 still works. CLIPBOARD and PRIMARY go from #0 to #1 but never to or
-# from an app display, not even through a SelectionNotify sent to gamescope (and on #0 only the
-# answer to gamescope's own request counts). A second app lands on #3
+# from an app display, not even through a SelectionNotify sent to gamescope (on #0 only a
+# SelectionNotify for gamescope's own window counts). A second app lands on #3
 # and cannot reach #2 either. With every app
 # display in use, apps.launch answers no_app_display; closing an app frees its display. A fake
 # Steam game lands on no app display. The number of app displays follows the profile's setting
