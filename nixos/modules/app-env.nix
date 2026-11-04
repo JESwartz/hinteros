@@ -59,19 +59,25 @@ let
     else
       e;
 
-  build =
-    ids0:
+  # Tombstones are dropped (the update's apps stage removes them from every env).
+  selectionOf =
+    ids0: lib.filter (e: e.status != "removed") (map entryOf (lib.sort lib.lessThan (lib.unique ids0)));
+  unfreeOf =
+    sel: lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.license.unfreePackages) sel));
+
+  # An env, with `pkgsFor unfree` as its nixpkgs (envPkgsFor, or buildAll's shared instances).
+  buildWith =
+    pkgsFor: ids0:
     let
-      # Tombstones are dropped (the update's apps stage removes them from every env).
-      sel = lib.filter (e: e.status != "removed") (map entryOf (lib.sort lib.lessThan (lib.unique ids0)));
+      sel = selectionOf ids0;
       ids = map (e: e.id) sel;
-      unfree = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.license.unfreePackages) sel));
+      unfree = unfreeOf sel;
       forbidden = lib.subtractLists config.hinteros.unfreeExceptions unfree;
       p =
         if config.hinteros.forbidUnfree && forbidden != [ ] then
           throw "hinteros.appEnv.build: hinteros.forbidUnfree is set but the env needs unfree packages: ${lib.concatStringsSep ", " forbidden}"
         else
-          envPkgsFor unfree;
+          pkgsFor unfree;
       # The box's inputs to apps (catalog.md, format 3). Steam is stock pkgs.steam (spike 8) with
       # our sockets hidden (lib/steam.nix); its drivers come from /run/opengl-driver(-32) at run time.
       box = {
@@ -141,6 +147,21 @@ let
       ];
       passthru = { inherit ids manifest; };
     };
+
+  build = buildWith envPkgsFor;
+
+  # Every owner's env, with one nixpkgs instance per distinct unfree set: an instance is a full
+  # evaluation of nixpkgs, and owners often need the same set (each with steam, say).
+  buildAll =
+    owners:
+    let
+      key = lib.concatStringsSep " ";
+      sets = lib.mapAttrs (_: ids0: unfreeOf (selectionOf ids0)) owners;
+      shared = lib.listToAttrs (
+        map (u: lib.nameValuePair (key u) (envPkgsFor u)) (lib.unique (lib.attrValues sets))
+      );
+    in
+    lib.mapAttrs (_: buildWith (u: shared.${key u})) owners;
 in
 {
   options.hinteros.appEnv = {
@@ -154,7 +175,7 @@ in
     buildAll = lib.mkOption {
       type = lib.types.raw;
       readOnly = true;
-      default = lib.mapAttrs (_: build);
+      default = buildAll;
       description = "`{ <owner> = [ ids ]; }` -> `{ <owner> = env; }`: every owner's env in one evaluation (the update's apps stage).";
     };
 
