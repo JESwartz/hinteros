@@ -99,7 +99,15 @@
         # so it must stay a plain attribute set that needs no build. After 1.0 a 1.0 daemon reads it
         # from every later revision: keep these fields, only add new ones (readers ignore unknown
         # fields and treat an unknown `kind` as not an app).
-        inherit (hinteros-catalog.lib) catalogIds;
+        # Derived here from the catalog's entries (the catalog flake keeps no views of its own).
+        catalogIds = nixpkgs.lib.mapAttrs (_: e: {
+          inherit (e)
+            name
+            kind
+            status
+            statusReason
+            ;
+        }) hinteros-catalog.catalog;
 
         # What the installer reads from a newer revision it installs (hinteros-install, a plan's
         # `rev`): per catalog entry the id, whether the installer offers it, its box features and
