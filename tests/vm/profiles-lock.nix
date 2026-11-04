@@ -79,6 +79,18 @@ profiles.mkTest {
     def fake_sleep_signal():
         # Anyone on the system bus can emit a signal of that name; not from logind, it is ignored.
         machine.succeed("busctl emit /org/freedesktop/login1 org.freedesktop.login1.Manager PrepareForSleep b true")
+        # A unicast signal gets past the bus's sender match: send one to each connection of
+        # the session daemon too.
+        conns = [
+            l.split()[0]
+            for l in machine.succeed("busctl list --unique --no-legend --no-pager").splitlines()
+            if "hinteros-p2" in l.split()
+        ]
+        assert conns, machine.succeed("busctl list --unique --no-pager")
+        for c in conns:
+            machine.succeed(
+                f"busctl emit --destination={c} /org/freedesktop/login1 org.freedesktop.login1.Manager PrepareForSleep b true"
+            )
 
     def inhibitor_of(user):
         out = machine.succeed("systemd-inhibit --list --no-legend --no-pager || true")
