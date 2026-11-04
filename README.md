@@ -52,8 +52,10 @@ one consistent system.
 Boxes follow the `stable` or `beta` branch of this repo and only install a tip that is signed by
 a key listed in `release/allowed_signers` of the generation they are running (design:
 `distribution.md` in the docs). Versions are semver; 1.0 is the first public release (0.x were
-internal pre-releases) and ships on the `unstable` nixpkgs base only. Commits on `main` are not
-signed; the owner promotes them:
+internal pre-releases) and ships on the `unstable` nixpkgs base only. `release/version` is still
+0.7.0, so the first 1.0 beta needs `promote -- beta --version 1.0.0` (the default is the next
+patch); the daemon and the launcher are 1.0.0 already. Commits on `main` are not signed; the owner
+promotes them:
 
 | Path or command | What it is |
 |---|---|
