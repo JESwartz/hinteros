@@ -178,6 +178,12 @@ pkgs.runCommand "hinteros-state-check"
     grep -q '"code":"channel-needs-rev"' stable.log || { cat stable.log; exit 1; }
     jq 'del(.channel)' stable.json > beta.json
     ${lib.getExe' betaInstaller "hinteros-install"} --plan beta.json --state-dir states-beta > beta.log || { cat beta.log; exit 1; }
+    # A keepData plan takes no `rev`: the message names a stable installer instead.
+    jq '.channel = "stable"' keep.json > keep-stable.json
+    rc=0
+    ${lib.getExe' betaInstaller "hinteros-install"} --plan keep-stable.json --state-dir states-beta > keep-stable.log || rc=$?
+    test "$rc" = 2 || { cat keep-stable.log; echo "keepData stable plan on a beta installer: exit $rc, not 2" >&2; exit 1; }
+    grep -q 'stable installer.*"code":"channel-needs-rev"' keep-stable.log || { cat keep-stable.log; exit 1; }
     rm -r states-beta
 
     find states -name state.json | sort

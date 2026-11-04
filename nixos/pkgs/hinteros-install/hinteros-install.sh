@@ -775,9 +775,11 @@ install_version=$ISO_VERSION
 # updates within a channel are fast-forward only). So a stable plan on a beta installer needs
 # `rev`, the stable tip, which is checked below to follow this revision. A stable installer on beta
 # is fine: every beta release contains the stable releases (promote beta checks it). Run again once
-# a keepData plan has the channel of the install.
+# a keepData plan has the channel of the install (it takes no `rev`: a stable installer repairs it).
 check_channel_rev() {
   if [ "$newer" -eq 0 ] && [ "$channel" = stable ] && [ "$DEFAULT_CHANNEL" = beta ]; then
+    [ "$keep_data" != true ] \
+      || fail 2 channel-needs-rev "This installer has a beta version. To repair this stable install, use a stable installer. Or select the beta channel."
     fail 2 channel-needs-rev "This installer has a beta version. For the stable channel, install the newest stable version (internet connection necessary). Or select the beta channel."
   fi
 }
