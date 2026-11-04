@@ -31,10 +31,38 @@ let
   # be added without breaking old states.
   diskLayout = "gpt-esp-btrfs";
 
-  settings = state.settings or { };
-  ssh = settings.ssh or { };
-  admin = settings.admin or null;
-  guest = settings.guest or { };
+  # An object field of the wrong type is reported below and read as absent here.
+  objectOr = d: v: if builtins.isAttrs v then v else d;
+  settings = objectOr { } (state.settings or { });
+  ssh = objectOr { } (settings.ssh or { });
+  admin = objectOr null (settings.admin or null);
+  guest = objectOr { } (settings.guest or { });
+  notObject = v: v != null && !builtins.isAttrs v;
+  # The admin account: the installer's rules (hinteros-install, admin.user).
+  adminUser = admin.user or null;
+  adminUserOk =
+    builtins.isString adminUser && builtins.match "[a-z_][a-z0-9_-]{0,31}" adminUser != null;
+  adminUserReserved =
+    adminUserOk
+    && (
+      lib.elem adminUser [
+        "root"
+        "hinteros"
+        "hinteros-guest"
+        "hinteros-greeter"
+        "hinteros-kbd"
+        "nobody"
+        "deploy"
+        "sshd"
+        "daemon"
+        "nixbld"
+      ]
+      || builtins.match "(systemd-|nixbld|hinteros-p[0-9]).*" adminUser != null
+    );
+  # The installer's rule; NixOS takes no dots in networking.hostName either.
+  hostname = settings.hostname or null;
+  hostnameOk =
+    builtins.isString hostname && builtins.match "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" hostname != null;
   # The automatic clean-up (storage.md). Absent fields: today's policy (maintenance.nix defaults).
   cleanup = settings.cleanup or { };
   cleanupFrequencies = [
@@ -62,8 +90,10 @@ let
   # A bad value is reported below; the disk options still need a string.
   diskUuid = v: if builtins.isString v then v else "invalid";
   profiles = listOr (state.profiles or null);
-  requirements = listOr (state.requirements or null);
-  services = listOr (state.services or null);
+  # Elements that are not strings are reported below and left out here.
+  requirements = lib.filter builtins.isString (listOr (state.requirements or null));
+  services = lib.filter builtins.isString (listOr (state.services or null));
+  allStrings = v: lib.all builtins.isString (listOr v);
   unknownFeatures = lib.filter (f: !(lib.elem f cfg.knownBoxFeatures)) requirements;
   unknownServices = lib.filter (s: !(lib.elem s serviceIds)) services;
 
@@ -86,9 +116,27 @@ let
     ++ lib.optional (!builtins.isString (state.stateVersion or null)) "stateVersion must be a string"
     ++ lib.optional (!builtins.isList (state.requirements or null)) "requirements must be a list"
     ++ lib.optional (!builtins.isList (state.services or null)) "services must be a list"
+    ++ lib.optional (!allStrings (state.requirements or null)) "requirements must be strings"
+    ++ lib.optional (!allStrings (state.services or null)) "services must be strings"
+    ++ lib.concatMap (n: lib.optional (notObject (state.${n} or null)) "${n} must be an object") [
+      "settings"
+      "disk"
+    ]
+    ++
+      lib.concatMap
+        (n: lib.optional (notObject (settings.${n} or null)) "settings.${n} must be an object")
+        [
+          "ssh"
+          "admin"
+          "guest"
+        ]
+    ++ lib.optional (ssh ? enable && !builtins.isBool ssh.enable) "settings.ssh.enable must be a bool"
     ++ lib.optional (
       guest ? enable && !builtins.isBool guest.enable
     ) "settings.guest.enable must be a bool"
+    ++
+      lib.optional (hostname != null && !hostnameOk)
+        "settings.hostname must be 1 to 63 lowercase letters, digits or hyphens, not starting or ending with a hyphen, not ${builtins.toJSON hostname}"
     ++ (
       if builtins.isAttrs cleanup then
         lib.optional (!cleanupOk.enable) "settings.cleanup.enable must be a bool"
@@ -108,6 +156,10 @@ let
       lib.optional (timeZone != null && !tz.wellFormed timeZone)
         "settings.timeZone must be a time zone name of tzdata (e.g. \"Europe/Berlin\" or \"UTC\"), not ${builtins.toJSON timeZone}"
     ++ lib.optional (admin != null && !(admin ? user)) "settings.admin needs a user"
+    ++
+      lib.optional (admin ? user && !adminUserOk)
+        "settings.admin.user must be 1 to 32 lowercase letters, digits, - or _, starting with a letter or _, not ${builtins.toJSON adminUser}"
+    ++ lib.optional adminUserReserved "settings.admin.user ${adminUser} is reserved"
     ++
       lib.optional (disk != null && (disk.layout or null) != diskLayout)
         "unsupported disk.layout ${builtins.toJSON (disk.layout or null)} (supported: ${diskLayout})"
@@ -145,7 +197,9 @@ let
       tz.wellFormed timeZone && !tz.ok timeZone
     ) "unknown settings.timeZone ${builtins.toJSON timeZone} (not in this tzdata), using UTC";
 
-  sshEnable = ssh.enable or false;
+  # A bad value is reported above and read as absent here.
+  boolOr = d: v: if builtins.isBool v then v else d;
+  sshEnable = boolOr false (ssh.enable or false);
 in
 {
   imports = [
@@ -171,7 +225,7 @@ in
         hinteros = {
           # The accounts (profiles.nix makes one Unix user each).
           profiles.accounts = accounts;
-          profiles.guest.enable = guest.enable or true;
+          profiles.guest.enable = boolOr true (guest.enable or true);
 
           # sshd on/off. Opt-in; the admin account is the only login (see hardening.nix).
           ssh.enable = sshEnable;
@@ -199,11 +253,12 @@ in
       })
 
       (lib.mkIf (state ? stateVersion) { system.stateVersion = state.stateVersion; })
-      (lib.mkIf (settings ? hostname) { networking.hostName = lib.mkDefault settings.hostname; })
+      (lib.mkIf hostnameOk { networking.hostName = lib.mkDefault hostname; })
 
       # The admin account (hardening.nix). Its password hash is a root-only file written by the
       # installer (and later the first-boot wizard); it is never part of state.json or the store.
-      (lib.mkIf (admin != null) {
+      # (A bad user name is reported above; no account is made from it.)
+      (lib.mkIf (adminUserOk && !adminUserReserved) {
         hinteros.admin = {
           enable = true;
           inherit (admin) user;

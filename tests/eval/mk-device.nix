@@ -122,8 +122,49 @@ let
           msg = "1 to 8 accounts";
           patch.profiles = [ ];
         }
+        # Each reported as a state problem, not a raw evaluation error.
+        {
+          msg = "settings.admin.user deploy is reserved";
+          patch.settings.admin.user = "deploy";
+        }
+        {
+          msg = "settings.admin.user hinteros-p2 is reserved";
+          patch.settings.admin.user = "hinteros-p2";
+        }
+        {
+          msg = "settings.admin.user must be 1 to 32 lowercase letters";
+          patch.settings.admin.user = "Bad Name";
+        }
+        {
+          msg = "settings.admin.user must be 1 to 32 lowercase letters";
+          patch.settings.admin.user = 5;
+        }
+        {
+          msg = "settings.ssh must be an object";
+          patch.settings.ssh = true;
+        }
+        {
+          msg = "settings.ssh.enable must be a bool";
+          patch.settings.ssh.enable = "yes";
+        }
+        {
+          msg = "settings must be an object";
+          patch.settings = [ ];
+        }
+        {
+          msg = "requirements must be strings";
+          patch.requirements = [ 1 ];
+        }
+        {
+          msg = "services must be strings";
+          patch.services = [ { id = "x"; } ];
+        }
+        {
+          msg = "settings.hostname must be 1 to 63 lowercase letters";
+          patch.settings.hostname = "Living Room";
+        }
       ];
-      expected = lib.genList (_: true) 4;
+      expected = lib.genList (_: true) 14;
     };
     # Ids a later release may add: left out with a warning (a box on an older channel evaluates
     # the newer state.json), not refused.
