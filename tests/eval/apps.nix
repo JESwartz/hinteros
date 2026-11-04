@@ -799,6 +799,7 @@ let
             "xwayland-size-all.patch"
             "xwayland-apps-no-input-emulation.patch"
             "xwayland-apps-no-control.patch"
+            "xwayland-apps-no-selection.patch"
           ]
         )
       ];

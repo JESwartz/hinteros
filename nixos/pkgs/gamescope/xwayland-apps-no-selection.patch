@@ -1,0 +1,43 @@
+diff -ru c/src/steamcompmgr.cpp d/src/steamcompmgr.cpp
+--- c/src/steamcompmgr.cpp
++++ d/src/steamcompmgr.cpp
+@@ -6644,7 +6644,9 @@
+ 	{
+ 		xwayland_ctx_t *ctx = server->ctx.get();
+ 
+-		if (ctx)
++		// HinterOS: never on an app display (#2 and later): what the home app, the OSK, Steam or
++		// another app display copied is not for the apps there.
++		if (ctx && !xwayland_ctx_is_apps(ctx))
+ 			x11_set_selection_owner(ctx, contents, eSelection);
+ 	}
+ }
+@@ -6675,6 +6677,15 @@
+ 	response.xselection.property = None;
+ 	response.xselection.target = None;
+ 
++	// HinterOS: gamescope holds no selection on an app display; refuse, never answer with the
++	// text of another display.
++	if ( xwayland_ctx_is_apps( ctx ) )
++	{
++		XSendEvent(ctx->dpy, ev->requestor, False, NoEventMask, &response);
++		XFlush(ctx->dpy);
++		return;
++	}
++
+ 	if (ev->requestor == ctx->ourWindow)
+ 	{
+ 		return;
+@@ -8649,6 +8660,12 @@
+ 	{
+ 		return;
+ 	}
++
++	// HinterOS: what an app on an app display copies stays on that display.
++	if ( xwayland_ctx_is_apps( ctx ) )
++	{
++		return;
++	}
+ 
+ 	XConvertSelection(ctx->dpy, event->selection, ctx->atoms.utf8StringAtom, event->selection, ctx->ourWindow, CurrentTime);
+ 	XFlush(ctx->dpy);
