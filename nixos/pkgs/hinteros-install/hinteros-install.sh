@@ -419,7 +419,7 @@ read_install_at() {
       ex_refuse keep-state-unreadable "the state.json on $d has no valid schemaVersion"
       ;;
     schema)
-      ex_refuse keep-schema-newer "the install on $d is newer than this installer (state.json schema $(jq -r .schemaVersion <<<"$state"), this installer knows $SCHEMA_VERSION); use a newer installer"
+      ex_refuse keep-schema-newer "The install on $d is newer than this installer (state.json schema $(jq -r .schemaVersion <<<"$state") > $SCHEMA_VERSION). Use a newer installer"
       ;;
     layout)
       ex_refuse keep-layout "the install on $d has another disk layout, not $DISK_LAYOUT"
@@ -816,7 +816,7 @@ fi
 # The machine.
 if [ ! -d /sys/firmware/efi ] && [ -z "${HINTEROS_INSTALL_ALLOW_BIOS:-}" ]; then
   # HINTEROS_INSTALL_ALLOW_BIOS is for the VM tests, whose installer VM is not booted via UEFI.
-  fail 2 not-uefi "this machine did not boot in UEFI mode; HinterOS installs on UEFI machines only (check the firmware boot settings)"
+  fail 2 not-uefi "This machine did not start in UEFI mode. Set UEFI boot in the firmware settings."
 fi
 
 exec 9>/run/hinteros-install.lock
@@ -878,7 +878,7 @@ if [ "$network_pref" != offline ]; then
   done
 fi
 if [ "$network_pref" = online ] && [ "$online" -eq 0 ]; then
-  fail 2 no-network "the plan asks for an online install but cache.nixos.org is not reachable"
+  fail 2 no-network "No internet connection. The plan needs an online install."
 fi
 if [ "$online" -eq 1 ]; then
   progress validate 4 "Online install"
@@ -890,7 +890,7 @@ if [ "$online" -eq 0 ] && [ -z "$ONLINE_APPS_HOOK" ] && [ "${#apps[@]}" -gt 0 ];
   offline_bad=$(printf '%s\n' "${apps[@]}" | jq -R . | jq -sc --slurpfile cat "$APPS_JSON" \
     '[.[] | select(. as $a | $cat[0].onIso | index($a) | not)]')
   if [ "$(printf '%s' "$offline_bad" | jq length)" -gt 0 ]; then
-    fail 2 app-needs-network "these apps are not on the installer and need a network connection: $(printf '%s' "$offline_bad" | jq -r 'join(", ")'); connect to a network or deselect them (they can be added later from the Store)"
+    fail 2 app-needs-network "These apps need the internet: $(printf '%s' "$offline_bad" | jq -r 'join(", ")'). Connect to a network or remove them."
   fi
 fi
 
@@ -916,14 +916,15 @@ disk_desc() {
 }
 disk_seq=$(disk_seq_of "$disk_real")
 if [ "$disk_seq" != "$plan_seq" ]; then
-  fail 2 disk-changed "the disk changed: $disk is now disk ${disk_seq:-unknown} ($(disk_desc "$disk_real")), not disk $plan_seq of the plan. Nothing was touched. Select the disk again"
+  echo "disk-changed: $disk is disk ${disk_seq:-unknown} ($(disk_desc "$disk_real")); the plan has disk $plan_seq" >>"$LOG"
+  fail 2 disk-changed "$disk is not the disk in the plan. Nothing was touched. Select the disk again."
 fi
 # Mounted anywhere (the installer medium, an old install)? Leftovers of an earlier run of this
 # script under /mnt are fine; they are unmounted before partitioning. JSON: in raw output lsblk
 # joins the mount points of one device with an escaped newline (\x0a), so they cannot be split.
 in_use=$(lsblk -J -o MOUNTPOINTS "$disk_real" | jq -r '.. | .mountpoints? | arrays | .[] | strings' \
   | { grep -Ev "^$MNT(/|$)" || true; })
-[ -z "$in_use" ] || fail 2 disk-in-use "$disk is in use (mounted at: $(printf '%s' "$in_use" | tr '\n' ' ')); it may be the installer medium"
+[ -z "$in_use" ] || fail 2 disk-in-use "$disk is in use (mounted at: $(printf '%s' "$in_use" | tr '\n' ' ' | sed 's/ $//')). Select another disk."
 disk_bytes=$(blockdev --getsize64 "$disk_real")
 disk_was="disk $disk_seq, $disk_real, $(disk_desc "$disk_real")"
 if [ "$disk_bytes" -lt $((MIN_DISK_GIB * 1024 * 1024 * 1024)) ]; then
@@ -980,7 +981,7 @@ fi
 # UI's word for it is not enough; the channel may also have moved on since it asked).
 if [ "$newer" -eq 1 ]; then
   [ "$online" -eq 1 ] \
-    || fail 2 rev-needs-network "the newer HinterOS ($plan_rev) is not on this installer and needs a network connection; connect to a network or install the version on this installer"
+    || fail 2 rev-needs-network "The newer HinterOS needs an internet connection. Connect to a network or install the version on this installer."
   progress validate 6 "Checking the newer HinterOS on the $channel channel"
   check_channel "$channel" 2
   if [ "$NEWER_REV" != "$plan_rev" ]; then
@@ -1012,7 +1013,8 @@ same_disk() {
   [ -n "$now" ] && [ -b "$now" ] && seq=$(disk_seq_of "$now")
   if [ "$now" != "$disk_real" ] || [ "$seq" != "$disk_seq" ] \
     || [ "$(blockdev --getsize64 "$now" 2>/dev/null || true)" != "$disk_bytes" ]; then
-    fail "$1" disk-changed "the disk changed: $disk was $disk_was; now it is ${seq:+disk $seq, }${now:-not there}. $2. Select the disk again"
+    echo "disk-changed: $disk was $disk_was; now it is ${seq:+disk $seq, }${now:-not there}" >>"$LOG"
+    fail "$1" disk-changed "$disk changed. $2. Select the disk again."
   fi
 }
 
