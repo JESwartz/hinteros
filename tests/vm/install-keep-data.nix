@@ -189,6 +189,20 @@ in
         assert superblock() == before
         installer.fail("findmnt -rn | grep -q vdc")
 
+    with subtest("--list-disks stopped at any point leaves nothing mounted; listings take turns"):
+        # The UI stops a listing that takes too long (SIGTERM), maybe during a mount.
+        for delay in ["0", "0.05", "0.1", "0.2", "0.3", "0.5", "1"]:
+            installer.succeed(
+                f"(hinteros-install --list-disks >/dev/null 2>&1 &); sleep {delay}; "
+                "pkill -TERM -f '[l]ibexec/hinteros-install' || true"
+            )
+            installer.wait_until_fails("pgrep -f '[l]ibexec/hinteros-install'", timeout=60)
+            installer.fail("findmnt -rn | grep -q vdc")
+        # A listing waits for the lock that an install (here: a stand-in) holds.
+        installer.succeed("(flock /run/hinteros-install.lock sleep 4 >/dev/null 2>&1 &); sleep 0.5")
+        took = installer.succeed("s=$(date +%s); hinteros-install --list-disks >/dev/null; echo $(( $(date +%s) - s ))")
+        assert int(took.strip()) >= 2, took
+
     with subtest("refused: an install this installer cannot keep"):
         edit_state(".schemaVersion = 3")
         refused("keep-schema-newer")

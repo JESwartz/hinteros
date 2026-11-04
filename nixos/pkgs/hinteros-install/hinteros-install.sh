@@ -14,7 +14,8 @@
 # settings.ssh.enable (false if absent), `profiles` counts state.json's accounts,
 # `schemaOk` says a keepData plan is accepted on this disk. null: no such install, the disk is in
 # use or it cannot be read. Disks are mounted read-only, one at a time; an unreadable disk never
-# fails the listing.
+# fails the listing. A listing waits (up to 45 s) for another listing or an install to end, and a
+# listing stopped with SIGTERM first undoes the mount it was doing.
 #
 # --info (offline, instant, no root): what this installer carries, as one JSON object,
 #   {"iso":{"rev":...,"version":...},"channel":"stable"}
@@ -183,12 +184,20 @@ SHORT_REV=12 # as update.rs: a tip without a readable release/version is named b
 repo_scheme=${REPO_URL%%://*}
 chk_dir=
 tmp_dirs=()
-probe_mnt= # a disk mounted read-only by read_install
+probe_mnt= # a disk mounted read-only by read_install (set before the mount)
+probe_pid= # that mount, while it runs
 # shellcheck disable=SC2329 # the EXIT trap
 cleanup_tmp() {
-  [ -z "$probe_mnt" ] || umount "$probe_mnt" 2>/dev/null || true
+  # Stopped during the mount: the mount can still finish, so wait for it, then undo it.
+  if [ -n "$probe_pid" ]; then
+    kill "$probe_pid" 2>/dev/null || true
+    wait "$probe_pid" 2>/dev/null || true
+  fi
+  # A lazy unmount detaches at once, so rm never reaches into the disk.
+  [ -z "$probe_mnt" ] || umount "$probe_mnt" 2>/dev/null || umount -l "$probe_mnt" 2>/dev/null || true
   [ "${#tmp_dirs[@]}" -eq 0 ] || rm -rf "${tmp_dirs[@]}"
 }
+# Also on SIGTERM (the UI stops a slow --list-disks): bash runs it before it dies.
 trap cleanup_tmp EXIT
 # Results of check_channel: the tip, and the newer release (empty: none newer).
 TIP_REV=
@@ -414,11 +423,17 @@ read_install() {
   fi
   dir=$(mktemp -d)
   tmp_dirs+=("$dir")
-  if ! timeout -k 5 30 mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 "$EX_ROOT" "$dir" 2>/dev/null; then
+  # In the background, so that if this is stopped during the mount the EXIT trap can wait for
+  # the mount to end and undo it.
+  probe_mnt=$dir
+  timeout -k 5 30 mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 "$EX_ROOT" "$dir" 2>/dev/null &
+  probe_pid=$!
+  if ! wait "$probe_pid"; then
+    probe_pid='' probe_mnt=''
     ex_refuse keep-unreadable "the HinterOS partition on $d cannot be read"
     return 0
   fi
-  probe_mnt=$dir
+  probe_pid=
   read_install_at "$d" "$dir"
   umount "$dir" 2>/dev/null || umount -l "$dir" 2>/dev/null || true
   probe_mnt=
@@ -527,6 +542,12 @@ if [ "$info" -eq 1 ]; then
 elif [ "$list" -eq 1 ]; then
   [ "$check_newer" -eq 0 ] && [ -z "$plan_file" ] && [ "$validate_only" -eq 0 ] \
     && [ -z "$state_dir" ] && [ "$check_ch" = "$DEFAULT_CHANNEL" ] || usage
+  # One at a time with other listings and with an install: each would take a disk the other
+  # mounted for a disk in use. A listing that was stopped may still be undoing its mount (up to
+  # 35 s). Without root there is no lock, and no disk is mounted.
+  if { exec 9>/run/hinteros-install.lock; } 2>/dev/null; then
+    flock -w 45 9 || true
+  fi
   list_disks
   exit 0
 elif [ "$check_newer" -eq 1 ]; then
@@ -775,7 +796,8 @@ if [ ! -d /sys/firmware/efi ] && [ -z "${HINTEROS_INSTALL_ALLOW_BIOS:-}" ]; then
 fi
 
 exec 9>/run/hinteros-install.lock
-flock -n 9 || fail 2 already-running "another hinteros-install is running"
+# Waits for a disk listing (one that was stopped may still be undoing its mount).
+flock -w 45 9 || fail 2 already-running "another hinteros-install is running"
 
 mem_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
 if [ "$mem_kib" -lt $((3 * 1024 * 1024)) ]; then
