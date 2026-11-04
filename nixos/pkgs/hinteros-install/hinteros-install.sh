@@ -1054,22 +1054,20 @@ if [ "$newer" -eq 1 ]; then
   locked=$(jq -r '.nodes[.nodes[.root].inputs.hinteros].locked.rev // ""' "$staged/flake/flake.lock")
   [ "$locked" = "$install_rev" ] \
     || fail 1 fetch-failed "the downloaded HinterOS is locked at '$locked', not $install_rev; nothing was touched"
-  # That revision's catalog, in the shape of the Store index the rest of this script reads.
-  # shellcheck disable=SC2016 # Nix, not shell
-  catalog_apply='es: {
-    entries = map (id: let e = es.${id}; in {
-      inherit id;
-      boxFeatures = e.boxFeatures or [ ];
-      offered = (e.kind or "app") == "app" && e.status == "available" && (e.starter or null) != null;
-      terms = if (e.terms or null) == null then null else { inherit (e.terms) version title; };
-    }) (builtins.attrNames es);
-  }'
-  echo "+ nix eval (the catalog of $install_rev)" >>"$LOG"
-  if ! timeout -k 10 900 nix --extra-experimental-features 'nix-command flakes' eval --json \
-    --option substitute true --no-update-lock-file \
-    "path:$staged/flake#nixosConfigurations.hinteros.config.hinteros.catalog.entries" \
-    --apply "$catalog_apply" >"$staged/catalog.json" 2>>"$LOG" </dev/null; then
-    fail 1 fetch-failed "could not read the app catalog of HinterOS $install_version; nothing was touched; see $LOG"
+  # That revision's catalog for installers (its flake's lib.installerCatalog: id, offered,
+  # boxFeatures, terms per entry), through the lock just made. It is in the shape of the Store index
+  # the rest of this script reads; fields this installer does not know are ignored, and a format it
+  # does not know (`version`) is refused.
+  echo "+ nix eval (lib.installerCatalog of $install_rev)" >>"$LOG"
+  if ! timeout -k 10 900 nix --extra-experimental-features 'nix-command flakes' eval --json --impure \
+    --option substitute true --expr "(builtins.getFlake \"path:$staged/flake\").inputs.hinteros.lib.installerCatalog" \
+    >"$staged/catalog.json" 2>>"$LOG" </dev/null; then
+    fail 1 fetch-failed "Could not read the app list of HinterOS $install_version. Nothing was touched."
+  fi
+  cat_version=$(jq -r '.version' "$staged/catalog.json" 2>>"$LOG" || true)
+  if [ "$cat_version" != 1 ] || ! jq -e '.entries | type == "array"' "$staged/catalog.json" >/dev/null 2>&1; then
+    echo "lib.installerCatalog of $install_rev has version '$cat_version'; this installer reads 1" >>"$LOG"
+    fail 1 fetch-failed "This installer cannot read the app list of HinterOS $install_version. Install the version on this installer."
   fi
   CATALOG_INDEX=$staged/catalog.json
   # Picked apps that revision no longer offers, or whose vendor terms changed since the ones
