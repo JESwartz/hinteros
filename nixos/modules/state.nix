@@ -40,6 +40,8 @@ let
   notObject = v: v != null && !builtins.isAttrs v;
   # The admin account: the installer's rules (hinteros-install, admin.user).
   adminUser = admin.user or null;
+  # The admin password hash (root only; see the admin account below).
+  adminHash = "/var/lib/hinteros-root/admin-password-hash";
   adminUserOk =
     builtins.isString adminUser && builtins.match "[a-z_][a-z0-9_-]{0,31}" adminUser != null;
   adminUserReserved =
@@ -260,12 +262,25 @@ in
 
       # The admin account (hardening.nix). Its password hash is a root-only file written by the
       # installer (and later the first-boot wizard); it is never part of state.json or the store.
+      # It is in /var/lib/hinteros-root, never in hinteros-system's /var/lib/hinteros: that
+      # service is not root, owns its directory and must not be able to replace the hash.
       # (A bad user name is reported above; no account is made from it.)
       (lib.mkIf (adminUserOk && !adminUserReserved) {
         hinteros.admin = {
           enable = true;
           inherit (admin) user;
-          hashedPasswordFile = lib.mkDefault "/var/lib/hinteros/admin-password-hash";
+          hashedPasswordFile = lib.mkDefault adminHash;
+        };
+        # Boxes installed before the move (internal, pre-1.0) have it in /var/lib/hinteros: move
+        # it before the accounts are set, so the admin keeps the password.
+        system.activationScripts = {
+          hinteros-admin-hash.text = ''
+            if [ -e /var/lib/hinteros/admin-password-hash ] && [ ! -e ${adminHash} ]; then
+              install -d -m 0700 /var/lib/hinteros-root
+              mv /var/lib/hinteros/admin-password-hash ${adminHash}
+            fi
+          '';
+          users.deps = [ "hinteros-admin-hash" ];
         };
       })
 

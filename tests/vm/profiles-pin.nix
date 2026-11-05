@@ -160,7 +160,7 @@ profiles.mkTest {
         for _ in range(3):
             assert pam_verify("0000") == "hinteros:wrong"
         assert not {x["id"]: x for x in public()["profiles"]}["p1"]["locked_until"]
-        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p1.tries").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p1.tries").strip() == "600 hinteros-system"
         # The tenth: refused until a reboot, even the right PIN, on every path.
         r = rename_p1("0000")
         assert r["error"]["code"] == 3016 and r["error"]["data"] == locked_out, r
@@ -243,7 +243,7 @@ profiles.mkTest {
         assert sys_ok("hinteros-p2", "profiles.switch", {"id": "p2"}) == {}
         hint = json.loads(machine.succeed("cat /run/hinteros/switch.json"))
         assert hint["token"]["user"] == "hinteros-p2", hint
-        assert machine.succeed("stat -c '%a %U' /run/hinteros/switch.json").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /run/hinteros/switch.json").strip() == "600 hinteros-system"
         # A token is bound to its user.
         machine.fail("env PAM_USER=hinteros-p1 hinteros-system pin unlocked")
         machine.succeed(unlocked)

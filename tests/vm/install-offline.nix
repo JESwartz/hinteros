@@ -301,7 +301,7 @@ in
         ""
     }
     with subtest("accepted terms are recorded (none for these apps)"):
-        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 hinteros-system"
         assert json.loads(target.succeed("cat /var/lib/hinteros/terms-accepted.json")) == {"version": 1, "accepted": {}}
 
     with subtest("/etc/hinteros and its snapshot"):
@@ -359,14 +359,14 @@ in
         assert target.succeed("passwd -S hinteros-p1").split()[1] == "L", "session user has a password"
         assert target.succeed("passwd -S root").split()[1] == "L", "root has a password"
         assert target.succeed("getent shadow james").split(":")[1].startswith("$6$")
-        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/admin-password-hash").strip() == "600 root"
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros-root/admin-password-hash").strip() == "600 root"
         target.succeed("test \"$(id -nG james | tr ' ' '\\n' | grep -cx wheel)\" = 1")
         target.fail("id -nG hinteros-p1 | tr ' ' '\\n' | grep -qx wheel")
         target.fail("runuser -u hinteros-p1 -- sudo -n true")
         target.succeed("printf 'hunter22\\n' | runuser -u james -- sudo -S -k true")
         target.fail("printf 'wrong\\n' | runuser -u james -- sudo -S -k true")
         # The hash is not in the config the generation embeds.
-        h = target.succeed("cat /var/lib/hinteros/admin-password-hash").strip()
+        h = target.succeed("cat /var/lib/hinteros-root/admin-password-hash").strip()
         target.fail(f"grep -rFq {shlex.quote(h)} /etc/hinteros /run/current-system/hinteros /etc/static")
 
     with subtest("sshd: password login for the admin only"):
@@ -385,7 +385,7 @@ in
         starter = json.loads(target.succeed("cat /var/lib/hinteros/starter.json"))
         assert starter["version"] == 1 and starter["by"] == "installer", starter
         assert sorted(starter["ids"]) == sorted(installed), starter
-        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/starter.json").strip() == "600 root"
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/starter.json").strip() == "600 hinteros-system"
         m = json.loads(target.succeed("cat /nix/var/nix/profiles/hinteros/starter/share/hinteros/apps.json"))
         assert m["ids"] == sorted(installed), m
         assert target.succeed("stat -c '%U %a' /nix/var/nix/profiles/hinteros/apps").strip() == "root 755"

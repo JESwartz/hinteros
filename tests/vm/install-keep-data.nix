@@ -78,7 +78,7 @@ let
     "/srv/media/marker"
     "/var/lib/hinteros/marker"
     "/var/lib/hinteros/profiles.json"
-    "/var/lib/hinteros/admin-password-hash"
+    "/var/lib/hinteros-root/admin-password-hash"
     "/var/lib/hinteros/starter.json"
     "/var/lib/hinteros/terms-accepted.json"
     "/etc/machine-id"
@@ -303,7 +303,7 @@ in
     with subtest("a keepData run that fails after formatting the ESP puts back what it changed"):
         # /etc/hinteros, the admin password hash and the boot files, as the old system needs them.
         snap = (
-            "cd /mnt && find etc/hinteros var/lib/hinteros/admin-password-hash -type f -print0 | sort -z | xargs -0 sha256sum"
+            "cd /mnt && find etc/hinteros var/lib/hinteros-root/admin-password-hash -type f -print0 | sort -z | xargs -0 sha256sum"
             " && find etc/hinteros | sort && cd /mnt/boot && find . -type f -print0 | sort -z | xargs -0 sha256sum"
         )
         mount_target()

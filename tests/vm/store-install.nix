@@ -227,7 +227,7 @@ in
         assert installed() == ["crunchyroll", "plex-htpc"]
         unchanged_box()
         # The record: root only, {id: [{version, accepted_at, by, profile}]}.
-        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 hinteros-system"
         rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert list(rec) == ["plex-htpc"] and len(rec["plex-htpc"]) == 1, rec
         e = rec["plex-htpc"][0]

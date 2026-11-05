@@ -240,7 +240,7 @@ in
     with subtest("jobs leave /var/lib/hinteros to hinteros-system"):
         # Jobs ran after the service restarted (the rebuild's switch); none took the tree back to
         # root:root, which made systemd chown all of it and race the service's file writes.
-        assert machine.succeed("stat -c %U:%G /var/lib/hinteros").strip() == "root:hinteros"
+        assert machine.succeed("stat -c %U:%G /var/lib/hinteros").strip() == "hinteros-system:hinteros"
 
     machine.succeed("pkill -f '[e]vents.py' || true")
   '';

@@ -146,11 +146,11 @@ let
         lib.filter (lib.hasPrefix "d /var/lib/hinteros/services") (tmpfiles all)
       );
       expected = [
-        "d /var/lib/hinteros/services 0700 root root -"
-        "d /var/lib/hinteros/services/cloudflare-tunnel 0700 root root -"
-        "d /var/lib/hinteros/services/jellyfin-server 0700 root root -"
-        "d /var/lib/hinteros/services/plex-media-server 0700 root root -"
-        "d /var/lib/hinteros/services/tailscale 0700 root root -"
+        "d /var/lib/hinteros/services 0700 hinteros-system hinteros -"
+        "d /var/lib/hinteros/services/cloudflare-tunnel 0700 hinteros-system hinteros -"
+        "d /var/lib/hinteros/services/jellyfin-server 0700 hinteros-system hinteros -"
+        "d /var/lib/hinteros/services/plex-media-server 0700 hinteros-system hinteros -"
+        "d /var/lib/hinteros/services/tailscale 0700 hinteros-system hinteros -"
       ];
     };
     testJellyfinSetup =
@@ -167,6 +167,10 @@ let
             ProtectSystem
             ;
           groups = lib.sort lib.lessThan all.users.users.jellyfin.extraGroups;
+          # Its files are root's (the service, not root, only reads them: its group).
+          secrets = lib.elem "/var/lib/hinteros-root/jellyfin-server" s.serviceConfig.ReadWritePaths;
+          # Plex's Preferences.xml: the service reads it as a member of Plex's group.
+          plexGroup = lib.elem "plex" (units all).hinteros-system.serviceConfig.SupplementaryGroups;
         };
         expected = {
           requiredBy = [ "jellyfin.service" ];
@@ -176,6 +180,8 @@ let
           RemainAfterExit = true;
           PrivateNetwork = true;
           ProtectSystem = "strict";
+          secrets = true;
+          plexGroup = true;
           groups = [
             "hinteros-media"
             "render"

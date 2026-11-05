@@ -533,6 +533,9 @@ let
           c2.hinteros.admin.enable
           c2.hinteros.admin.user
           c2.hinteros.admin.hashedPasswordFile
+          # A pre-1.0 box's hash moves out of the service's directory before the accounts are set.
+          (lib.hasInfix "mv /var/lib/hinteros/admin-password-hash" c2.system.activationScripts.hinteros-admin-hash.text)
+          c2.system.activationScripts.users.deps
           c2.users.users.james.isNormalUser
           c2.fileSystems."/".device
           c2.boot.loader.systemd-boot.enable
@@ -542,7 +545,9 @@ let
           "livingroom"
           true
           "james"
-          "/var/lib/hinteros/admin-password-hash"
+          "/var/lib/hinteros-root/admin-password-hash"
+          true
+          [ "hinteros-admin-hash" ]
           true
           "/dev/disk/by-uuid/11111111-2222-3333-4444-555555555555"
           true

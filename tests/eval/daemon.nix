@@ -72,8 +72,10 @@ let
         [ "CAP_DAC_READ_SEARCH" ]
         true
         true
-        # greeter.sock's and keyboard.sock's groups (chgrp without CAP_CHOWN).
+        # The Jellyfin setup's files, and greeter.sock's and keyboard.sock's groups (chgrp
+        # without CAP_CHOWN).
         [
+          "hinteros-system"
           "hinteros-greeter"
           "hinteros-keyboard"
         ]
@@ -125,12 +127,16 @@ let
           false
           false
           false
-          [ "hinteros-greeter" ]
+          [
+            "hinteros-system"
+            "hinteros-greeter"
+          ]
           false
         ];
       };
     # The time zone helper (time-zone.md): the service itself never writes /etc; this oneshot,
-    # started on demand, may write /etc and /run/hinteros only, with no network or capabilities.
+    # started on demand, may write /etc and /run/hinteros only, with no network; its only
+    # capabilities reach the request and the lock in the service's run directory.
     testTimeZoneApplyUnit =
       let
         u = c.systemd.services.hinteros-time-zone-apply;
@@ -163,10 +169,73 @@ let
           true
           true
           true
-          [ "" ]
+          [
+            "CAP_DAC_OVERRIDE"
+            "CAP_CHOWN"
+          ]
           [ "AF_UNIX" ]
           [ ]
           false
+        ];
+      };
+    # hinteros-system is not root (daemon README, "Privileges"): its own system account, no
+    # capabilities, and on the system bus only its jobs, helper units and the freezer. The units
+    # that read what it cannot run as it with read-only access; root's own state is apart.
+    testServiceAccount =
+      let
+        svc = c.environment.etc."polkit-1/rules.d/40-hinteros-system.rules".text;
+        usage = c.systemd.services.hinteros-usage.serviceConfig;
+        boot = c.systemd.services.hinteros-boot-entries;
+      in
+      {
+        expr = [
+          sys.User
+          sys.Group
+          sys.AmbientCapabilities
+          c.users.users.hinteros-system.isSystemUser
+          (c.users.groups ? hinteros-system)
+          usage.User
+          usage.AmbientCapabilities
+          boot.serviceConfig.User
+          boot.serviceConfig.AmbientCapabilities
+          (lib.hasSuffix "/bin/hinteros-system boot-entries" boot.serviceConfig.ExecStart)
+          boot.wantedBy
+          c.systemd.paths.hinteros-boot-entries.pathConfig.PathChanged
+          (lib.elem "d /var/lib/hinteros-root 0710 root hinteros-system -" c.systemd.tmpfiles.rules)
+          c.systemd.services.hinteros-lan-filter.serviceConfig.CapabilityBoundingSet
+          (lib.hasInfix ''subject.user !== "hinteros-system"'' svc)
+          (lib.hasInfix "org.freedesktop.systemd1.manage-units" svc)
+          (lib.hasInfix ''^hinteros-job@[0-9a-f]{16}\.service$'' svc)
+          (lib.hasInfix ''unit === "hinteros-usage.service"'' svc)
+          (lib.hasInfix ''unit === "hinteros-time-zone-apply.service"'' svc)
+          (lib.hasInfix ''verb === "restart" && unit === "hinteros-lan-filter.service"'' svc)
+          (lib.hasInfix "return polkit.Result.NO;" svc)
+        ];
+        expected = [
+          "hinteros-system"
+          "hinteros"
+          [ "" ]
+          true
+          true
+          "hinteros-system"
+          [ "CAP_DAC_READ_SEARCH" ]
+          "hinteros-system"
+          [ "CAP_DAC_READ_SEARCH" ]
+          true
+          [ "hinteros-system.service" ]
+          "/boot/loader/entries"
+          true
+          [
+            "CAP_NET_ADMIN"
+            "CAP_DAC_READ_SEARCH"
+          ]
+          true
+          true
+          true
+          true
+          true
+          true
+          true
         ];
       };
     testSystemService = {
@@ -188,7 +257,7 @@ let
           "/run/hinteros"
           "/var/lib/hinteros"
         ]
-        [ "CAP_SYS_PTRACE" ]
+        [ "" ]
         [ "AF_UNIX" ]
         true
         [ "@system-service" ]
@@ -430,6 +499,8 @@ pkgs.runCommand "hinteros-daemon-eval"
     [ "$(grep -c '<allow_active>auth_admin</allow_active>' polkit-1/actions/org.hinteros.system.policy)" = 2 ]
     grep -q '<message>Authentication is required to turn remote login (SSH) on or off</message>' polkit-1/actions/org.hinteros.system.policy
     ! grep -q 'org.hinteros.system.ssh.admin' polkit-1/actions/org.hinteros.system.policy
+    # The service account owns every action (it asks about other users' processes; not root).
+    [ "$(grep -c '<annotate key="org.freedesktop.policykit.owner">unix-user:hinteros-system</annotate>' polkit-1/actions/org.hinteros.system.policy)" = 14 ]
     # With a key: the principal, the pinned namespace, the key, and dev in release.json.
     grep -qx 'owner namespaces="git" ssh-ed25519 .* owner@hinteros' $shareKey/share/hinteros/update/allowed_signers
     [ "$(jq .dev $shareKey/share/hinteros/release.json)" = true ]
