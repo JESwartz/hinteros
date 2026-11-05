@@ -4,7 +4,7 @@
 # system/update-repo.sh with throwaway keys; no network). The box trusts the release key through
 # `hinteros.update.allowedSigners`, so the key is in the running generation's allowed_signers.
 #
-# Real: the git fetch into the /var/lib/hinteros mirror, `ssh-keygen -Y verify` (git
+# Real: the git fetch into the /var/lib/hinteros-root mirror, `ssh-keygen -Y verify` (git
 # verify-commit) against /run/current-system's allowed_signers, the fast-forward and seen-tip
 # rules, the target's catalog evaluation, the flake.lock rewrite (`nix flake lock
 # --override-input`), the flake.nix retarget, the profile generation and the switch.
@@ -91,6 +91,8 @@ in
             }
           } /var/lib/hinteros/profiles.json
           install -m 0600 ${profiles.pinHash pin} /var/lib/hinteros/pins/p1
+          # The service's files (it is not root), as if it had written them.
+          chown -R hinteros-system:hinteros /var/lib/hinteros
         '';
       };
 
@@ -219,7 +221,7 @@ in
         assert len(g) == 1 and g[0]["generation"] == gen1, g
         for f in ("flake.nix", "flake.lock"):
             machine.succeed(f"cmp {REPO}/config/{f} /etc/hinteros/{f}")
-        machine.fail("test -e /var/lib/hinteros/staging")
+        machine.fail("test -e /var/lib/hinteros-root/staging")
         assert "flake lock" not in nix_log() and "build" not in nix_log(), nix_log()
 
     with subtest("the running generation carries the trust and the channel table"):
@@ -245,7 +247,7 @@ in
             err = done["error"]
             assert err["code"] == 3009 and err["data"]["reason"] == reason, (name, err)
             # Fetched into the mirror, and refused there.
-            machine.succeed(f"git --git-dir=/var/lib/hinteros/git cat-file -e {REVS[name]}^{{commit}}")
+            machine.succeed(f"git --git-dir=/var/lib/hinteros-root/git cat-file -e {REVS[name]}^{{commit}}")
             # Never the verified revision: update.apply does not take it.
             e = fails("update.apply", {"rev": REVS[name], "admin_pin": PIN}, 3007)
             assert e["data"]["reason"] == "update_rev", e
@@ -264,7 +266,7 @@ in
         # The target's catalog was evaluated (real nix, git+file input): it adds no app.
         assert a["new_apps"] == [] and a["removed_apps"] == [], a
         # The verified tips: beta's, and stable's (checked too, for a later switch).
-        tips = json.loads(machine.succeed("cat /var/lib/hinteros/channel-tips.json"))["tips"]
+        tips = json.loads(machine.succeed("cat /var/lib/hinteros-root/channel-tips.json"))["tips"]
         assert tips == {"beta": REVS["newer"], "stable": REVS["base"]}, tips
         # Within the cache window the same result comes back without a job.
         again = ok("update.check")
@@ -316,7 +318,7 @@ in
         g = gens()
         assert len(g) == 2 and g[0]["current"] and g[0]["generation"] == gen1 + 1, g
         assert done["result"]["generation"] == gen1 + 1, done
-        machine.fail("test -e /var/lib/hinteros/staging")
+        machine.fail("test -e /var/lib/hinteros-root/staging")
         info = ok("system.info")
         assert info["channel"] == "beta" and info["rev"] == REVS["newer"], info
 
@@ -361,7 +363,7 @@ in
         info = ok("system.info")
         assert info["channel"] == "stable" and info["rev"] == REVS["base"], info
         # A switch never lowers the newest verified tip of a branch.
-        tips = json.loads(machine.succeed("cat /var/lib/hinteros/channel-tips.json"))["tips"]
+        tips = json.loads(machine.succeed("cat /var/lib/hinteros-root/channel-tips.json"))["tips"]
         assert tips == {"beta": REVS["newer"], "stable": REVS["base"]}, tips
   '';
 }
