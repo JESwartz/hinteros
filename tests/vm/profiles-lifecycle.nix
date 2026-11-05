@@ -213,7 +213,14 @@ profiles.mkTest {
         r = sess("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "revision": rev("hinteros-p4")})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "self"}, r
         stub_build(systems[""])
-        r = sess_ok("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "pin": "5555", "revision": rev("hinteros-p4")})
+        # p4's launcher runs its update check at session start: wait it out, as create() does.
+        for _ in range(5):
+            resp = sess("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "pin": "5555", "revision": rev("hinteros-p4")})
+            if resp.get("error", {}).get("code") != 3005:
+                break
+            jobs_idle("hinteros-p4")
+        assert "result" in resp, resp
+        r = resp["result"]
         # The job ends the session first (as a switch does); follow it as p1 (read-only).
         done = wait_job("hinteros-p1", r["job_id"])
         assert done["state"] == "succeeded", done
