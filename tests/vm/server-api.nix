@@ -381,6 +381,7 @@ profiles.mkTest {
 
     with subtest("Cloudflare: token checked, written 0600, the unit started; cleared"):
         tok = "/var/lib/hinteros/services/cloudflare-tunnel/token"
+        copy = "/var/lib/hinteros-root/cloudflare-tunnel-token"
         secret = base64.b64encode(b"s" * 32).decode()
         good = base64.b64encode(json.dumps({
             "a": "0123456789abcdef0123456789abcdef",
@@ -402,12 +403,16 @@ profiles.mkTest {
         # hinteros-system's group (hinteros) on a 0600 file: root only.
         assert machine.succeed(f"stat -c '%a %U' {tok}").strip() == "600 hinteros-system"
         assert machine.succeed(f"cat {tok}") == good
+        # The job's checked copy in root's directory is what the unit loads.
+        assert machine.succeed(f"stat -c '%a %U' {copy}").strip() == "600 root"
+        assert machine.succeed(f"cat {copy}") == good
         machine.wait_until_succeeds("systemctl is-active hinteros-cloudflared.service", timeout=60)
         d = services()["cloudflare-tunnel"]["detail"]
         assert d["token_set"] is True and d["connected"] is False, d
         machine.fail(f"journalctl --no-pager | grep -qF -- '{secret}'")
         job("system.cloudflare.clear_token", {"pin": PIN})
         machine.fail(f"test -e {tok}")
+        machine.fail(f"test -e {copy}")
         machine.fail("systemctl is-active hinteros-cloudflared.service")
         assert services()["cloudflare-tunnel"]["detail"]["token_set"] is False
         assert sess_ok("hinteros-p1", "system.cloudflare.clear_token", {"pin": PIN}) == {"job_id": None}

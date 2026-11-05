@@ -20,7 +20,8 @@
 # and `api-key` (0640 root:hinteros-system, no trailing newline) in `/var/lib/hinteros-root/
 # jellyfin-server` (root's: the service is not root), the server at http://127.0.0.1:8096; Plex at
 # http://127.0.0.1:32400 with `/var/lib/plex/Plex Media Server/Preferences.xml`; the tunnel token
-# at `/var/lib/hinteros/services/cloudflare-tunnel/token`, the unit `hinteros-cloudflared.service`,
+# at `/var/lib/hinteros/services/cloudflare-tunnel/token` (its job copies it, checked, to root's
+# `/var/lib/hinteros-root/cloudflare-tunnel-token`: what the unit loads), the unit `hinteros-cloudflared.service`,
 # its metrics at http://127.0.0.1:20241 (`/ready`); `tailscale` on PATH with the socket
 # `/run/tailscale/tailscaled.sock`; `/srv/media` of group `hinteros-media`.
 {
@@ -61,7 +62,9 @@ let
   jfState = "/var/lib/hinteros-root/jellyfin-server";
   serviceUser = "hinteros-system";
   jfGroup = if cfg.daemon.enable then serviceUser else "root";
-  cfToken = "${stateRoot}/cloudflare-tunnel/token";
+  # The set_token job's checked copy (root's): LoadCredential reads it as root, so never a
+  # file of the service's (it could make that a link to any file).
+  cfToken = "/var/lib/hinteros-root/cloudflare-tunnel-token";
 
   jf = config.services.jellyfin;
   jfDirs = lib.unique [

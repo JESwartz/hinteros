@@ -240,8 +240,8 @@ let
           pre = lib.hasPrefix "+/nix/store/" u.serviceConfig.ExecStartPre;
         };
         expected = {
-          ConditionPathExists = "/var/lib/hinteros/services/cloudflare-tunnel/token";
-          LoadCredential = "token:/var/lib/hinteros/services/cloudflare-tunnel/token";
+          ConditionPathExists = "/var/lib/hinteros-root/cloudflare-tunnel-token";
+          LoadCredential = "token:/var/lib/hinteros-root/cloudflare-tunnel-token";
           DynamicUser = true;
           Restart = "on-failure";
           exec = true;
