@@ -11,7 +11,8 @@
 # needs polkit `profiles.recover`; own settings check the own PIN; apps act on the caller's own
 # env only; p1 and p3 (not on screen) are refused by the seat check; the greeter's socket is the
 # greeter's; no PIN reaches the journal. Rollback, channel.set, base.set, hardware.redetect and
-# update.apply need the admin PIN (system API 0.9; root needs none).
+# update.apply need the admin PIN (system API 0.9; root needs none). The admin PIN is always
+# admin_pin; jobs.cancel of a job root started needs it.
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
@@ -225,7 +226,7 @@ in
         # The admin PIN locks after 10 wrong tries until a reboot (system API 0.9): pins/p1.tries
         # counts them for one boot id. These subtests send more on purpose; first the lock holds
         # (also for the right PIN), then the counter goes as a reboot makes it go.
-        r = sess("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Mallory", "pin": "2468"})
+        r = sess("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Mallory", "admin_pin": "2468"})
         assert r["error"]["code"] == 3016 and r["error"]["data"].get("reboot_required") is True, r
         machine.succeed("rm /var/lib/hinteros/pins/p1.tries")
 
@@ -237,16 +238,24 @@ in
         before = held()
         rev = sys_ok("hinteros-p2", "settings.get")["revision"]
         for pin in [None, "1357", P3_PIN]:  # none, its own, the other profile's
-            extra = {} if pin is None else {"pin": pin}
+            extra = {} if pin is None else {"admin_pin": pin}
             admin_refused("hinteros-p2", "profiles.rename", {"id": "p1", "name": "Mallory", **extra})
             admin_refused("hinteros-p2", "profiles.rename", {"id": "p3", "name": "Mallory", **extra})
             if pin is not None:
                 admin_refused("hinteros-p2", "profiles.reset_pin", {"id": "p3", "new_pin": "0000", "admin_pin": pin})
-                admin_refused("hinteros-p2", "profiles.remove", {"id": "p3", "confirm_id": "p3", "pin": pin, "revision": rev})
-                admin_refused("hinteros-p2", "starter_set.set", {"ids": [], "pin": pin})
+                admin_refused("hinteros-p2", "profiles.remove", {"id": "p3", "confirm_id": "p3", "admin_pin": pin, "revision": rev})
+                admin_refused("hinteros-p2", "starter_set.set", {"ids": [], "admin_pin": pin})
                 admin_refused("hinteros-p2", "guest.set", {"enabled": False, "admin_pin": pin})
+        # The admin PIN is admin_pin only: pin is an unknown field there.
+        for method, params in [
+            ("profiles.rename", {"id": "p3", "name": "Mallory"}),
+            ("starter_set.set", {"ids": []}),
+        ]:
+            r = sess("hinteros-p2", "system." + method, {**params, "pin": "2468"})
+            assert r["error"]["code"] == -32602, (method, r)
+            sys_err("hinteros-p2", method, {**params, "pin": "2468"}, -32602)
         # The admin profile: never removable; its PIN only with the admin account's password.
-        r = sess("hinteros-p2", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "pin": "2468", "revision": rev})
+        r = sess("hinteros-p2", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "admin_pin": "2468", "revision": rev})
         assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "admin", r
         r = sysrpc("hinteros-p2", "profiles.reset_pin", {"id": "p1", "new_pin": "0000", "admin_pin": "2468"})
         assert r["error"]["code"] in (3002, 3012), r
@@ -264,7 +273,7 @@ in
         assert now == before, f"held state changed:\n{before}\n---\n{now}"
         # With the admin PIN it works (from p2's session).
         admin_tries_reset()
-        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Alexis", "pin": "2468"}) == {}
+        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p3", "name": "Alexis", "admin_pin": "2468"}) == {}
         assert profiles_file()["profiles"]["p3"]["name"] == "Alexis"
 
     with subtest("two profiles: the box-wide actions need the admin PIN (system API 0.9)"):
@@ -304,6 +313,17 @@ in
         assert j, j
         sys_call("hinteros-p2", "jobs.cancel", {"job_id": j})
         wait_job("hinteros-p2", j)
+        # A job root started: p2 (not its starter, not the admin profile) cancels it only with
+        # the admin PIN.
+        out = json.loads(machine.succeed("python3 /etc/hinteros-test/rpc.py hardware.redetect '{}'"))
+        j = out["response"]["result"]["job_id"]
+        e = sys_err("hinteros-p2", "jobs.cancel", {"job_id": j}, 3002)
+        assert e["data"] == {"action": "org.hinteros.system.jobs.cancel", "reason": "starter"}, e
+        e = sys_err("hinteros-p2", "jobs.cancel", {"job_id": j, "admin_pin": "1357"}, 3016)
+        assert e["data"] == {"pin": "admin"}, e
+        assert sys_ok("hinteros-p2", "jobs.cancel", {"job_id": j, "admin_pin": "2468"}) == {"job_id": j}
+        done = wait_job("hinteros-p2", j)
+        assert done["state"] == "cancelled" and done["error"]["data"]["reason"] == "cancelled", done
         machine.succeed("rm -f /run/stub/hold")
         # Root (a terminal) needs no PIN.
         out = json.loads(machine.succeed("python3 /etc/hinteros-test/rpc.py base.set '{\"base\": \"unstable\"}'"))
@@ -315,7 +335,7 @@ in
         for user in ["hinteros-p1", "hinteros-p3"]:
             own_rev = sys_ok(user, "apps.list")["revision"]
             for method, params in [
-                ("profiles.rename", {"id": "p2", "name": "Mallory", "pin": "2468"}),
+                ("profiles.rename", {"id": "p2", "name": "Mallory", "admin_pin": "2468"}),
                 ("profiles.set_appearance", {"color": "red"}),
                 ("apps.install", {"ids": ["moonlight"], "revision": own_rev}),
                 ("profiles.switch", {"id": "p1"}),
