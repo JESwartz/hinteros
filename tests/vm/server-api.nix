@@ -97,9 +97,13 @@ profiles.mkTest {
     {
       hinteros.unfreeAllowlist = lib.mkForce [ ];
       services.plex.package = lib.mkForce plexStub;
-      # As profiles.nix, and Tailscale's sign-in gives up after 30 s (no internet here).
+      # As profiles.nix, and Tailscale's sign-in gives up after 30 s (no internet here; the job's
+      # flag below).
       systemd.services.hinteros-system.serviceConfig.ExecStart =
         lib.mkOverride 40 "${lib.getExe config.hinteros.daemon.system.package} --freeze-inactive --min-memory-bytes 268435456 --min-disk-bytes 1048576 --rate-burst 100 --rate-per-minute 6000 --tailscale-login-timeout-s 30";
+      # The sign-in runs in the job, which takes its flags from its own unit, not the service.
+      systemd.services."hinteros-job@".serviceConfig.ExecStart =
+        lib.mkOverride 40 "${lib.getExe config.hinteros.daemon.system.package} job --tailscale-login-timeout-s 30 %i";
       environment.systemPackages = [ pkgs.curl ];
       virtualisation.memorySize = lib.mkOverride 40 4096;
     };
