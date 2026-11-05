@@ -87,11 +87,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793809194,
-        "narHash": "sha256-OWpjMxkDzk815DOPpFqrVMgOUxBdoove4KWsKGZ0HQM=",
+        "lastModified": 1793907036,
+        "narHash": "sha256-e24G1PWrekOAPifWemrEock40sXoM21SijQOwuYmz8A=",
         "ref": "pre-1.0",
-        "rev": "d812f6b9e777ccf5dbc0e963874f8a33a950232c",
-        "revCount": 350,
+        "rev": "21fd96bfd4afb5a7c8d8b5f5546c786f2711ad1f",
+        "revCount": 373,
         "type": "git",
         "url": "https://git.hinteros.org/hinteros-daemon.git"
       },
@@ -114,11 +114,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793803213,
-        "narHash": "sha256-ZGlEBWlkq7y0opYrdQUzUc/t11LBWZU1tzUNsiN1hpQ=",
+        "lastModified": 1793907355,
+        "narHash": "sha256-06UF/IhvEN2W1mlhO4WzpFb7fo6cZ3rIVVJgaMsbj4k=",
         "ref": "pre-1.0",
-        "rev": "5a7a802d65717beb5e87043976cd1c50ff41de97",
-        "revCount": 303,
+        "rev": "f7dbfaa914890080151bae4ca27e06dd2fc64689",
+        "revCount": 310,
         "type": "git",
         "url": "https://git.hinteros.org/hinteros-launcher.git"
       },
