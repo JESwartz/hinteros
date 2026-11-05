@@ -2,24 +2,41 @@
 # unit hinteros-time-zone-apply, activation and hinteros-config-sync. Greeter mode; p1 = James,
 # the admin profile (PIN 2468); p2 = Sam (PIN 1357), on screen. state.json starts with
 # `settings.timeZone` "America/Chicago".
-#   - Boot: activation points /etc/localtime at /etc/zoneinfo/America/Chicago (from the live
-#     state.json); `date` shows it; hinteros-config-sync leaves state.json alone.
+#   - Boot: activation makes /etc/localtime a link to /etc/hinteros-time-zone/localtime and points
+#     that at /etc/zoneinfo/America/Chicago (from the live state.json); `date` shows it;
+#     hinteros-config-sync leaves state.json alone.
 #   - `time_zone.get` and `time_zone.list` (system API 0.9).
 #   - `time_zone.set` needs the admin PIN: none, p2's own and a wrong one are refused (also through
 #     the session daemon's relay, session API 0.18), and nothing changes; an unknown zone and
 #     path tricks are refused.
 #   - With the admin PIN (through the relay, as the launcher does it): /etc/localtime and
 #     state.json change at once, with no job, through the helper unit (the service itself cannot
-#     write /etc); a new process's `date` shows the new zone.
+#     write /etc); a new process's `date` shows the new zone. The helper's sandbox cannot make a
+#     file anywhere else in /etc.
 #   - A job (guest.set; STUBBED build: the guest-on specialisation) replaces /etc/hinteros and
 #     switches: the zone stays, and the same service process can still set one afterwards.
 #   - A reboot keeps it: activation reads the zone the service wrote, and hinteros-config-sync
 #     keeps the live zone although the generation's snapshot still says America/Chicago.
 #   - Activation again (as a switch or a rollback does): a zone that is not tzdata's or no zone
-#     means UTC; a valid one comes back; a second run leaves the link as it is.
+#     means UTC; a valid one comes back; a second run leaves the links as they are; a
+#     /etc/localtime straight at a zone (a box from before the link directory) is put back.
 { self, pkgs }:
 let
   profiles = import ./system/profiles.nix { inherit self pkgs; };
+  # In place of the helper's ExecStart, in its own sandbox: which directories can it write?
+  probe = pkgs.writeShellScript "nm13-probe" ''
+    for p in /etc/nm13-probe /etc/hinteros/nm13-probe /etc/hinteros-time-zone/nm13-probe /run/hinteros/nm13-probe; do
+      if touch "$p" 2>/dev/null; then echo "ok $p"; rm -f "$p"; else echo "no $p"; fi
+    done
+    if ln -sfn /etc/zoneinfo/UTC /etc/.nm13-probe 2>/dev/null; then echo "ok link"; else echo "no link"; fi
+    if touch /etc/shadow 2>/dev/null; then echo "ok shadow"; else echo "no shadow"; fi
+  '';
+  probeDropIn = pkgs.writeText "probe.conf" ''
+    [Service]
+    ExecStart=
+    ExecStart=${probe}
+    StandardOutput=file:/run/nm13-probe.out
+  '';
   stateWith =
     guest:
     let
@@ -77,15 +94,17 @@ profiles.mkTest {
     systems = boot_box()
 
     def link():
-        return machine.succeed("readlink /etc/localtime").strip()
+        """The zone link; /etc/localtime must be the fixed link to it."""
+        outer = machine.succeed("readlink /etc/localtime").strip()
+        assert outer == "/etc/hinteros-time-zone/localtime", outer
+        return machine.succeed("readlink /etc/hinteros-time-zone/localtime").strip()
 
     def zone_of_link():
-        """The zone /etc/localtime names (absolute, or relative to /etc as systemd writes it)."""
+        """The zone the zone link names."""
         t = link()
-        for prefix in ("/etc/zoneinfo/", "zoneinfo/", "../etc/zoneinfo/"):
-            if t.startswith(prefix):
-                return t[len(prefix):]
-        raise AssertionError(f"/etc/localtime -> {t}")
+        if t.startswith("/etc/zoneinfo/"):
+            return t[len("/etc/zoneinfo/"):]
+        raise AssertionError(f"/etc/hinteros-time-zone/localtime -> {t}")
 
     def date(fmt):
         # A new process: it reads /etc/localtime (TZ is not set).
@@ -100,7 +119,12 @@ profiles.mkTest {
     with subtest("boot: /etc/localtime follows the live state.json"):
         machine.wait_for_unit("hinteros-config-sync.service")
         assert link() == "/etc/zoneinfo/America/Chicago", link()
+        assert machine.succeed("stat -c '%a %U:%G' /etc/hinteros-time-zone").strip() == "755 root:root"
+        assert machine.succeed("realpath /etc/localtime").strip().endswith("/zoneinfo/America/Chicago")
         assert date("%Z") in ("CST", "CDT"), date("%Z")
+        # A user resolves both links too (the directory is readable).
+        assert machine.succeed("runuser -u hinteros-p2 -- env -u TZ date +%Z").strip() in ("CST", "CDT")
+        print(machine.succeed("timedatectl status || true"))
         assert date("%z") in ("-0600", "-0500"), date("%z")
         assert tz_state() == "America/Chicago", state_json()
         machine.succeed("journalctl -b -u hinteros-config-sync | grep -q 'already matches'")
@@ -160,7 +184,33 @@ profiles.mkTest {
         assert st["settings"]["guest"] == {"enable": False}, st
         # Nothing left behind next to either file.
         machine.fail("ls -a /etc | grep -v '^localtime$' | grep -i localtime")
+        assert machine.succeed("ls -A /etc/hinteros-time-zone").split() == ["localtime"]
         machine.fail("ls -a /etc/hinteros | grep -i tmp")
+
+    with subtest("the helper's sandbox writes only /etc/hinteros, the zone link's directory and /run/hinteros"):
+        # The unit itself, with a probe in place of its ExecStart (a runtime drop-in, removed
+        # afterwards): making or changing any other entry of /etc fails.
+        machine.succeed(
+            "install -D -m 0644 ${probeDropIn} /run/systemd/system/hinteros-time-zone-apply.service.d/probe.conf"
+            " && systemctl daemon-reload"
+        )
+        print(machine.succeed("systemctl cat hinteros-time-zone-apply.service"))
+        machine.succeed("systemctl start hinteros-time-zone-apply.service")
+        out = machine.succeed("cat /run/nm13-probe.out").split("\n")
+        print(out)
+        assert out[:6] == [
+            "no /etc/nm13-probe",
+            "ok /etc/hinteros/nm13-probe",
+            "ok /etc/hinteros-time-zone/nm13-probe",
+            "ok /run/hinteros/nm13-probe",
+            "no link",
+            "no shadow",
+        ], out
+        machine.fail("test -e /etc/nm13-probe || test -e /etc/.nm13-probe")
+        assert zone_of_link() == "Europe/London", link()
+        machine.succeed(
+            "rm -r /run/systemd/system/hinteros-time-zone-apply.service.d /run/nm13-probe.out && systemctl daemon-reload"
+        )
 
     with subtest("a job replaces /etc/hinteros: it keeps the zone, and the service can still set one"):
         # guest.set rebuilds (the stub "builds" the guest-on specialisation) and swaps
@@ -209,6 +259,8 @@ profiles.mkTest {
             assert link() == "/etc/zoneinfo/UTC", (bad, link())
             assert date("%Z") == "UTC", date("%Z")
         machine.succeed("jq 'del(.settings.timeZone)' /etc/hinteros/state.json > /tmp/s && mv /tmp/s /etc/hinteros/state.json")
+        # A /etc/localtime straight at a zone (as a box from before the link directory had it):
+        # activation makes it the fixed link again.
         machine.succeed("ln -sfn /etc/zoneinfo/Asia/Tokyo /etc/localtime")
         activate()
         assert link() == "/etc/zoneinfo/UTC", link()
@@ -216,9 +268,9 @@ profiles.mkTest {
         activate()
         assert link() == "/etc/zoneinfo/Europe/Berlin", link()
         assert date("%Z") in ("CET", "CEST"), date("%Z")
-        # Idempotent: a second run does not replace the link.
-        ino = machine.succeed("stat -c %i /etc/localtime")
+        # Idempotent: a second run does not replace either link.
+        ino = machine.succeed("stat -c %i /etc/localtime /etc/hinteros-time-zone/localtime")
         activate()
-        assert machine.succeed("stat -c %i /etc/localtime") == ino
+        assert machine.succeed("stat -c %i /etc/localtime /etc/hinteros-time-zone/localtime") == ino
   '';
 }

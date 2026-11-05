@@ -130,7 +130,8 @@ let
         ];
       };
     # The time zone helper (time-zone.md): the service itself never writes /etc; this oneshot,
-    # started on demand, may write /etc and /run/hinteros only, with no network or capabilities.
+    # started on demand, may write /etc/hinteros, the zone link's directory and /run/hinteros only
+    # (not all of /etc), with no network or capabilities.
     testTimeZoneApplyUnit =
       let
         u = c.systemd.services.hinteros-time-zone-apply;
@@ -157,7 +158,8 @@ let
           true
           "strict"
           [
-            "/etc"
+            "/etc/hinteros"
+            "/etc/hinteros-time-zone"
             "/run/hinteros"
           ]
           true

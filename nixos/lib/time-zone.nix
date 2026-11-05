@@ -9,6 +9,10 @@
 rec {
   pattern = "[A-Z][A-Za-z0-9_+-]*(/[A-Z][A-Za-z0-9_+-]*)*";
   zoneinfo = "${pkgs.tzdata}/share/zoneinfo";
+  # The directory of the zone link (hinteros-system's `--localtime` default is its `localtime`):
+  # /etc/localtime points at that link, which points at /etc/zoneinfo/<zone>. time-zone.nix makes
+  # both; hinteros-time-zone-apply (daemon.nix) may write only this directory and /etc/hinteros.
+  linkDir = "/etc/hinteros-time-zone";
   wellFormed = zone: builtins.isString zone && builtins.match pattern zone != null;
   ok =
     zone:
