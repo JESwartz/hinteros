@@ -240,6 +240,7 @@
         system-escalation = import ./tests/vm/system-escalation.nix { inherit self pkgs; };
         system-authz = import ./tests/vm/system-authz.nix { inherit self pkgs; };
         system-jobs = import ./tests/vm/system-jobs.nix { inherit self pkgs; };
+        system-update = import ./tests/vm/system-update.nix { inherit self pkgs; };
         polkit-agent = import ./tests/vm/polkit-agent.nix { inherit self pkgs; };
         session-restart = import ./tests/vm/session-restart.nix { inherit self pkgs; };
         store-install = import ./tests/vm/store-install.nix { inherit self pkgs; };

@@ -6,12 +6,11 @@
   self,
   pkgs,
   rateLimits ? false,
+  # /etc/hinteros and the generation snapshot: the same file set, so hinteros-config-sync finds
+  # nothing to restore.
+  fixture ? ../fixtures/system-a,
 }:
 { lib, config, ... }:
-let
-  # Same file set as the generation snapshot, so hinteros-config-sync finds nothing to restore.
-  fixture = ../fixtures/system-a;
-in
 {
   imports = [
     ../../../nixos/modules # everything but the overlay (the test pkgs already have it)

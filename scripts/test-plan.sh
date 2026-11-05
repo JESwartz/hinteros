@@ -20,12 +20,12 @@ PROFILES=(profiles-greeter profiles-switch profiles-pin profiles-lifecycle profi
   profiles-isolation guest system-authz)
 APPS=(profile-apps profile-apps-system apps-box-features store-install)
 SESSION=(gamescope session-restart input-layer)
-SYSTEM=(system-authz system-jobs system-escalation polkit-agent time-zone)
+SYSTEM=(system-authz system-jobs system-update system-escalation polkit-agent time-zone)
 SANDBOX=(sandbox sandbox-apps sandbox-lan sandbox-pad gamescope-sandbox steam-sockets)
 SERVER=(server-api server-network server-jellyfin server-jellyfin-signin)
 # The daemon and the launcher touch nearly everything; this is the set that exercises each part
 # once (session, profiles, apps, jobs, authorization, input, installer UI).
-DAEMON=(system-authz system-jobs profiles-greeter profiles-switch profiles-pin guest profile-apps
+DAEMON=(system-authz system-jobs system-update profiles-greeter profiles-switch profiles-pin guest profile-apps
   session-restart gamescope input-layer runtime time-zone sandbox sandbox-lan server-api)
 LAUNCHER=(installer-ui profiles-greeter gamescope typing input-layer)
 
