@@ -259,6 +259,7 @@ let
         true
         true
         [
+          "hinteros-system"
           "hinteros-greeter"
           "hinteros-keyboard"
         ]

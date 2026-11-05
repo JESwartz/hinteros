@@ -467,13 +467,17 @@ let
             unit = false;
             path = false;
           };
-          caps = [ "CAP_NET_ADMIN" ];
+          # CAP_DAC_READ_SEARCH: lan-filter.json is the service's (0600; the service is not root).
+          caps = [
+            "CAP_NET_ADMIN"
+            "CAP_DAC_READ_SEARCH"
+          ];
           families = [
             "AF_NETLINK"
             "AF_UNIX"
           ];
-          # hinteros-system itself still has no network and no CAP_NET_ADMIN.
-          systemCaps = [ "CAP_SYS_PTRACE" ];
+          # hinteros-system itself has no network and no capabilities at all.
+          systemCaps = [ "" ];
           systemFamilies = [ "AF_UNIX" ];
           exec = true;
           resolv = "/etc/resolv.conf";

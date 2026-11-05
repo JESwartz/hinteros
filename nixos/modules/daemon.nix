@@ -617,7 +617,7 @@ in
           User = "root";
           ProtectSystem = "strict";
           ReadWritePaths = [
-            config.hinteros.deviceConfig.dir
+            "/etc/hinteros" # the daemon's default (--config-dir); device-config.nix may not be imported
             "/run/hinteros"
           ];
           ProtectHome = true;
