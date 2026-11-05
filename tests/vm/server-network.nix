@@ -79,7 +79,8 @@ in
 
       MACHINE = "${nodes.machine.networking.primaryIPAddress}"
       CLIENT = "${nodes.client.networking.primaryIPAddress}"
-      TOKEN_FILE = "/var/lib/hinteros/services/cloudflare-tunnel/token"
+      # The set_token job's root copy is what the unit loads (the service's own file is not).
+      TOKEN_FILE = "/var/lib/hinteros-root/cloudflare-tunnel-token"
 
       start_all()
       machine.wait_for_unit("multi-user.target")
