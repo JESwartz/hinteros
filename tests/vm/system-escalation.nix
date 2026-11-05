@@ -86,6 +86,14 @@
         print(out)
         assert "denied" in out.lower() or "authentication" in out.lower(), out
         machine.fail("test -e /root/pwned")
+        # Also with a name the rule allows for StartUnit: no transient unit of that name either.
+        for name in ("hinteros-job@0123456789abcdef.service", "hinteros-usage.service", "hinteros-time-zone-apply.service"):
+            out = machine.fail(
+                f"{bus} StartTransientUnit 'ssa(sv)a(sa(sv))' {name} fail "
+                "1 ExecStart 'a(sasb)' 1 /run/current-system/sw/bin/touch 2 touch /root/pwned false 0 2>&1"
+            )
+            print(name, out)
+            machine.fail("test -e /root/pwned")
         machine.fail(f"{bus} StartUnit ss systemd-tmpfiles-clean.service replace")
         machine.fail(f"{bus} StartUnit ss hinteros-job@not-a-job.service replace")
         machine.fail(f"{bus} StopUnit ss greetd.service replace")
