@@ -435,5 +435,7 @@ pkgs.runCommand "hinteros-daemon-eval"
     [ "$(jq .dev $shareKey/share/hinteros/release.json)" = true ]
     # The channel bootstrap script is on PATH (and passed shellcheck to get built).
     [ -x $bootstrapChannel/bin/hinteros-bootstrap-channel ]
+    # ... without its test hooks (tests/vm/bootstrap-channel.nix): a box ignores HINTEROS_CONFIG_DIR etc.
+    grep -qx test_hooks=0 $bootstrapChannel/bin/hinteros-bootstrap-channel
     echo "$channelLine" > $out
   ''
