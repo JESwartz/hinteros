@@ -170,8 +170,12 @@ let
 
   # What hinteros-system may do on the system bus (it is not root; README, "Privileges" in the
   # daemon repo): start its jobs and helper units, restart the local network filter, freeze and
-  # thaw a profile's slice. Nothing else, so systemd refuses StartTransientUnit, other units and
-  # other verbs, and every other polkit action is no. Before every other rules file.
+  # thaw a profile's slice. Nothing else: other units, other verbs and StartTransientUnit are no
+  # (a transient user-<uid>.slice could pull in a transient service that runs as root), and so is
+  # every other polkit action. Before every other rules file.
+  # The verb alone does not tell the D-Bus method: StartUnit and StartTransientUnit both ask with
+  # "start", FreezeUnit and StopUnit with "stop". The message systemd passes does (systemd's
+  # dbus-unit.c and dbus-manager.c); a systemd that words it otherwise is refused (fails closed).
   serviceRules = ''
     polkit.addRule(function (action, subject) {
       if (subject.user !== "${serviceUser}") {
@@ -180,18 +184,23 @@ let
       if (action.id === "org.freedesktop.systemd1.manage-units") {
         var unit = action.lookup("unit") || "";
         var verb = action.lookup("verb") || "";
-        if (verb === "start" && (/^hinteros-job@[0-9a-f]{16}\.service$/.test(unit) ||
+        var message = action.lookup("polkit.message") || "";
+        var job = function (what) {
+          return message === "Authentication is required to " + what + " '$(unit)'.";
+        };
+        if (verb === "start" && job("start") && (/^hinteros-job@[0-9a-f]{16}\.service$/.test(unit) ||
             ${lib.concatMapStringsSep " || " (u: ''unit === "${u}"'') startUnits})) {
           return polkit.Result.YES;
         }
-        if (verb === "restart" && unit === "hinteros-lan-filter.service") {
+        if (verb === "restart" && job("restart") && unit === "hinteros-lan-filter.service") {
           return polkit.Result.YES;
         }
-        // FreezeUnit and ThawUnit: systemd asks with the verbs "stop" and "start". Only the
-        // slices of profile accounts and the guest (uid 20000 and up), never the admin's.
+        // FreezeUnit and ThawUnit (systemd asks with the verbs "stop" and "start"), not
+        // StopUnit or StartUnit. Only the slices of profile accounts and the guest (uid 20000
+        // and up), never the admin's.
         var slice = /^user-([0-9]+)\.slice$/.exec(unit);
-        if ((verb === "stop" || verb === "start" || verb === "freeze" || verb === "thaw") &&
-            slice && parseInt(slice[1], 10) >= 20000) {
+        if ((verb === "stop" || verb === "start") && slice && parseInt(slice[1], 10) >= 20000 &&
+            message === "Authentication is required to freeze or thaw the processes of '$(unit)' unit.") {
           return polkit.Result.YES;
         }
       }

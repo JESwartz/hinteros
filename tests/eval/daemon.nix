@@ -208,7 +208,10 @@ let
           (lib.hasInfix ''^hinteros-job@[0-9a-f]{16}\.service$'' svc)
           (lib.hasInfix ''unit === "hinteros-usage.service"'' svc)
           (lib.hasInfix ''unit === "hinteros-time-zone-apply.service"'' svc)
-          (lib.hasInfix ''verb === "restart" && unit === "hinteros-lan-filter.service"'' svc)
+          (lib.hasInfix ''verb === "restart" && job("restart") && unit === "hinteros-lan-filter.service"'' svc)
+          # The method, not only the verb: StartTransientUnit and StopUnit ask with other messages.
+          (lib.hasInfix ''verb === "start" && job("start")'' svc)
+          (lib.hasInfix "freeze or thaw the processes of" svc)
           (lib.hasInfix "return polkit.Result.NO;" svc)
         ];
         expected = [
@@ -229,6 +232,8 @@ let
             "CAP_NET_ADMIN"
             "CAP_DAC_READ_SEARCH"
           ]
+          true
+          true
           true
           true
           true

@@ -86,14 +86,34 @@
         print(out)
         assert "denied" in out.lower() or "authentication" in out.lower(), out
         machine.fail("test -e /root/pwned")
-        # Also with a name the rule allows for StartUnit: no transient unit of that name either.
+        # Also with a name the rule allows for StartUnit or FreezeUnit: polkit says no (not only
+        # systemd's "has a fragment file"). A transient slice of a profile uid has no fragment and
+        # would pull in a transient root service.
         for name in ("hinteros-job@0123456789abcdef.service", "hinteros-usage.service", "hinteros-time-zone-apply.service"):
             out = machine.fail(
                 f"{bus} StartTransientUnit 'ssa(sv)a(sa(sv))' {name} fail "
                 "1 ExecStart 'a(sasb)' 1 /run/current-system/sw/bin/touch 2 touch /root/pwned false 0 2>&1"
             )
             print(name, out)
+            assert "denied" in out.lower(), out
             machine.fail("test -e /root/pwned")
+        out = machine.fail(
+            f"{bus} StartTransientUnit 'ssa(sv)a(sa(sv))' user-20099.slice fail "
+            "1 Wants as 1 hinteros-evil.service "
+            "1 hinteros-evil.service 1 ExecStart 'a(sasb)' 1 /run/current-system/sw/bin/touch 2 touch /root/pwned false 2>&1"
+        )
+        print(out)
+        assert "denied" in out.lower(), out
+        machine.fail("test -e /root/pwned")
+        # A profile's slice: freeze and thaw, not stop (that would end the session).
+        p1 = machine.succeed("id -u hinteros-p1").strip()
+        out = machine.fail(f"{bus} StopUnit ss user-{p1}.slice replace 2>&1")
+        assert "denied" in out.lower(), out
+        machine.fail(f"{bus} StartUnit ss user-{p1}.slice replace")
+        machine.succeed(f"{bus} FreezeUnit s user-{p1}.slice")
+        machine.succeed(f"{bus} ThawUnit s user-{p1}.slice")
+        assert machine.succeed(f"systemctl show -p FreezerState --value user-{p1}.slice").strip() == "running"
+        machine.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
         machine.fail(f"{bus} StartUnit ss systemd-tmpfiles-clean.service replace")
         machine.fail(f"{bus} StartUnit ss hinteros-job@not-a-job.service replace")
         machine.fail(f"{bus} StopUnit ss greetd.service replace")
