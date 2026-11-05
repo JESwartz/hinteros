@@ -451,9 +451,7 @@ let
       };
 
     # The time zone (time-zone.md): NixOS does not own /etc/localtime; the activation script
-    # reads the live state.json after `etc`, whatever the state says at evaluation, and makes
-    # /etc/localtime a fixed link to the zone link in its own directory (no environment.etc
-    # entry for either: activation owns them).
+    # reads the live state.json after `etc`, whatever the state says at evaluation.
     testTimeZoneWiring =
       let
         cfg = mkTz null;
@@ -463,19 +461,15 @@ let
         expr = [
           cfg.time.timeZone
           (cfg.environment.etc ? localtime)
-          (cfg.environment.etc ? "hinteros-time-zone")
           snippet.deps
           (has "/etc/hinteros/state.json" snippet.text)
-          (has ''relink "/etc/zoneinfo/$zone" /etc/hinteros-time-zone/localtime'' snippet.text)
-          (has "relink /etc/hinteros-time-zone/localtime /etc/localtime" snippet.text)
+          (has "mv -fT /etc/.localtime.hinteros-tmp /etc/localtime" snippet.text)
           (has "zone=UTC" snippet.text)
         ];
         expected = [
           null
           false
-          false
           [ "etc" ]
-          true
           true
           true
           true

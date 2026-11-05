@@ -57,13 +57,14 @@
         assert "ProtectSystem" not in unit and "User=root" in unit
         assert machine.succeed("systemctl show 'hinteros-job@x.service' -p Nice --value").strip() == "10"
         # The time zone helper (time_zone.set): the only HinterOS unit besides jobs that writes
-        # /etc (only /etc/hinteros and the zone link's directory); no network, started on demand only.
+        # /etc, and only /etc/hinteros (timedated replaces /etc/localtime); no network, started
+        # on demand only.
         show = machine.succeed("systemctl show hinteros-time-zone-apply.service -p ProtectSystem -p ReadWritePaths -p PrivateNetwork -p NoNewPrivileges -p Type -p WantedBy")
         print(show)
         for want in ("ProtectSystem=strict", "PrivateNetwork=yes", "NoNewPrivileges=yes", "Type=oneshot", "WantedBy=\n"):
             assert want in show, (want, show)
         rw = next(l for l in show.splitlines() if l.startswith("ReadWritePaths=")).split("=", 1)[1].split()
-        assert sorted(rw) == ["/etc/hinteros", "/etc/hinteros-time-zone", "/run/hinteros"], rw
+        assert sorted(rw) == ["/etc/hinteros", "/run/hinteros"], rw
 
     def jobs():
         return rpc("hinteros-p1", "jobs.list")["response"]["result"]["jobs"]

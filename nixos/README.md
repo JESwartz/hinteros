@@ -144,17 +144,16 @@ Xwaylands' memory.
   `settings.timeZone` (set without a rebuild); state.json is compared as JSON. `configDir` must be a plain path (a flake
   source), not a derivation output, because the module reads it at eval time.
 - `time-zone.nix` (time-zone.md): `time.timeZone = null`; the activation snippet
-  `hinteros-time-zone` (after `etc`) makes `/etc/localtime` a fixed link to
-  `/etc/hinteros-time-zone/localtime` (directory 0755 root) and points that link at
-  `/etc/zoneinfo/<zone>` from the live `/etc/hinteros/state.json` `settings.timeZone` (UTC when
-  absent or not a zone of tzdata; the name rule and the directory are `nixos/lib/time-zone.nix`,
-  shared with state.nix and daemon.nix), replacing each link with a rename and only when it
-  differs. A `/etc/localtime` that points elsewhere (a box from before the directory, or
-  timedated) is put back. glibc and ICU follow both links; `timedatectl` reads one level only
-  and shows no zone name. `time_zone.set` changes state.json and the zone link at once through
-  the oneshot `hinteros-time-zone-apply` (daemon.nix; root, `ReadWritePaths` /etc/hinteros,
-  /etc/hinteros-time-zone and /run/hinteros, not all of /etc; no network), so hinteros-system
-  itself never writes /etc.
+  `hinteros-time-zone` (after `etc`) points `/etc/localtime` at `/etc/zoneinfo/<zone>` from the
+  live `/etc/hinteros/state.json` `settings.timeZone` (UTC when absent or not a zone of tzdata;
+  the name rule is `nixos/lib/time-zone.nix`, shared with state.nix), replacing the link with a
+  rename and only when it differs. `time_zone.set` changes both at once through the oneshot
+  `hinteros-time-zone-apply` (daemon.nix; root, `ReadWritePaths` /etc/hinteros and
+  /run/hinteros, no network): it writes state.json and asks systemd-timedated (`SetTimezone`,
+  over the system bus) to replace `/etc/localtime`, so neither hinteros-system nor its helper
+  writes the rest of /etc. `/etc/localtime` stays one absolute link straight into
+  `/etc/zoneinfo` (what activation and NixOS's timedated write); readers that take the zone
+  name from that link (OpenJDK, timedated, .NET) need it so.
 - `runtime.nix`: `hinteros.runtime.{enable,network,bluetooth,audio,power}`, on with the session.
   NetworkManager (no VPN plugins), BlueZ (`Experimental`; in input.conf `UserspaceHID` and `ClassicBondedOnly`, which
   stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules

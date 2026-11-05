@@ -540,12 +540,12 @@ in
 
       # The time zone (time-zone.md): `time_zone.set` writes the zone to
       # /run/hinteros/time-zone.request and starts this over D-Bus (no [Install]). It writes
-      # state.json `settings.timeZone` and points the zone link (time-zone.nix: /etc/localtime is
-      # a fixed link to it) at the zone, each by renaming a new file over the old one, so it
-      # needs those two directories writable, not all of /etc. That stays out of
-      # hinteros-system's own sandbox: this unit does nothing else. The binds are made when it
+      # state.json `settings.timeZone` (a new file renamed over the old one) and asks
+      # systemd-timedated over the system bus to point /etc/localtime at the zone, so it needs
+      # /etc/hinteros writable, not all of /etc (timedated's own unit writes /etc). That stays out
+      # of hinteros-system's own sandbox: this unit does nothing else. The binds are made when it
       # starts: a job that replaces /etc/hinteros before the helper takes the state.json lock
-      # makes it fail (time_zone.set fails; try again), never write the old copy.
+      # makes that run fail, and hinteros-system starts it once more.
       hinteros-time-zone-apply = {
         description = "HinterOS: apply the time zone";
         serviceConfig = {
@@ -555,7 +555,6 @@ in
           ProtectSystem = "strict";
           ReadWritePaths = [
             config.hinteros.deviceConfig.dir
-            (import ../lib/time-zone.nix { inherit pkgs; }).linkDir
             "/run/hinteros"
           ];
           ProtectHome = true;
