@@ -110,6 +110,8 @@ profiles.mkTest {
     ENV = "HINTEROS_SESSION_API=1.0 HINTEROS_SYSTEM_API=1.0 PYTHONPATH=/etc/hinteros-test"
     API = "http://127.0.0.1:8096"
     S = "/var/lib/hinteros/services"
+    # Root's own: the Jellyfin setup's files and the backup (the service is not root).
+    R = "/var/lib/hinteros-root"
     PIN = "2468"
     CLIENT_HDR = "Authorization: MediaBrowser Client=\"test\", Device=\"test\", DeviceId=\"test\", Version=\"1\""
 
@@ -143,7 +145,7 @@ profiles.mkTest {
         return done
 
     def api_key():
-        return machine.succeed(f"cat {S}/jellyfin-server/api-key").strip()
+        return machine.succeed(f"cat {R}/jellyfin-server/api-key").strip()
 
     def jf_get(path, token=None):
         hdr = f"Authorization: MediaBrowser Token=\"{token or api_key()}\""
@@ -179,7 +181,7 @@ profiles.mkTest {
         assert done["kind"] == "services_enable", done
         assert current_system() == systems["jf"]
         assert state_json()["services"] == ["jellyfin-server"], state_json()
-        machine.succeed(f"test -e {S}/jellyfin-server/setup-done")
+        machine.succeed(f"test -e {R}/jellyfin-server/setup-done")
 
     with subtest("services.list: enabled, running, set up, one user per profile"):
         j = services()["jellyfin-server"]
@@ -193,7 +195,7 @@ profiles.mkTest {
         names = {u["Name"]: u for u in jf_get("/Users")}
         assert {"admin", "James", "Sam"} <= set(names), list(names)
         assert not names["James"]["Policy"]["IsAdministrator"], names["James"]
-        assert machine.succeed(f"stat -c '%a %U' {S}/jellyfin-server/users.json").strip() == "600 root"
+        assert machine.succeed(f"stat -c '%a %U' {S}/jellyfin-server/users.json").strip() == "600 hinteros-system"
         # A second enable is nothing to do.
         r = sess_ok("hinteros-p1", "system.services.enable", {"ids": ["jellyfin-server"], "pin": PIN, "revision": rev()})
         assert r == {"job_id": None}, r
@@ -280,7 +282,7 @@ profiles.mkTest {
         assert r["error"]["code"] == -32602, r
         machine.fail(f"journalctl --no-pager | grep -qF -- '{tokens['p1']['access_token']}'")
 
-    B = f"{S}/jellyfin-server/backup"
+    B = f"{R}/jellyfin-backup"
 
     with subtest("an update to another Jellyfin version backs up its data first"):
         machine.fail(f"test -e {B}")
@@ -290,7 +292,7 @@ profiles.mkTest {
         assert current_system() == systems["jf-next"]
         assert machine.succeed(f"cat {B}/hinteros-marker").strip() == "one"
         assert machine.succeed(f"stat -c '%U %G' {B}/hinteros-marker").strip() == "jellyfin jellyfin"
-        assert machine.succeed(f"stat -c '%a %U' {S}/jellyfin-server").strip() == "700 root"
+        assert machine.succeed(f"stat -c '%a %U' {R}").strip() == "710 root"
         machine.succeed("journalctl -u 'hinteros-job@*' | grep -q 'Jellyfin changes version'")
         machine.wait_for_unit("jellyfin.service")
         machine.wait_until_succeeds(f"curl -fsS {API}/System/Info/Public | jq -e .Id", timeout=300)
@@ -325,7 +327,7 @@ profiles.mkTest {
         assert done["kind"] == "services_disable", done
         assert current_system() == systems["p3"]
         machine.fail("systemctl is-active jellyfin.service")
-        for p in ("/var/lib/jellyfin", "/var/cache/jellyfin", f"{S}/jellyfin-server"):
+        for p in ("/var/lib/jellyfin", "/var/cache/jellyfin", f"{S}/jellyfin-server", f"{R}/jellyfin-server"):
             machine.fail(f"test -e {p}")
         assert "8096" not in machine.succeed("nft list ruleset")
         j = services()["jellyfin-server"]
@@ -394,7 +396,7 @@ profiles.mkTest {
         done = job("system.cloudflare.set_token", {"pin": PIN, "token": good}, state="failed")
         assert done["error"]["data"]["reason"] == "not_connected", done
         # hinteros-system's group (hinteros) on a 0600 file: root only.
-        assert machine.succeed(f"stat -c '%a %U' {tok}").strip() == "600 root"
+        assert machine.succeed(f"stat -c '%a %U' {tok}").strip() == "600 hinteros-system"
         assert machine.succeed(f"cat {tok}") == good
         machine.wait_until_succeeds("systemctl is-active hinteros-cloudflared.service", timeout=60)
         d = services()["cloudflare-tunnel"]["detail"]

@@ -153,7 +153,7 @@ in
               "s": secret,
           }).encode()).decode()
           got = machine.succeed("stat -c '%a %U %G' /var/lib/hinteros/services/cloudflare-tunnel").strip()
-          assert got == "700 root root", got
+          assert got == "700 hinteros-system hinteros", got
           machine.succeed(f"(umask 077; printf %s '{token}' > {TOKEN_FILE})")
           machine.succeed("systemctl start hinteros-cloudflared.service")
           machine.wait_until_succeeds("systemctl is-active hinteros-cloudflared.service")
