@@ -104,8 +104,10 @@ in
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("inputplumber.service")
-    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
     uid = machine.succeed("id -u hinteros-p1").strip()
+    # The user manager first: asking it before its bus is up fails, not waits.
+    machine.wait_for_unit(f"user@{uid}.service")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     events = "/home/hinteros-p1/.local/share/hinteros/sandbox/padreader/events.txt"
