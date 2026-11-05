@@ -296,6 +296,12 @@ in
       ++ map (id: "d ${stateRoot}/${id} 0700 ${serviceUser} ${cfg.daemon.group} -") services;
     })
 
+    # The Jellyfin setup's own directory in root's HinterOS state (its sandbox needs it before it
+    # starts): setgid, so its files take the group the service reads them with.
+    (lib.mkIf jellyfinOn {
+      systemd.tmpfiles.rules = [ "d ${jfState} 2750 root ${jfGroup} -" ];
+    })
+
     # Firewall: `any` ports to all sources, `lan` ports to the local networks only.
     {
       networking.firewall = lib.mkMerge [

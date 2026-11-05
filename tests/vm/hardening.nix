@@ -331,7 +331,7 @@ in
               for u in ACCOUNTS:
                   machine.fail(f"runuser -u {u} -- test -r {dev}")
           machine.wait_until_succeeds("journalctl -b -u hinteros-keyboard | grep -q 'keyboard found'", timeout=30)
-          assert mode("/run/hinteros/keyboard.sock") == "660 root:hinteros-keyboard", mode("/run/hinteros/keyboard.sock")
+          assert mode("/run/hinteros/keyboard.sock") == "660 hinteros-system:hinteros-keyboard", mode("/run/hinteros/keyboard.sock")
           for u in ACCOUNTS:
               machine.fail(f"runuser -u {u} -- test -w /run/hinteros/keyboard.sock")
 

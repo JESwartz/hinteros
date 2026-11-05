@@ -169,6 +169,9 @@ let
           groups = lib.sort lib.lessThan all.users.users.jellyfin.extraGroups;
           # Its files are root's (the service, not root, only reads them: its group).
           secrets = lib.elem "/var/lib/hinteros-root/jellyfin-server" s.serviceConfig.ReadWritePaths;
+          setupDir = lib.elem "d /var/lib/hinteros-root/jellyfin-server 2750 root hinteros-system -" (
+            tmpfiles all
+          );
           # Plex's Preferences.xml: the service reads it as a member of Plex's group.
           plexGroup = lib.elem "plex" (units all).hinteros-system.serviceConfig.SupplementaryGroups;
         };
@@ -181,6 +184,7 @@ let
           PrivateNetwork = true;
           ProtectSystem = "strict";
           secrets = true;
+          setupDir = true;
           plexGroup = true;
           groups = [
             "hinteros-media"
