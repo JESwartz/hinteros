@@ -128,7 +128,7 @@ profiles.mkTest {
           assert machine.succeed("cat /run/hinteros/gamescope-modes") == "QEMU Monitor:1280x720@60\n"
           assert machine.succeed("cat /run/hinteros/audio-output") == "hinteros_sink_b\n"
           for f in ["gamescope-modes", "audio-output"]:
-              assert machine.succeed(f"stat -c '%a %U' /run/hinteros/{f}").strip() == "644 root", f
+              assert machine.succeed(f"stat -c '%a %U' /run/hinteros/{f}").strip() == "644 hinteros-system", f
           p1_env = machine.succeed(f"readlink -f {P1}").strip()
           assert p1_env == env_path("p1")
           p1_gens = machine.succeed(f"nix-env -p {P1} --list-generations")

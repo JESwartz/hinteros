@@ -1,6 +1,7 @@
 # Jellyfin server (design/server.md, M10 step 2) on a built box with `jellyfin-server` enabled:
 #   - hinteros-jellyfin-setup ran before jellyfin.service: `setup-done`, `admin-password` and
-#     `api-key` are 0600 root in a 0700 root directory, no `setup-started` left;
+#     `api-key` are 0640 root:hinteros-system in root's 2750 directory (the service reads them), no
+#     `setup-started` left;
 #   - the wizard is complete (System/Info/Public, the server name is the hostname) and closed
 #     (/Startup/User wants authentication); `admin` logs in with the stored password, not with
 #     another; the API key works, no key gets 401;
@@ -70,7 +71,7 @@ in
       import json
 
       MACHINE = "${nodes.machine.networking.primaryIPAddress}"
-      S = "/var/lib/hinteros/services/jellyfin-server"
+      S = "/var/lib/hinteros-root/jellyfin-server"
       API = "http://127.0.0.1:8096"
       CLIENT_HDR = "Authorization: MediaBrowser Client=\"test\", Device=\"test\", DeviceId=\"test\", Version=\"1\""
 
@@ -95,12 +96,15 @@ in
       def check_files():
           machine.succeed(f"test -e {S}/setup-done")
           machine.fail(f"test -e {S}/setup-started")
-          for d in (S, "/var/lib/hinteros/services"):
-              got = machine.succeed(f"stat -c '%a %U %G' {d}").strip()
-              assert got == "700 root root", (d, got)
+          # Root's, the service's group may read them (it is not root); the services' directory
+          # is the service's.
+          got = machine.succeed(f"stat -c '%a %U %G' {S}").strip()
+          assert got == "2750 root hinteros-system", got
+          got = machine.succeed("stat -c '%a %U %G' /var/lib/hinteros/services").strip()
+          assert got == "700 hinteros-system hinteros", got
           for f in ("admin-password", "api-key"):
               got = machine.succeed(f"stat -c '%a %U %G' {S}/{f}").strip()
-              assert got == "600 root root", (f, got)
+              assert got == "640 root hinteros-system", (f, got)
               machine.succeed(f"test -s {S}/{f}")
 
       wait_jellyfin()

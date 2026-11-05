@@ -98,11 +98,13 @@ in
         return r["response"]["error"]
 
     with subtest("the policy files"):
-        assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
+        assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 hinteros-system:hinteros"
         pol = machine.succeed("cat /run/current-system/sw/share/polkit-1/actions/org.hinteros.system.policy")
         for a in ACTIONS:
             assert f'org.hinteros.system.{a}"' in pol, a
         machine.succeed("grep -q 'isInGroup(\"hinteros\")' /etc/polkit-1/rules.d/50-hinteros.rules")
+        # The service (not root) may ask about its callers' processes: it owns every action.
+        assert pol.count("<annotate key=\"org.freedesktop.policykit.owner\">unix-user:hinteros-system</annotate>") == 14, pol
         assert "org.hinteros.system.ssh.admin" not in pol
         for a in ACTIONS:
             v = machine.succeed(f"pkaction --action-id org.hinteros.system.{a} --verbose")
@@ -350,7 +352,7 @@ in
             "'import socket; socket.socket(socket.AF_UNIX).connect(\"/run/hinteros/greeter.sock\")'"
         )
         assert rpc("hinteros-greeter", "system.info") == {"connect_error": "EACCES"}
-        assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/greeter.sock").strip() == "660 root:hinteros-greeter"
+        assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/greeter.sock").strip() == "660 hinteros-system:hinteros-greeter"
 
     with subtest("two profiles: PINs never reach the journal"):
         machine.fail(f"journalctl -o cat --no-pager | grep -q {P3_PIN}")

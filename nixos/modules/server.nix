@@ -16,10 +16,12 @@
 #   - hinteros-system may talk HTTP to loopback (status of Jellyfin, Plex and cloudflared).
 #
 # What hinteros-system relies on (the daemon's side, system API 0.5): `/var/lib/hinteros/services/
-# <id>/` (0700 root) per enabled service; for Jellyfin `setup-done`, `admin-password` and `api-key`
-# (0600 root, no trailing newline) in its directory, the server at http://127.0.0.1:8096; Plex at
+# <id>/` (0700, the service's account) per enabled service; for Jellyfin `setup-done`, `admin-password`
+# and `api-key` (0640 root:hinteros-system, no trailing newline) in `/var/lib/hinteros-root/
+# jellyfin-server` (root's: the service is not root), the server at http://127.0.0.1:8096; Plex at
 # http://127.0.0.1:32400 with `/var/lib/plex/Plex Media Server/Preferences.xml`; the tunnel token
-# at `/var/lib/hinteros/services/cloudflare-tunnel/token`, the unit `hinteros-cloudflared.service`,
+# at `/var/lib/hinteros/services/cloudflare-tunnel/token` (its job copies it, checked, to root's
+# `/var/lib/hinteros-root/cloudflare-tunnel-token`: what the unit loads), the unit `hinteros-cloudflared.service`,
 # its metrics at http://127.0.0.1:20241 (`/ready`); `tailscale` on PATH with the socket
 # `/run/tailscale/tailscaled.sock`; `/srv/media` of group `hinteros-media`.
 {
@@ -54,8 +56,15 @@ let
   hasLan = lanPorts "tcp" != [ ] || lanPorts "udp" != [ ];
 
   stateRoot = "/var/lib/hinteros/services";
-  jfState = "${stateRoot}/jellyfin-server";
-  cfToken = "${stateRoot}/cloudflare-tunnel/token";
+  # The Jellyfin setup's files (setup-done, admin-password, api-key): root's, in root's HinterOS
+  # directory, readable by hinteros-system's group (account and group of the same name). The
+  # service (not root) owns stateRoot: no root unit writes there (its jobs do it carefully).
+  jfState = "/var/lib/hinteros-root/jellyfin-server";
+  serviceUser = "hinteros-system";
+  jfGroup = if cfg.daemon.enable then serviceUser else "root";
+  # The set_token job's checked copy (root's): LoadCredential reads it as root, so never a
+  # file of the service's (it could make that a link to any file).
+  cfToken = "/var/lib/hinteros-root/cloudflare-tunnel-token";
 
   jf = config.services.jellyfin;
   jfDirs = lib.unique [
@@ -201,6 +210,7 @@ let
 
       printf '%s' "$password" > "$state/admin-password.new"
       printf '%s' "$key" > "$state/api-key.new"
+      chmod 0640 "$state/admin-password.new" "$state/api-key.new"
       sync "$state/admin-password.new" "$state/api-key.new"
       mv "$state/admin-password.new" "$state/admin-password"
       mv "$state/api-key.new" "$state/api-key"
@@ -280,15 +290,19 @@ in
       ];
     })
 
-    # The parent is hinteros-system's StateDirectory: created here with its owner, else systemd
-    # would chown everything below it (our root:root files too) when hinteros-system starts.
-    (lib.mkIf (services != [ ]) {
-      systemd.tmpfiles.rules =
-        lib.optional cfg.daemon.enable "d /var/lib/hinteros 0700 root ${cfg.daemon.group} -"
-        ++ [
-          "d ${stateRoot} 0700 root root -"
-        ]
-        ++ map (id: "d ${stateRoot}/${id} 0700 root root -") services;
+    # The services' directories in hinteros-system's state (its StateDirectory, which systemd
+    # gives to its account): the service's own, as the service is not root.
+    (lib.mkIf (services != [ ] && cfg.daemon.enable) {
+      systemd.tmpfiles.rules = [
+        "d ${stateRoot} 0700 ${serviceUser} ${cfg.daemon.group} -"
+      ]
+      ++ map (id: "d ${stateRoot}/${id} 0700 ${serviceUser} ${cfg.daemon.group} -") services;
+    })
+
+    # The Jellyfin setup's own directory in root's HinterOS state (its sandbox needs it before it
+    # starts): setgid, so its files take the group the service reads them with.
+    (lib.mkIf jellyfinOn {
+      systemd.tmpfiles.rules = [ "d ${jfState} 2750 root ${jfGroup} -" ];
     })
 
     # Firewall: `any` ports to all sources, `lan` ports to the local networks only.
@@ -374,7 +388,10 @@ in
           RemainAfterExit = true;
           # Its own sandbox needs the directories; a deleted one comes back here.
           ExecStartPre = "+${pkgs.writeShellScript "hinteros-jellyfin-dirs" ''
-            ${pkgs.coreutils}/bin/install -d -m 0700 ${stateRoot} ${jfState}
+            # Root's directory (the service's group may only pass), then the setup's own, whose
+            # files take the group (setgid) for the service to read.
+            ${pkgs.coreutils}/bin/install -d -m 0710 -g ${jfGroup} /var/lib/hinteros-root
+            ${pkgs.coreutils}/bin/install -d -m 2750 -g ${jfGroup} ${jfState}
             ${lib.concatMapStringsSep "\n" (
               d: "${pkgs.coreutils}/bin/install -d -m 0700 -o ${jf.user} -g ${jf.group} ${lib.escapeShellArg d}"
             ) jfDirs}
@@ -427,6 +444,14 @@ in
         "hinteros-media"
         "render"
         "video"
+      ];
+    })
+
+    # hinteros-system reads Plex's Preferences.xml for its status (claimed, name). It is not root:
+    # the file must be readable by Plex's group (the service is in it) or by all.
+    (lib.mkIf (plexOn && cfg.daemon.enable) {
+      systemd.services.hinteros-system.serviceConfig.SupplementaryGroups = [
+        config.services.plex.group
       ];
     })
 

@@ -95,6 +95,8 @@ in
       now=$(date +%s)
       printf '{"version":1,"next":2,"profiles":{"p1":{"name":"Test","color":"teal","admin":true,"locked":false,"created_at":%s,"last_used_at":null,"appearance":{"text_scale":1.0,"high_contrast":false,"reduce_motion":false}}}}' "$now" > /var/lib/hinteros/profiles.json
       chmod 0600 /var/lib/hinteros/profiles.json
+      # The service's file (it is not root), as if it had written it.
+      chown -R hinteros-system:hinteros /var/lib/hinteros
     """)
     machine.succeed("systemctl restart hinteros-system.service")
     machine.wait_for_unit("hinteros-system.service")
@@ -227,7 +229,7 @@ in
         assert installed() == ["crunchyroll", "plex-htpc"]
         unchanged_box()
         # The record: root only, {id: [{version, accepted_at, by, profile}]}.
-        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 hinteros-system"
         rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert list(rec) == ["plex-htpc"] and len(rec["plex-htpc"]) == 1, rec
         e = rec["plex-htpc"][0]

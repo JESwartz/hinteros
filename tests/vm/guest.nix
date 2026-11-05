@@ -110,7 +110,7 @@ profiles.mkTest {
             "f=/var/lib/hinteros/terms-accepted.json; [ -e $f ] || echo '{\"version\": 1, \"accepted\": {}}' > $f; "
             "jq '.accepted.steam = [{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-guest\"}, "
             "{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-p1\", \"profile\": \"p1\"}]' "
-            "$f > $f.new && mv $f.new $f && chmod 0600 $f"
+            "$f > $f.new && mv $f.new $f && chmod 0600 $f && chown hinteros-system:hinteros $f"
         )
         machine.succeed("systemctl start hinteros-usage.service")
         assert "guest" in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json"))["data"], machine.succeed("cat /var/lib/hinteros/usage.json")

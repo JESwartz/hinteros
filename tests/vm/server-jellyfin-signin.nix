@@ -54,12 +54,14 @@ profiles.mkTest {
     ENV = "HINTEROS_SESSION_API=1.0 HINTEROS_SYSTEM_API=1.0 PYTHONPATH=/etc/hinteros-test"
     API = "http://127.0.0.1:8096"
     S = "/var/lib/hinteros/services/jellyfin-server"
+    # The setup's files are root's (the service is not root).
+    R = "/var/lib/hinteros-root/jellyfin-server"
     BASE = "/home/hinteros-p1/.local/share/hinteros/sandbox/jellyfin-desktop/.local/share/jellyfin-desktop"
 
     boot_box()
     machine.wait_for_unit("jellyfin.service", timeout=900)
     machine.wait_until_succeeds(f"curl -fsS {API}/System/Info/Public | jq -e .Id", timeout=600)
-    key = machine.succeed(f"cat {S}/api-key").strip()
+    key = machine.succeed(f"cat {R}/api-key").strip()
 
     def jf_get(path):
         return json.loads(machine.succeed(f"curl -fsS -H 'Authorization: MediaBrowser Token=\"{key}\"' '{API}{path}'"))

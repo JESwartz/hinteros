@@ -134,7 +134,7 @@ profiles.mkTest {
         assert machine.succeed("stat -c '%a %U' /home/hinteros-p3").strip() == "700 hinteros-p3"
         meta = profiles_file()["profiles"]["p3"]
         assert meta["name"] == "Alex" and meta["color"] == "purple" and not meta["admin"] and not meta["locked"], meta
-        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p3").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p3").strip() == "600 hinteros-system"
         assert machine.succeed(f"readlink -f {APPS}/hinteros-p3").strip() == starter
         machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros-p3")
         assert "p3" in [p["id"] for p in public()["profiles"]]

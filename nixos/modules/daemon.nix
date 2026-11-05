@@ -13,6 +13,8 @@
 let
   cfg = config.hinteros.daemon;
   sessionUser = config.hinteros.session.user;
+  # The account hinteros-system runs as (README, "Privileges" in the daemon repo): not root.
+  serviceUser = "hinteros-system";
   toml = pkgs.formats.toml { };
   sessionConfig = toml.generate "hinteros-session.toml" cfg.session.settings;
 
@@ -39,7 +41,8 @@ let
 
   # polkit actions. Defaults are "no" for everything except ssh (the admin password); the rules
   # below grant the rest to the hinteros group. That keeps the grant in one readable place and
-  # does not depend on how polkit classifies a user service's process.
+  # does not depend on how polkit classifies a user service's process. The service account owns
+  # each action: polkit lets only root or an action's owner ask about another user's process.
   mkAction' = id: description: message: defaults: ''
     <action id="org.hinteros.system.${id}">
       <description>${description}</description>
@@ -49,6 +52,7 @@ let
         <allow_inactive>${defaults}</allow_inactive>
         <allow_active>${defaults}</allow_active>
       </defaults>
+      <annotate key="org.freedesktop.policykit.owner">unix-user:${serviceUser}</annotate>
     </action>
   '';
   mkAction = id: description: mkAction' id description description;
@@ -163,6 +167,50 @@ let
       }
     });
   '';
+
+  # What hinteros-system may do on the system bus (it is not root; README, "Privileges" in the
+  # daemon repo): start its jobs and helper units, restart the local network filter, freeze and
+  # thaw a profile's slice. Nothing else: other units, other verbs and StartTransientUnit are no
+  # (a transient user-<uid>.slice could pull in a transient service that runs as root), and so is
+  # every other polkit action. Before every other rules file.
+  # The verb alone does not tell the D-Bus method: StartUnit and StartTransientUnit both ask with
+  # "start", FreezeUnit and StopUnit with "stop". The message systemd passes does (systemd's
+  # dbus-unit.c and dbus-manager.c); a systemd that words it otherwise is refused (fails closed).
+  serviceRules = ''
+    polkit.addRule(function (action, subject) {
+      if (subject.user !== "${serviceUser}") {
+        return polkit.Result.NOT_HANDLED;
+      }
+      if (action.id === "org.freedesktop.systemd1.manage-units") {
+        var unit = action.lookup("unit") || "";
+        var verb = action.lookup("verb") || "";
+        var message = action.lookup("polkit.message") || "";
+        var job = function (what) {
+          return message === "Authentication is required to " + what + " '$(unit)'.";
+        };
+        if (verb === "start" && job("start") && (/^hinteros-job@[0-9a-f]{16}\.service$/.test(unit) ||
+            ${lib.concatMapStringsSep " || " (u: ''unit === "${u}"'') startUnits})) {
+          return polkit.Result.YES;
+        }
+        if (verb === "restart" && job("restart") && unit === "hinteros-lan-filter.service") {
+          return polkit.Result.YES;
+        }
+        // FreezeUnit and ThawUnit (systemd asks with the verbs "stop" and "start"), not
+        // StopUnit or StartUnit. Only the slices of profile accounts and the guest (uid 20000
+        // and up), never the admin's.
+        var slice = /^user-([0-9]+)\.slice$/.exec(unit);
+        if ((verb === "stop" || verb === "start") && slice && parseInt(slice[1], 10) >= 20000 &&
+            message === "Authentication is required to freeze or thaw the processes of '$(unit)' unit.") {
+          return polkit.Result.YES;
+        }
+      }
+      return polkit.Result.NO;
+    });
+  '';
+  startUnits = [
+    "hinteros-usage.service"
+    "hinteros-time-zone-apply.service"
+  ];
 
   # `sudo hinteros-bootstrap-channel <channel> <rev>`: moves a box onto a channel outside the
   # update UI (a box that does not trust the release key yet, or whose keys are out of date).
@@ -451,11 +499,22 @@ in
     };
 
     users = {
-      groups.${cfg.group} = { };
-      # The keyboard reader's (hinteros-keyboard): only it may write to keyboard.sock.
-      groups.hinteros-keyboard = lib.mkIf keyboardHome { };
+      groups = {
+        ${cfg.group} = { };
+        # The keyboard reader's (hinteros-keyboard): only it may write to keyboard.sock.
+        hinteros-keyboard = lib.mkIf keyboardHome { };
+        # hinteros-system's: it reads what root writes for it in /var/lib/hinteros-root
+        # (Jellyfin's setup).
+        ${serviceUser} = { };
+      };
       # profiles.nix puts every account in the group; without it (module tests) the session user.
       users.${sessionUser}.extraGroups = lib.mkIf (!(options.hinteros ? profiles)) [ cfg.group ];
+      # hinteros-system's account: a system user, not DynamicUser (it keeps /var/lib/hinteros).
+      users.${serviceUser} = {
+        isSystemUser = true;
+        group = serviceUser;
+        description = "HinterOS system service";
+      };
     };
 
     assertions = [
@@ -498,24 +557,28 @@ in
         "/share/polkit-1/actions"
       ];
       etc."polkit-1/rules.d/50-hinteros.rules".text = polkitRules;
+      etc."polkit-1/rules.d/40-hinteros-system.rules".text = serviceRules;
     };
 
     systemd.services = {
       # Per-profile disk use (profiles.md, "Per-profile storage"; DECISIONS D5): started by
       # hinteros-system over D-Bus when profiles.list finds the data older than an hour. Reads the
-      # homes, writes /var/lib/hinteros/usage.json.
+      # homes, writes /var/lib/hinteros/usage.json. As the service's account (the file is its):
+      # only reading and stat in the homes need a capability.
       hinteros-usage = {
         description = "HinterOS per-profile disk use";
         serviceConfig = {
           Type = "oneshot";
           ExecStart = "${lib.getExe cfg.system.package} usage";
-          User = "root";
+          User = serviceUser;
+          Group = cfg.group;
           ProtectSystem = "strict";
           ProtectHome = "read-only";
           ReadWritePaths = [ "/var/lib/hinteros" ];
           # It walks trees the profiles control: only reading and stat (any home, whatever its
-          # modes) and writing its own root-owned file.
+          # modes) and writing its own file.
           CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
+          AmbientCapabilities = [ "CAP_DAC_READ_SEARCH" ];
           PrivateTmp = true;
           PrivateDevices = true;
           PrivateNetwork = true;
@@ -572,7 +635,12 @@ in
           LockPersonality = true;
           MemoryDenyWriteExecute = true;
           SystemCallFilter = [ "@system-service" ];
-          CapabilityBoundingSet = [ "" ];
+          # The request and state.lock are in the service's /run/hinteros (it is not root): read and
+          # make them there, and give the lock to the directory's owner.
+          CapabilityBoundingSet = [
+            "CAP_DAC_OVERRIDE"
+            "CAP_CHOWN"
+          ];
           UMask = "0022";
         };
       };
@@ -595,7 +663,11 @@ in
           Type = "oneshot";
           ExecStart = lanFilterCmd;
           User = "root";
-          CapabilityBoundingSet = [ "CAP_NET_ADMIN" ];
+          # CAP_DAC_READ_SEARCH: lan-filter.json is the service's (0600; the service is not root).
+          CapabilityBoundingSet = [
+            "CAP_NET_ADMIN"
+            "CAP_DAC_READ_SEARCH"
+          ];
           RestrictAddressFamilies = [
             "AF_NETLINK"
             "AF_UNIX"
@@ -619,6 +691,40 @@ in
           SystemCallArchitectures = "native";
           SystemCallFilter = [ "@system-service" ];
           UMask = "0077";
+        };
+      };
+
+      # The toplevels systemd-boot has an entry for, for generations.list: the ESP is root's only
+      # (disk.nix) and hinteros-system is not root. Run at start and whenever the entries change;
+      # as the service's account, reading only.
+      hinteros-boot-entries = {
+        description = "HinterOS: list the boot entries for the system service";
+        wantedBy = [ "hinteros-system.service" ];
+        after = [ "hinteros-system.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${lib.getExe cfg.system.package} boot-entries";
+          User = serviceUser;
+          Group = cfg.group;
+          CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
+          AmbientCapabilities = [ "CAP_DAC_READ_SEARCH" ];
+          ProtectSystem = "strict";
+          ReadWritePaths = [ "-/run/hinteros" ];
+          ProtectHome = true;
+          PrivateTmp = true;
+          PrivateNetwork = true;
+          NoNewPrivileges = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectKernelLogs = true;
+          ProtectControlGroups = true;
+          RestrictAddressFamilies = [ "AF_UNIX" ];
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          SystemCallFilter = [ "@system-service" ];
+          UMask = "0022";
         };
       };
 
@@ -680,6 +786,11 @@ in
     };
 
     systemd = {
+      # Root's own HinterOS state, out of hinteros-system's reach (it is not root): the jobs'
+      # staging, git mirror, channel tips and Jellyfin backup, the admin password hash, and the
+      # Jellyfin setup's files (which the service's group reads). The group may only pass.
+      tmpfiles.rules = [ "d /var/lib/hinteros-root 0710 root ${serviceUser} -" ];
+
       # The nameservers DNS may go to come from /etc/resolv.conf: load the table again when it
       # changes (no cgroup filtered: the unit removes the table, which costs nothing).
       paths.hinteros-lan-filter = lib.mkIf lanFilter {
@@ -702,23 +813,26 @@ in
           # device fds it opened before a switch (/dev/uinput) stay open, and must not reach the
           # admin console.
           ExecStart = "${lib.getExe cfg.system.package} --freeze-inactive";
-          # Root, because it starts the jobs that rebuild the system. The socket is created in the
-          # runtime directory, owned by root:hinteros, mode 0660.
-          User = "root";
+          # Not root (README, "Privileges" in the daemon repo): its own account, no capabilities,
+          # and on the system bus only what 40-hinteros-system.rules allows (its jobs and helper
+          # units). What changes the system runs in hinteros-job@ and the helper units, as root.
+          # The socket is created in the runtime directory, group hinteros, mode 0660.
+          User = serviceUser;
           Group = cfg.group;
           RuntimeDirectory = "hinteros";
           RuntimeDirectoryMode = "0755";
           # The job directories in /run/hinteros/jobs must survive a restart of this service
           # during a switch; the restarted service re-attaches to running jobs.
           RuntimeDirectoryPreserve = "yes";
-          # /var/lib/hinteros (root, 0700): the update cache, staging and the git mirror.
+          # /var/lib/hinteros (0700, the service's account): profiles, PINs, the app registry, the
+          # last checks. systemd gives it (and, once, everything in it) to the account. Root's own
+          # state (staging, the git mirror, the admin password hash) is in /var/lib/hinteros-root.
           StateDirectory = "hinteros";
           StateDirectoryMode = "0700";
           Restart = "on-failure";
           RestartSec = 2;
           # It reads /etc/hinteros, /proc, the profile links and /run/current-system, and writes
-          # only /run/hinteros and its state. Everything that changes the system happens in
-          # hinteros-job@.
+          # only /run/hinteros and its state.
           ProtectSystem = "strict";
           ReadWritePaths = [
             "/run/hinteros"
@@ -737,21 +851,28 @@ in
           LockPersonality = true;
           MemoryDenyWriteExecute = true;
           SystemCallFilter = [ "@system-service" ];
-          # Only so the audit entries can read /proc/<pid>/exe of another user's process
-          # (HINTEROS_EXE; with an empty set the field is "?").
-          CapabilityBoundingSet = [ "CAP_SYS_PTRACE" ];
+          # None: the audit names another user's process by /proc/<pid>/comm when its exe cannot
+          # be read (no CAP_SYS_PTRACE).
+          CapabilityBoundingSet = [ "" ];
+          AmbientCapabilities = [ "" ];
           # greeter.sock is root:hinteros-greeter 0660 and keyboard.sock root:hinteros-keyboard 0660:
-          # a member may chgrp them without CAP_CHOWN.
-          SupplementaryGroups =
-            lib.optional greeterOn config.hinteros.profiles.greeter.user
-            ++ lib.optional keyboardHome "hinteros-keyboard";
+          # a member may chgrp them without CAP_CHOWN. hinteros-system: what root writes for it
+          # in /var/lib/hinteros-root (Jellyfin's setup).
+          SupplementaryGroups = [
+            serviceUser
+          ]
+          ++ lib.optional greeterOn config.hinteros.profiles.greeter.user
+          ++ lib.optional keyboardHome "hinteros-keyboard";
           UMask = "0007";
         };
       };
 
-      # One job per unit instance (`hinteros-job@<id>`), started by hinteros-system over D-Bus:
-      # a switch restarts hinteros-system when its unit changes, which must not kill the rebuild
-      # that causes it. Root with network and no ProtectSystem: it switches the system.
+      # The boot entries' list again whenever they change (a switch, a clean-up).
+      paths.hinteros-boot-entries = {
+        wantedBy = [ "multi-user.target" ];
+        pathConfig.PathChanged = "/boot/loader/entries";
+      };
+
       services."hinteros-job@" = {
         description = "HinterOS system job %i";
         # Neither the switch it performs nor a later one may restart or stop a running instance.

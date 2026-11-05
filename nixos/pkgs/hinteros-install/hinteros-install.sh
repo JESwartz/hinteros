@@ -230,9 +230,9 @@ restore_kept() {
     echo "could not put back $cfg" >>"$LOG"
   fi
   if [ -e "$d/admin-password-hash" ]; then
-    cp -a "$d/admin-password-hash" "$MNT/var/lib/hinteros/admin-password-hash" >>"$LOG" 2>&1
+    cp -a "$d/admin-password-hash" "$MNT/var/lib/hinteros-root/admin-password-hash" >>"$LOG" 2>&1
   else
-    rm -f "$MNT/var/lib/hinteros/admin-password-hash"
+    rm -f "$MNT/var/lib/hinteros-root/admin-password-hash"
   fi
   # A damaged ESP that did not mount had no boot files to keep: the new, empty one stays.
   if [ "$esp_touched" -eq 1 ] && [ -d "$d/esp" ]; then
@@ -702,7 +702,7 @@ problems=$(printf '%s' "$PLAN" | jq -c --slurpfile cat "$APPS_JSON" --slurpfile 
               or (.admin.user | test("^[a-z_][a-z0-9_-]{0,31}$") | not)
             then bad("admin.user"; "admin-user-invalid"; "admin user must be 1-32 lowercase letters, digits, - or _, starting with a letter or _") else empty end),
           (if (.admin.user | type) == "string"
-              and ((.admin.user | IN("root", "hinteros", "hinteros-guest", "hinteros-greeter", "hinteros-kbd", "nobody", "deploy", "sshd", "daemon", "nixbld"))
+              and ((.admin.user | IN("root", "hinteros", "hinteros-guest", "hinteros-greeter", "hinteros-kbd", "hinteros-system", "nobody", "deploy", "sshd", "daemon", "nixbld"))
                    or (.admin.user | test("^(systemd-|nixbld|hinteros-p[0-9])")))
             then bad("admin.user"; "admin-user-reserved"; "admin user name \(.admin.user) is reserved") else empty end),
           (if ((.admin.password | type) == "string" and (.admin.password | length) > 0)
@@ -1225,13 +1225,16 @@ fi
 cfg=$MNT/etc/hinteros
 # (Not on a kept install: this would also set the modes of what is there.)
 [ "$keep_data" = true ] || install -d -m 0755 "$MNT/etc" "$cfg" "$MNT/var/lib/hinteros"
+# Root's own HinterOS state (the admin password hash): never in the unprivileged service's
+# /var/lib/hinteros.
+install -d -m 0700 "$MNT/var/lib/hinteros-root"
 if [ "$keep_data" = true ]; then
   # What a failed run puts back (restore_kept), saved on the kept disk before anything changes.
   bak=$(mktemp -d -p "$MNT")
   tmp_dirs+=("$bak")
   run "Saving the device configuration" cp -a "$cfg" "$bak/etc-hinteros"
-  if [ -e "$MNT/var/lib/hinteros/admin-password-hash" ]; then
-    run "Saving the admin password" cp -a "$MNT/var/lib/hinteros/admin-password-hash" "$bak/"
+  if [ -e "$MNT/var/lib/hinteros-root/admin-password-hash" ]; then
+    run "Saving the admin password" cp -a "$MNT/var/lib/hinteros-root/admin-password-hash" "$bak/"
   fi
   keep_bak=$bak
 fi
@@ -1337,7 +1340,7 @@ chmod 0644 "$cfg"/facter.*  2>/dev/null || true
 # in state.json.
 # A keepData plan keeps the password unless it gives one.
 if [ "$keep_data" = false ] || [ "$(plan '(.admin.password // .admin.hashedPassword // "") | length')" -gt 0 ]; then
-  hash_file=$MNT/var/lib/hinteros/admin-password-hash
+  hash_file=$MNT/var/lib/hinteros-root/admin-password-hash
   (
     umask 0077
     if [ "$(plan '(.admin.hashedPassword // "") | length')" -gt 0 ]; then

@@ -273,27 +273,31 @@ in
           assert machine.succeed("id -u hinteros-p2").strip() == "20002"
           assert machine.succeed("id -u hinteros-guest").strip() == "20000"
 
-      with subtest("profiles: root-held state, app profiles and published files"):
-          assert mode("/var/lib/hinteros").startswith("700 root:"), mode("/var/lib/hinteros")
-          assert mode("/var/lib/hinteros/pins").startswith("700 root:"), mode("/var/lib/hinteros/pins")
-          assert mode("/var/lib/hinteros/pins/p1").startswith("600 root:"), mode("/var/lib/hinteros/pins/p1")
-          assert mode("/var/lib/hinteros/profiles.json").startswith("600 root:"), mode("/var/lib/hinteros/profiles.json")
+      with subtest("profiles: the service's state, app profiles and published files"):
+          # hinteros-system is not root: its state is its own account's, private to it; root's own
+          # (the admin password hash, the jobs' staging) is apart, and only root may list it.
+          assert mode("/var/lib/hinteros").startswith("700 hinteros-system:"), mode("/var/lib/hinteros")
+          assert mode("/var/lib/hinteros-root") == "710 root:hinteros-system", mode("/var/lib/hinteros-root")
+          assert mode("/var/lib/hinteros/pins").startswith("700 hinteros-system:"), mode("/var/lib/hinteros/pins")
+          assert mode("/var/lib/hinteros/pins/p1").startswith("600 hinteros-system:"), mode("/var/lib/hinteros/pins/p1")
+          assert mode("/var/lib/hinteros/profiles.json").startswith("600 hinteros-system:"), mode("/var/lib/hinteros/profiles.json")
           assert mode("/nix/var/nix/profiles/hinteros").startswith("755 root:"), mode("/nix/var/nix/profiles/hinteros")
           assert mode("/nix/var/nix/profiles/hinteros/apps").startswith("755 root:"), mode("/nix/var/nix/profiles/hinteros/apps")
           for u in ["hinteros-p1", "hinteros-p2"]:
               assert link_owner(f"/nix/var/nix/profiles/hinteros/apps/{u}") == "root", u
-          assert mode("/run/hinteros").startswith("755 root:"), mode("/run/hinteros")
+          assert mode("/run/hinteros").startswith("755 hinteros-system:"), mode("/run/hinteros")
           machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros-p2")
-          # D4 says 0755; the service makes it 0750 root:hinteros, which every account (all in
+          # D4 says 0755; the service makes it 0750 hinteros-system:hinteros, which every account (all in
           # `hinteros`) can still traverse.
-          assert mode("/run/hinteros/apps") in ("755 root:root", "755 root:hinteros", "750 root:hinteros"), mode("/run/hinteros/apps")
+          assert mode("/run/hinteros/apps") == "750 hinteros-system:hinteros", mode("/run/hinteros/apps")
           for u in ["hinteros-p1", "hinteros-p2"]:
-              assert link_owner(f"/run/hinteros/apps/{u}") == "root", u
-          assert mode("/run/hinteros/profiles-public.json").startswith("644 root:"), mode("/run/hinteros/profiles-public.json")
-          assert mode("/run/hinteros/system.sock") == "660 root:hinteros", mode("/run/hinteros/system.sock")
-          assert mode("/run/hinteros/greeter.sock") == "660 root:hinteros-greeter", mode("/run/hinteros/greeter.sock")
+              assert link_owner(f"/run/hinteros/apps/{u}") in ("root", "hinteros-system"), u
+          assert mode("/run/hinteros/profiles-public.json").startswith("644 hinteros-system:"), mode("/run/hinteros/profiles-public.json")
+          assert mode("/run/hinteros/system.sock") == "660 hinteros-system:hinteros", mode("/run/hinteros/system.sock")
+          assert mode("/run/hinteros/greeter.sock") == "660 hinteros-system:hinteros-greeter", mode("/run/hinteros/greeter.sock")
           for u in ACCOUNTS:
               machine.fail(f"runuser -u {u} -- cat /var/lib/hinteros/profiles.json")
+              machine.fail(f"runuser -u {u} -- ls /var/lib/hinteros-root")
               machine.fail(f"runuser -u {u} -- touch /run/hinteros/apps/x")
               machine.fail(f"runuser -u {u} -- touch /nix/var/nix/profiles/hinteros/apps/x")
           # The guest's home is emptied at boot (never following symlinks).
@@ -327,7 +331,7 @@ in
               for u in ACCOUNTS:
                   machine.fail(f"runuser -u {u} -- test -r {dev}")
           machine.wait_until_succeeds("journalctl -b -u hinteros-keyboard | grep -q 'keyboard found'", timeout=30)
-          assert mode("/run/hinteros/keyboard.sock") == "660 root:hinteros-keyboard", mode("/run/hinteros/keyboard.sock")
+          assert mode("/run/hinteros/keyboard.sock") == "660 hinteros-system:hinteros-keyboard", mode("/run/hinteros/keyboard.sock")
           for u in ACCOUNTS:
               machine.fail(f"runuser -u {u} -- test -w /run/hinteros/keyboard.sock")
 
