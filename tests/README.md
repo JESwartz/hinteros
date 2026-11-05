@@ -6,11 +6,11 @@
   - session and display: `boot`, `gamescope`, `gamescope-size`, `gamescope-sandbox`, `input-layer`, `fake-steam`, `typing`, `session-restart`, `runtime`, `runtime-settings`, `config-sync`, `time-zone`, `wifi-iwd`
   - apps and the app sandbox: `tv-apps`, `sandbox`, `sandbox-apps`, `sandbox-pad`, `sandbox-lan`, `steam-sockets`, `store-install`, `apps-box-features`, `profile-apps`, `profile-apps-system`
   - profiles: `profiles-greeter`, `profiles-switch`, `profiles-pin`, `profiles-isolation`, `profiles-lifecycle`, `profiles-lock`, `guest`
-  - privileged service and hardening: `hardening`, `system-escalation`, `system-authz`, `system-jobs`, `polkit-agent`
+  - privileged service and hardening: `hardening`, `system-escalation`, `system-authz`, `system-jobs`, `system-update`, `polkit-agent`
   - installer: `install-offline`, `install-offline-hw`, `install-offline-m900`, `install-app-failure`, `install-validation`, `install-newer`, `install-keep-data`, `installer-ui`, `installer-save-log`
   - server: `server-api`, `server-network`, `server-jellyfin`, `server-jellyfin-signin`
 
-  Not covered by a VM test yet (backlog, 1.0): an update end to end through `hinteros-job@`, that is `update.check`/`update.apply` from a signed channel repo (HOME, SSL_CERT_FILE, the fetch into the mirror, `ssh-keygen -Y verify` against the `/run/current-system` allowed_signers, the flake.lock rewrite) and `channel.set` to an older channel. Until then `daemon-eval` checks the job PATH and the allowed_signers file, and hinteros-system's `updates_are_verified` test covers the verify logic.
+  `system-update` runs an update end to end through `hinteros-job@`: `update.check`/`update.apply` and `channel.check`/`channel.set` (to an older channel) from a signed `file://` channel repo, with the fetch into the mirror, `ssh-keygen -Y verify` against the running generation's allowed_signers, refused tips, the flake.lock rewrite and a switch; only the system build is a stub. Not covered by a VM test yet: the `https` transport (SSL_CERT_FILE, a git server with a test CA) and a real build from a binary cache (`update-verify` in hinteros-docs/design/system-api.md).
 
   `vm/system/` holds the shared node (`node.nix`) and the Python socket clients the system tests run inside the VM; `vm/install/` the installer tests' helpers.
 
