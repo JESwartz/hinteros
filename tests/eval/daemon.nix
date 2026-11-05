@@ -130,7 +130,9 @@ let
         ];
       };
     # The time zone helper (time-zone.md): the service itself never writes /etc; this oneshot,
-    # started on demand, may write /etc and /run/hinteros only, with no network or capabilities.
+    # started on demand, may write /etc/hinteros and /run/hinteros only (not all of /etc:
+    # systemd-timedated, which NixOS ships bus-activated, replaces /etc/localtime), with no
+    # network or capabilities.
     testTimeZoneApplyUnit =
       let
         u = c.systemd.services.hinteros-time-zone-apply;
@@ -150,6 +152,11 @@ let
           s.RestrictAddressFamilies
           u.wantedBy
           (lib.elem "/etc" sys.ReadWritePaths)
+          (c.systemd.units ? "systemd-timedated.service")
+          # Its bus activation file comes with systemd in the system path; it writes /etc/localtime
+          # itself (not /etc/static, as with time.timeZone set).
+          (lib.elem c.systemd.package c.environment.systemPackages)
+          (c.systemd.services.systemd-timedated.environment ? SYSTEMD_ETC_LOCALTIME)
         ];
         expected = [
           "oneshot"
@@ -157,7 +164,7 @@ let
           true
           "strict"
           [
-            "/etc"
+            "/etc/hinteros"
             "/run/hinteros"
           ]
           true
@@ -166,6 +173,9 @@ let
           [ "" ]
           [ "AF_UNIX" ]
           [ ]
+          false
+          true
+          true
           false
         ];
       };

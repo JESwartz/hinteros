@@ -148,8 +148,12 @@ Xwaylands' memory.
   live `/etc/hinteros/state.json` `settings.timeZone` (UTC when absent or not a zone of tzdata;
   the name rule is `nixos/lib/time-zone.nix`, shared with state.nix), replacing the link with a
   rename and only when it differs. `time_zone.set` changes both at once through the oneshot
-  `hinteros-time-zone-apply` (daemon.nix; root, `ReadWritePaths` /etc and /run/hinteros, no
-  network), so hinteros-system itself never writes /etc.
+  `hinteros-time-zone-apply` (daemon.nix; root, `ReadWritePaths` /etc/hinteros and
+  /run/hinteros, no network): it writes state.json and asks systemd-timedated (`SetTimezone`,
+  over the system bus) to replace `/etc/localtime`, so neither hinteros-system nor its helper
+  writes the rest of /etc. `/etc/localtime` stays one absolute link straight into
+  `/etc/zoneinfo` (what activation and NixOS's timedated write); readers that take the zone
+  name from that link (OpenJDK, timedated, .NET) need it so.
 - `runtime.nix`: `hinteros.runtime.{enable,network,bluetooth,audio,power}`, on with the session.
   NetworkManager (no VPN plugins), BlueZ (`Experimental`; in input.conf `UserspaceHID` and `ClassicBondedOnly`, which
   stays true), PipeWire/WirePlumber, logind (power key suspends, lid ignored), and polkit rules
