@@ -332,7 +332,7 @@ in
             "'import socket; socket.socket(socket.AF_UNIX).connect(\"/run/hinteros/greeter.sock\")'"
         )
         assert rpc("hinteros-greeter", "system.info") == {"connect_error": "EACCES"}
-        assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/greeter.sock").strip() == "660 root:hinteros-greeter"
+        assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/greeter.sock").strip() == "660 hinteros-system:hinteros-greeter"
 
     with subtest("two profiles: PINs never reach the journal"):
         machine.fail(f"journalctl -o cat --no-pager | grep -q {P3_PIN}")
