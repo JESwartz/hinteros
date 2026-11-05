@@ -187,8 +187,11 @@ let
         if (verb === "restart" && unit === "hinteros-lan-filter.service") {
           return polkit.Result.YES;
         }
+        // FreezeUnit and ThawUnit: systemd asks with the verbs "stop" and "start". Only the
+        // slices of profile accounts and the guest (uid 20000 and up), never the admin's.
         var slice = /^user-([0-9]+)\.slice$/.exec(unit);
-        if ((verb === "freeze" || verb === "thaw") && slice && parseInt(slice[1], 10) >= 1000) {
+        if ((verb === "stop" || verb === "start" || verb === "freeze" || verb === "thaw") &&
+            slice && parseInt(slice[1], 10) >= 20000) {
           return polkit.Result.YES;
         }
       }
