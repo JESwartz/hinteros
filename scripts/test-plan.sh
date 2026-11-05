@@ -67,6 +67,7 @@ case "$mode" in
       case "$f" in
         tests/vm/system/profiles.nix) add "${PROFILES[@]}" ;;
         tests/vm/install/*) add "${INSTALLER[@]}" ;;
+        tests/vm/fixtures/bootstrap-channel/*) add bootstrap-channel ;;
         tests/vm/system/*) add "${SYSTEM[@]}" ;;
         tests/vm/*/*) ;;
         tests/vm/*.nix)
@@ -81,7 +82,8 @@ case "$mode" in
         nixos/modules/app-env.nix | nixos/modules/apps.nix | nixos/modules/box-features.nix | nixos/modules/catalog.nix) add "${APPS[@]}" "${SANDBOX[@]}" ;;
         nixos/modules/session.nix | nixos/pkgs/gamescope/*) add "${SESSION[@]}" ;;
         nixos/modules/input.nix | nixos/pkgs/inputplumber/*) add input-layer typing profiles-switch ;;
-        nixos/modules/daemon.nix) add "${SYSTEM[@]}" ;;
+        nixos/modules/daemon.nix) add "${SYSTEM[@]}" bootstrap-channel ;;
+        nixos/pkgs/hinteros-bootstrap-channel/*) add bootstrap-channel ;;
         nixos/modules/hardening.nix) add hardening system-escalation ;;
         nixos/modules/maintenance.nix) add boot ;;
         nixos/modules/runtime.nix | nixos/modules/network-hardware.nix) add runtime runtime-settings ;;

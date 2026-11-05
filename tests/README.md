@@ -6,7 +6,7 @@
   - session and display: `boot`, `gamescope`, `gamescope-size`, `gamescope-sandbox`, `input-layer`, `fake-steam`, `typing`, `session-restart`, `runtime`, `runtime-settings`, `config-sync`, `time-zone`, `wifi-iwd`
   - apps and the app sandbox: `tv-apps`, `sandbox`, `sandbox-apps`, `sandbox-pad`, `sandbox-lan`, `steam-sockets`, `store-install`, `apps-box-features`, `profile-apps`, `profile-apps-system`
   - profiles: `profiles-greeter`, `profiles-switch`, `profiles-pin`, `profiles-isolation`, `profiles-lifecycle`, `profiles-lock`, `guest`
-  - privileged service and hardening: `hardening`, `system-escalation`, `system-authz`, `system-jobs`, `polkit-agent`
+  - privileged service and hardening: `hardening`, `system-escalation`, `system-authz`, `system-jobs`, `polkit-agent`, `bootstrap-channel` (`hinteros-bootstrap-channel` in its testHooks build, against a signed local channel repo with keys made in the test)
   - installer: `install-offline`, `install-offline-hw`, `install-offline-m900`, `install-app-failure`, `install-validation`, `install-newer`, `install-keep-data`, `installer-ui`, `installer-save-log`
   - server: `server-api`, `server-network`, `server-jellyfin`, `server-jellyfin-signin`
 
