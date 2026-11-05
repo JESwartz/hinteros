@@ -73,10 +73,10 @@
         "| grep -E 'handshake done client=hinteros-launcher .*api_version=1.0'"
     )
 
-    # System service: socket in /run/hinteros, root:hinteros 0660, answers the API.
+    # System service: socket in /run/hinteros, hinteros-system:hinteros 0660, answers the API.
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
-    assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 root:hinteros"
+    assert machine.succeed("stat -c '%a %U:%G' /run/hinteros/system.sock").strip() == "660 hinteros-system:hinteros"
     machine.succeed("id -nG hinteros-p1 | tr ' ' '\\n' | grep -qx hinteros")
     assert rpc("/run/hinteros/system.sock", "1.0", as_user="hinteros-p1") == "hinteros-system"
 

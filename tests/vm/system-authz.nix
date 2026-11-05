@@ -1,4 +1,4 @@
-# Who may talk to the privileged service and what each caller gets. The socket is root:hinteros
+# Who may talk to the privileged service and what each caller gets. The socket is hinteros-system:hinteros
 # 0660; read-only methods work for any member; mutating ones need the seat0 owner, polkit YES
 # (the hinteros group rule), and `ssh.set` needs the admin password (auth_admin), so the session
 # user gets authentication_required. A rules file returning NO is honored; pkcheck agrees per
