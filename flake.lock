@@ -62,11 +62,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793800637,
-        "narHash": "sha256-dpVfLZODY8JECijNBn5asMHCpZqSba+2XlRYAryCdSI=",
+        "lastModified": 1793919046,
+        "narHash": "sha256-bPan64yGhQJodRYiPIi9YTsQpk0l1ANnLs1iq4KLZng=",
         "ref": "pre-1.0",
-        "rev": "ddb3c965c08899fdcf6d5a2125c903d1a7a85776",
-        "revCount": 65,
+        "rev": "b7d99b7ea16b57600f047a8a3419291a5a0dec24",
+        "revCount": 66,
         "type": "git",
         "url": "https://git.hinteros.org/hinteros-catalog.git"
       },
