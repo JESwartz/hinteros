@@ -89,6 +89,8 @@ in
       now=$(date +%s)
       printf '{"version":1,"next":2,"profiles":{"p1":{"name":"Test","color":"teal","admin":true,"locked":false,"created_at":%s,"last_used_at":null,"appearance":{"text_scale":1.0,"high_contrast":false,"reduce_motion":false}}}}' "$now" > /var/lib/hinteros/profiles.json
       chmod 0600 /var/lib/hinteros/profiles.json
+      # The service's file (it is not root), as if it had written it.
+      chown -R hinteros-system:hinteros /var/lib/hinteros
     """)
     machine.succeed(f"nix-env -p {P} --set {envs['firefox,youtube']['out']}")
     machine.succeed("systemctl restart hinteros-system.service")
