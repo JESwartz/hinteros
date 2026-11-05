@@ -147,7 +147,7 @@ in
         assert ok("jobs.cancel", {"job_id": j1}) == {"job_id": j1}
         done = wait_job(j1)
         assert done["state"] == "cancelled", done
-        assert done["error"]["code"] == 3003 and done["error"]["message"] == "cancelled", done
+        assert done["error"]["code"] == 3003 and done["error"]["data"]["reason"] == "cancelled", done
         machine.wait_until_fails(f"systemctl is-active hinteros-job@{j1}.service")
         machine.fail("pgrep -f 'sleep 0.1'")  # the stub build was killed with its unit
         assert tree_hash() == base_tree and current_system() == orig and len(gens()) == 1

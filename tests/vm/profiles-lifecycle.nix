@@ -146,10 +146,10 @@ profiles.mkTest {
     with subtest("rename: another profile needs the admin PIN, yourself not"):
         r = sess("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha"})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "admin"}, r
-        r = sess("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha", "pin": "1357"})
+        r = sess("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha", "admin_pin": "1357"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         assert listed()["p2"]["name"] == "Sam"
-        assert sess_ok("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha", "pin": "2468"}) == {}
+        assert sess_ok("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha", "admin_pin": "2468"}) == {}
         assert sess_ok("hinteros-p1", "system.profiles.rename", {"id": "p1", "name": "Jim"}) == {}
         names = {p["id"]: p["name"] for p in public()["profiles"]}
         assert names["p1"] == "Jim" and names["p2"] == "Samantha", names
@@ -170,12 +170,12 @@ profiles.mkTest {
         machine.wait_until_succeeds("pgrep -u hinteros-p3 -f 'sleep 1000'")
         # A file of p3's in /etc: deleting the home must not follow ~/link to it.
         machine.succeed("echo keep > /etc/p3-owned && chown hinteros-p3 /etc/p3-owned")
-        r = sess("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p2", "pin": "2468", "revision": rev()})
+        r = sess("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p2", "admin_pin": "2468", "revision": rev()})
         assert r["error"]["code"] == -32602, r
-        r = sess("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "pin": "4444", "revision": rev()})
+        r = sess("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "admin_pin": "4444", "revision": rev()})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         stub_build(systems[""])
-        r = sess_ok("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "pin": "2468", "revision": rev()})
+        r = sess_ok("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "admin_pin": "2468", "revision": rev()})
         done = wait_job("hinteros-p1", r["job_id"])
         assert done["state"] == "succeeded" and done["kind"] == "profiles_remove", done
         assert current_system() == systems[""]
@@ -209,6 +209,8 @@ profiles.mkTest {
     with subtest("a profile removes itself with its own PIN; the picker comes back without it"):
         switch("hinteros-p1", "p4", "hinteros-p4")
         r = sess("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "pin": "2468", "revision": rev("hinteros-p4")})
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "self"}, r
+        r = sess("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "revision": rev("hinteros-p4")})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "self"}, r
         stub_build(systems[""])
         r = sess_ok("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "pin": "5555", "revision": rev("hinteros-p4")})

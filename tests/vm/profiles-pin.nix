@@ -147,7 +147,7 @@ profiles.mkTest {
 
     with subtest("the admin PIN: no wait, but 10 wrong tries a boot, then only a reboot helps"):
         def rename_p1(pin):
-            return sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": pin})
+            return sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "admin_pin": pin})
 
         def pam_verify(pin):
             return machine.succeed(f"printf '{pin}\\0' | env PAM_USER=hinteros-p1 hinteros-system pin verify || true").strip()
@@ -188,17 +188,17 @@ profiles.mkTest {
         machine.wait_for_unit("hinteros-system.service")
         assert pam_verify("0000") == "hinteros:wrong"
         enter("p2", "hinteros-p2", "1357")
-        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "James", "pin": "2468"}) == {}
+        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "James", "admin_pin": "2468"}) == {}
         assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p1.tries"))["data"]["failures"] == 0
 
     with subtest("admin actions need the admin PIN, from any profile"):
         # Rename another profile: no PIN, its own PIN, the admin PIN.
         r = sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim"})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "admin"}, r
-        r = sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": "1357"})
+        r = sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "admin_pin": "1357"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         assert profiles_file()["profiles"]["p1"]["name"] == "James"
-        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": "2468"}) == {}
+        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "admin_pin": "2468"}) == {}
         assert profiles_file()["profiles"]["p1"]["name"] == "Jim"
         # Renaming yourself needs nothing.
         assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p2", "name": "Sammy"}) == {}
@@ -211,11 +211,11 @@ profiles.mkTest {
         # Guest on/off and the starter set: the admin PIN (no job without it).
         r = sess("hinteros-p2", "system.guest.set", {"enabled": True, "admin_pin": "9753"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
-        r = sess("hinteros-p2", "system.starter_set.set", {"ids": [], "pin": "9753"})
+        r = sess("hinteros-p2", "system.starter_set.set", {"ids": [], "admin_pin": "9753"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         # Removing the admin profile: never.
         rev = sys_ok("hinteros-p2", "settings.get")["revision"]
-        r = sess("hinteros-p2", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "pin": "2468", "revision": rev})
+        r = sess("hinteros-p2", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "admin_pin": "2468", "revision": rev})
         assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "admin", r
         assert [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"] == []
 
