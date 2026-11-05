@@ -156,6 +156,10 @@ let
           patch.settings.admin.user = "hinteros-p2";
         }
         {
+          msg = "settings.admin.user hinteros-system is reserved";
+          patch.settings.admin.user = "hinteros-system";
+        }
+        {
           msg = "settings.admin.user must be 1 to 32 lowercase letters";
           patch.settings.admin.user = "Bad Name";
         }
@@ -188,7 +192,7 @@ let
           patch.settings.hostname = "Living Room";
         }
       ];
-      expected = lib.genList (_: true) 14;
+      expected = lib.genList (_: true) 15;
     };
     # Ids a later release may add: left out with a warning (a box on an older channel evaluates
     # the newer state.json), not refused.
@@ -533,9 +537,8 @@ let
           c2.hinteros.admin.enable
           c2.hinteros.admin.user
           c2.hinteros.admin.hashedPasswordFile
-          # A pre-1.0 box's hash moves out of the service's directory before the accounts are set.
-          (lib.hasInfix "mv /var/lib/hinteros/admin-password-hash" c2.system.activationScripts.hinteros-admin-hash.text)
-          c2.system.activationScripts.users.deps
+          # Root never takes a hash from the service's directory (it could write one there).
+          (c2.system.activationScripts ? hinteros-admin-hash)
           c2.users.users.james.isNormalUser
           c2.fileSystems."/".device
           c2.boot.loader.systemd-boot.enable
@@ -546,8 +549,7 @@ let
           true
           "james"
           "/var/lib/hinteros-root/admin-password-hash"
-          true
-          [ "hinteros-admin-hash" ]
+          false
           true
           "/dev/disk/by-uuid/11111111-2222-3333-4444-555555555555"
           true
