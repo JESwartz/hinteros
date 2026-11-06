@@ -37,7 +37,7 @@ in
         "graphics32"
         "steam-devices"
       ];
-      description = "Box features that are on (apps.md \"Box requirements\").";
+      description = "Box features that are on.";
     };
 
     knownBoxFeatures = lib.mkOption {

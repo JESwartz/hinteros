@@ -275,8 +275,7 @@ in
       type = lib.types.bool;
       default = true;
       description = ''
-        Start apps in the session daemon's bwrap sandbox (session.toml `[sandbox]`,
-        design/sandbox.md): every app with `sandbox = true` (all catalog apps but Steam) gets
+        Start apps in the session daemon's bwrap sandbox (session.toml `[sandbox]`): every app with `sandbox = true` (all catalog apps but Steam) gets
         its own home and sees none of the HinterOS sockets, the D-Bus buses, uinput or the real
         home. Off: apps run as the profile user, as before.
       '';
@@ -286,7 +285,7 @@ in
       type = lib.types.bool;
       default = true;
       description = ''
-        Enforce the `lan` app permission (design/sandbox.md): a sandboxed app without it cannot
+        Enforce the `lan` app permission: a sandboxed app without it cannot
         reach the local network (private, link-local, loopback, multicast and on-link addresses,
         this box's own services), only DNS to the box's nameservers and the internet. The session
         daemon's user unit gets `Delegate=yes`; `hinteros-lan-filter.service` loads the nftables

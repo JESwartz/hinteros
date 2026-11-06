@@ -145,8 +145,8 @@ rec {
           type = lib.types.bool;
           default = true;
           description = ''
-            Start the app in the session daemon's bwrap sandbox (session.toml `sandbox`, see
-            design/sandbox.md). Every catalog app except Steam; needs `hinteros.sandbox.enable`.
+            Start the app in the session daemon's bwrap sandbox (session.toml `sandbox`). Every
+            catalog app except Steam; needs `hinteros.sandbox.enable`.
           '';
         };
 
