@@ -12,13 +12,13 @@ hardware profiles and system tests.
 
 | Repo | Contents |
 |---|---|
-| [`hinteros`](https://justsomeshed.com/JSwartz/HinterOS/hinteros) (this one) | System flake, NixOS modules, hardware profiles, VM tests |
-| [`hinteros-launcher`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher) | Flutter launcher (the TV/console UI) |
-| [`hinteros-daemon`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon) | Rust system daemon (controller input, Home button, app launching, settings, rebuilds) |
-| [`hinteros-catalog`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog) | The App Store catalog (apps and services) |
+| [`hinteros`](https://git.hinteros.org/hinteros) (this one) | System flake, NixOS modules, hardware profiles, VM tests |
+| [`hinteros-launcher`](https://git.hinteros.org/hinteros-launcher) | Flutter launcher (the TV/console UI) |
+| [`hinteros-daemon`](https://git.hinteros.org/hinteros-daemon) | Rust system daemon (controller input, Home button, app launching, settings, rebuilds) |
+| [`hinteros-catalog`](https://git.hinteros.org/hinteros-catalog) | The App Store catalog (apps and services) |
 
-Development (pushes, the web UI) is on Forgejo at justsomeshed.com. Boxes, installers and the
-flake inputs fetch the repos read-only from `https://git.hinteros.org/<repo>.git`.
+The repos are on Forgejo at https://git.hinteros.org: pushes and the web UI, and the read-only
+fetches of boxes, installers and flake inputs (`https://git.hinteros.org/<repo>.git`).
 
 The system flake takes the launcher, daemon and catalog as flake inputs. Its `flake.lock` pins the
 exact component revisions, so each branch of this repo (`main`, `beta`, `stable`) describes

@@ -44,7 +44,7 @@
 # Environment:
 #   HINTEROS_RELEASE_KEY   signing key file (default ~/.ssh/hinteros/release_ed25519)
 #   PROMOTE_REPO_URL       remote to fetch from and push to (default: `origin` of the current repo)
-#   PROMOTE_FORGEJO_API    Forgejo API base, e.g. https://justsomeshed.com/api/v1 (default: derived)
+#   PROMOTE_FORGEJO_API    Forgejo API base, e.g. https://git.hinteros.org/api/v1 (default: derived)
 #   PROMOTE_FORGEJO_REPO   repo path for the API, e.g. JSwartz/HinterOS/hinteros (default: derived)
 #   PROMOTE_STATUS_CMD     program printing the combined-status JSON for a commit (tests)
 
