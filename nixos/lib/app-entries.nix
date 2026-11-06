@@ -1,5 +1,5 @@
 # The app entry shared by the box-wide app registry (apps.nix, `hinteros.apps.<id>`, the test VMs)
-# and the per-profile app envs (app-env.nix, apps.md "The app env"): one submodule
+# and the per-profile app envs (app-env.nix): one submodule
 # for an app's settings and one function that turns the enabled, listed apps into the daemon's
 # entries (session.toml `[[apps]]`, or the env manifest's `apps`), so both carry exactly the same
 # entries for the same apps.

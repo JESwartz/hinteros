@@ -1,4 +1,4 @@
-# The `lan` permission (design/sandbox.md): a sandboxed app without it reaches neither the home
+# The `lan` permission: a sandboxed app without it reaches neither the home
 # network nor this box's own services, only DNS and the internet. Three nodes:
 #   - router: the home router (192.168.1.3, 2001:db8:1::3), the box's gateway and nameserver
 #     (dnsmasq: inet.test is 203.0.113.2), with a web server on 8080, forwarding to ... It also

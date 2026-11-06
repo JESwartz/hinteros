@@ -71,7 +71,7 @@ let
         channel = "Switch the update channel";
         "jobs.cancel" = "Cancel a running system job";
         apps = "Install or remove apps";
-        # Profiles (profiles.md, "Authority"): PINs are checked by the service; polkit stays the
+        # Profiles: PINs are checked by the service; polkit stays the
         # per-action gate (and the future parental-controls hook).
         profiles = "Change profiles";
         "profiles.create" = "Create a profile";
@@ -112,14 +112,14 @@ let
   greeterOn = config.hinteros.profiles.greeter.enable or false;
   keyboardHome = cfg.input.keyboardHome;
 
-  # The play-only sound socket for sandboxed apps (design/sandbox.md, `mic`): a second
+  # The play-only sound socket for sandboxed apps (the `mic` permission): a second
   # pipewire-pulse at $XDG_RUNTIME_DIR/pulse/play that refuses every record stream (the rule
   # matches every client: a client can set any property it likes, but not remove one), module
   # loading (a module could open a new, unrestricted socket) and source volume. Apps with `mic`
   # get the full pulse/native. No WirePlumber rule: the restriction is in this server alone.
   playPulse = config.hinteros.sandbox.enable && config.services.pipewire.pulse.enable;
 
-  # `lan` (design/sandbox.md): apps without it start in the session daemon's `nolan` cgroup
+  # `lan`: apps without it start in the session daemon's `nolan` cgroup
   # (Delegate=yes), which hinteros-lan-filter.service keeps off the local network with an
   # nftables table of its own (`inet hinteros_lan`, `socket cgroupv2`), on whatever firewall
   # backend. hinteros-system (no CAP_NET_ADMIN, no netlink) only writes the cgroups to
@@ -440,9 +440,8 @@ in
           if config.hinteros.session.compositor == "gamescope" then "gamescope-0" else "wayland-0"
         );
       }
-      # Each app on an Xwayland of its own, from the third on (session.nix, design/sandbox.md
-      # step 3), away from the home app and the OSK on the first and from each other. Cage has
-      # one Xwayland: apps stay on :0.
+      # Each app on an Xwayland of its own, from the third on (session.nix), away from the home app
+      # and the OSK on the first and from each other. Cage has one Xwayland: apps stay on :0.
       // lib.optionalAttrs (config.hinteros.session.compositor == "gamescope") {
         apps_display = lib.mkDefault "auto+2";
         app_displays = lib.mkDefault config.hinteros.session.gamescope.appDisplays;
@@ -481,7 +480,7 @@ in
         library_debounce_ms = lib.mkDefault 500;
       };
       close.timeout_ms = lib.mkDefault 5000;
-      # The app sandbox (design/sandbox.md). bwrap by absolute store path: unprivileged, it needs
+      # The app sandbox. bwrap by absolute store path: unprivileged, it needs
       # no setuid wrapper, only user namespaces.
       sandbox = {
         enable = lib.mkDefault config.hinteros.sandbox.enable;
@@ -561,7 +560,7 @@ in
     };
 
     systemd.services = {
-      # Per-profile disk use (profiles.md, "Per-profile storage"; DECISIONS D5): started by
+      # Per-profile disk use: started by
       # hinteros-system over D-Bus when profiles.list finds the data older than an hour. Reads the
       # homes, writes /var/lib/hinteros/usage.json. As the service's account (the file is its):
       # only reading and stat in the homes need a capability.
@@ -601,7 +600,7 @@ in
         };
       };
 
-      # The time zone (time-zone.md): `time_zone.set` writes the zone to
+      # The time zone: `time_zone.set` writes the zone to
       # /run/hinteros/time-zone.request and starts this over D-Bus (no [Install]). It writes
       # state.json `settings.timeZone` (a new file renamed over the old one) and asks
       # systemd-timedated over the system bus to point /etc/localtime at the zone, so it needs
@@ -645,7 +644,7 @@ in
         };
       };
 
-      # `lan` (design/sandbox.md): loads the nftables table `inet hinteros_lan` for the cgroups in
+      # `lan`: loads the nftables table `inet hinteros_lan` for the cgroups in
       # /run/hinteros/lan-filter.json (hinteros-system restarts it over D-Bus on lan_filter.*;
       # the path unit and NetworkManager's hook when the nameservers or the network change). One
       # nft transaction: when it fails the old table stays. The only HinterOS unit with

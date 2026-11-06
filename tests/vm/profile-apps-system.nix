@@ -1,6 +1,6 @@
-# The system side of per-profile apps and accounts (apps.md build plan steps 3, 6, 9; profiles.md),
+# The system side of per-profile apps and accounts,
 # without the M7 daemon: hinteros-system's part (setting a profile's Nix profile, publishing
-# /run/hinteros/apps/<user>) is done by hand here, the way its jobs do it (DECISIONS D4). Checks:
+# /run/hinteros/apps/<user>) is done by hand here, the way its jobs do it. Checks:
 #   - accounts: p1 = hinteros-p1, p2 = hinteros-p2 (uid 20002), the guest (uid 20000), all in
 #     `hinteros`, homes 0700, no static device groups needed for the checks below;
 #   - /nix/var/nix/profiles/hinteros{,/apps} root 0755; a profile user cannot repoint its link;

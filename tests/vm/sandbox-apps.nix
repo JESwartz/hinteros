@@ -1,4 +1,4 @@
-# The real native apps in the app sandbox under cage (design/sandbox.md, step 4): Jellyfin
+# The real native apps in the app sandbox under cage: Jellyfin
 # (Qt/mpv, Qt WebEngine), Plex HTPC (Qt WebEngine in its own FHS bwrap, unfree), VacuumTube
 # (Electron), Moonlight (Qt) and the Firefox kiosk (YouTube, on a local https page) and plain
 # Firefox entries. Each one starts with apps.launch, must map a window on the apps display, still
@@ -243,7 +243,7 @@ in
 
     # Not caused by the sandbox, or by design:
     EXPECTED = re.compile("|".join([
-        # The D-Bus buses are hidden by design (design/sandbox.md); Chromium (Electron, Qt
+        # The D-Bus buses are hidden by design; Chromium (Electron, Qt
         # WebEngine) logs it and goes on without them.
         r"dbus/bus\.cc.*Failed to connect to the bus", r"dbus/object_proxy\.cc.*NameHasOwner",
         # GTK (Firefox): the accessibility bus, through the session bus.

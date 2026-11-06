@@ -1,4 +1,4 @@
-# The guest (profiles.md "Guest", apps.md "Where it lives"; build plan step 9, VM `guest`).
+# The guest (VM `guest`).
 # Greeter mode; p1 = `hinteros-p1` (James, admin, unlocked); the starter set is Firefox + YouTube.
 #   - The guest starts with the starter env (its link under /run points straight at it), enters
 #     from the picker without a PIN, has no PIN, is never admin, and cannot do admin actions

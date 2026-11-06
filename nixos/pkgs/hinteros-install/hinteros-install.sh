@@ -810,7 +810,7 @@ check_channel_rev() {
 }
 check_channel_rev
 
-# state.json (schema 2, profiles.md "Installer"): one spare account (p1) and no
+# state.json (schema 2): one spare account (p1) and no
 # profile (first-boot mode creates the admin profile), no apps (each profile has its own; the
 # picks become the starter set, below). `requirements` are the box features the picked apps need
 # (Steam: graphics32, steam-devices), so the system stage already has them and a profile created
@@ -841,7 +841,7 @@ app_requirements() {
     '. as $a | [$idx[0].entries[] | select(.id as $i | $a | index($i)) | (.boxFeatures // [])[]] | unique' <<<"$1"
 }
 requirements=$(app_requirements "$(json_array "${apps[@]}")")
-# The starter set (apps.md "Starter set"): which apps new profiles and guests start with.
+# The starter set: which apps new profiles and guests start with.
 write_starter() { # JSON array of app ids, [DIR]
   local dir=${2:-$MNT/var/lib/hinteros}
   (
@@ -1881,7 +1881,7 @@ apps_rescue() {
 # A keepData plan keeps the starter set, the app envs and everything in /var/lib/hinteros.
 [ "$keep_data" = false ] || finish
 
-# The starter env (apps.md "Installer and first boot"): the same `config.hinteros.appEnv.build`
+# The starter env: the same `config.hinteros.appEnv.build`
 # as on the box, against the target's configuration, built into the target's store, and set as
 # the target's /nix/var/nix/profiles/hinteros/starter. Offline, every subset of the apps on this
 # installer is in its store already (nixos/installer). No profile is created here: first-boot mode

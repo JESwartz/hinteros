@@ -1,4 +1,4 @@
-# Steam's FHS bwrap hides HinterOS's sockets (design/sandbox.md, step 5; nixos/lib/steam.nix).
+# Steam's FHS bwrap hides HinterOS's sockets (nixos/lib/steam.nix).
 # Steam itself is unfree and needs the network, so this runs `.run-free` (steam-run without
 # Steam): the same bwrap script with the same extra arguments. As the session user, inside:
 # no /run/hinteros/system.sock, no $XDG_RUNTIME_DIR/hinteros/{session,osk}.sock, and both

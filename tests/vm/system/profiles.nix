@@ -1,4 +1,4 @@
-# Shared parts of the profile VM tests (profiles.md "VM tests", apps.md build plan steps 6-10):
+# Shared parts of the profile VM tests:
 # a box with profile accounts, their metadata and PINs as hinteros-system keeps them,
 # optional prebuilt app envs (with the stub `nix` of stub-nix-envs.nix, so jobs need no network),
 # specialisations that stand for the systems the jobs' apply flow "builds", and Python helpers
@@ -60,7 +60,7 @@ in
 rec {
   inherit userOf pinHash stubbornApp;
 
-  # state.json (DECISIONS D6).
+  # state.json.
   mkState =
     {
       accounts ? [
@@ -83,7 +83,7 @@ rec {
       inherit requirements services;
     };
 
-  # profiles.json (DECISIONS D4) for `profiles`; `next` is one past the highest account.
+  # profiles.json for `profiles`; `next` is one past the highest account.
   profilesJson =
     state: profiles:
     pkgs.writeText "profiles.json" (

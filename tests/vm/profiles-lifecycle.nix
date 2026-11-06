@@ -1,5 +1,4 @@
-# Creating, renaming and removing profiles (profiles.md "Declarative accounts", "Creating a
-# profile", "Removing a profile", "Authority"; VM `profiles-lifecycle`). Greeter mode; p1 =
+# Creating, renaming and removing profiles (VM `profiles-lifecycle`). Greeter mode; p1 =
 # `hinteros-p1` (James, admin, unlocked, PIN 2468), p2 = `hinteros-p2` (Sam, unlocked, PIN 1357);
 # the starter env is Firefox + YouTube.
 #   - profiles.create from p1's session is a job whose apply flow adds the account (a rebuild:

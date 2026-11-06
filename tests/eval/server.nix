@@ -1,4 +1,4 @@
-# Eval tests for server.nix (design/server.md): a box with all four M10 services evaluates (Plex's
+# Eval tests for server.nix: a box with all four M10 services evaluates (Plex's
 # unfree package allowed only then), the firewall follows the entries' `ports` (`lan` to the local
 # networks and tailscale0, `any` to all, SSH on tailscale0 while both are on), the Jellyfin setup
 # unit is required by jellyfin.service and has its own network, hardware transcoding follows the

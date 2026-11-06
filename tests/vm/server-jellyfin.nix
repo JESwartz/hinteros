@@ -1,4 +1,4 @@
-# Jellyfin server (design/server.md, M10 step 2) on a built box with `jellyfin-server` enabled:
+# Jellyfin server (M10) on a built box with `jellyfin-server` enabled:
 #   - hinteros-jellyfin-setup ran before jellyfin.service: `setup-done`, `admin-password` and
 #     `api-key` are 0640 root:hinteros-system in root's 2750 directory (the service reads them), no
 #     `setup-started` left;

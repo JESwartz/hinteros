@@ -181,7 +181,7 @@ let
         ];
       };
     # Same ids, same system: same store path, whatever the order, duplicates or unrelated box
-    # settings; Steam is stock pkgs.steam, so it does not depend on the box's graphics (spike 8).
+    # settings; Steam is stock pkgs.steam, so it does not depend on the box's graphics.
     testEnvDeterministic = {
       expr = [
         (
@@ -357,7 +357,7 @@ let
       );
       expected = false;
     };
-    # design/sandbox.md: every app entry says whether it is sandboxed and carries the catalog's
+    # Every app entry says whether it is sandboxed and carries the catalog's
     # permissions; session.toml turns the sandbox on with bwrap by store path.
     testSandboxSettings = {
       expr = {
@@ -410,7 +410,7 @@ let
         protectTunables = false;
       };
     };
-    # design/sandbox.md `lan`: the daemon owns its cgroup subtree, session.toml turns the filter
+    # `lan`: the daemon owns its cgroup subtree, session.toml turns the filter
     # on, hinteros-system takes lan_filter.* and the oneshot unit (the only one with
     # CAP_NET_ADMIN) loads the table; the path unit follows /etc/resolv.conf. Off: none of it.
     testLanFilter =
@@ -803,8 +803,8 @@ let
         "unset"
       ];
     };
-    # gamescope: each app on an Xwayland of its own from the third on, patched
-    # (design/sandbox.md step 3), their number read before gamescope starts; cage: one display.
+    # gamescope: each app on an Xwayland of its own from the third on, patched, their number
+    # read before gamescope starts; cage: one display.
     testGamescopeAppsDisplay = {
       expr = [
         (settings gs).gamescope.apps_display
@@ -893,7 +893,7 @@ let
       expr = [
         (lib.hasSuffix "esr" (fx oskEsr).finalPackage.version)
         (hasSub (fx oskEsr).autoConfig ''lockPref("xpinstall.signatures.required", false);'')
-        # Spike 8: the signature pref is box-wide in the policies too, so any env's Firefox gets it.
+        # The signature pref is box-wide in the policies too, so any env's Firefox gets it.
         (fx oskEsr).policies.Preferences."xpinstall.signatures.required"
         (fx oskEsr).hasNativeHost
         (fx oskEsr).policies.ExtensionSettings.${extId}.installation_mode

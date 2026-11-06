@@ -1,4 +1,4 @@
-// HinterOS: the Jellyfin app on this box signs in by itself (design/server.md, spike S1). The
+// HinterOS: the Jellyfin app on this box signs in by itself. The
 // session daemon starts the app on this page, served by Jellyfin at /web/hinteros/signin.html, with
 //   #s=<ServerId>&u=<UserId>&d=<DeviceId>&AccessToken=<token>
 // (a token hinteros-system made for the profile's own Jellyfin user). The page stores

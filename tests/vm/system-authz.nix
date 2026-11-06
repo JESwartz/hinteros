@@ -4,7 +4,7 @@
 # user gets authentication_required. A rules file returning NO is honored; pkcheck agrees per
 # action; every decision is in the system journal.
 #
-# Two profiles (profiles.md "Authority"), on a second box (greeter mode; p1 = James, the
+# Two profiles, on a second box (greeter mode; p1 = James, the
 # admin profile, PIN 2468; p2 = Sam, PIN 1357, on screen; p3 = Alex): p2 cannot rename, remove or
 # reset the PIN of another profile, change the starter set or the guest with its own PIN or
 # another profile's, only with the admin PIN; the admin profile is never removable and its PIN
@@ -208,7 +208,7 @@ in
         assert (huid, "allowed") in seen, seen
         machine.fail("runuser -u hinteros-p1 -- journalctl --system HINTEROS_AUDIT=1 -q | grep -q HINTEROS")
 
-    # ---- two profiles (profiles.md "Authority"): a second box with the greeter ----------------
+    # ---- two profiles: a second box with the greeter -------------------------------------------
     machine.shutdown()
     machine = twoprofiles
     boot_box()

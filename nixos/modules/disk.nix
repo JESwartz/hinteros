@@ -5,7 +5,7 @@
 # Both are found by UUID (state.json `disk.rootUuid`, `disk.espUuid`, written by the installer), so
 # a second HinterOS disk in the box cannot confuse the boot. The subvolumes let a reinstall replace
 # the system and keep the data (`keepData`). No snapshots and no scrub service; generations and
-# /etc/hinteros snapshots are the rollback story. No encryption (threat-model.md, decided).
+# /etc/hinteros snapshots are the rollback story. No encryption (decided).
 { config, lib, ... }:
 let
   cfg = config.hinteros.disk;

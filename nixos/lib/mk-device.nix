@@ -12,7 +12,7 @@
   # A checked-in device (`self.lib.devices.<selfFlake>`, the dev box) without a config dir: the
   # snapshot gets a generated device flake naming this repo by store path, whose
   # `nixosConfigurations.hinteros` is `self.lib.devices.<selfFlake> { state = <its state.json>; }`
-  # (spike 8 item 6). So /etc/hinteros on the box evaluates like any box's, app envs included, and
+  # So /etc/hinteros on the box evaluates like any box's, app envs included, and
   # a state.json that hinteros-system rewrites there takes effect.
   selfFlake ? null,
   # Extra NixOS modules (hardware profiles, the dev box's extras).
@@ -30,7 +30,7 @@ let
 
   # This repo's source and every flake input below it. Kept with the system
   # (system.extraDependencies), so a GC never leaves the box unable to evaluate an app env
-  # offline (spike 8: otherwise only nixpkgs' source survives).
+  # offline (otherwise only nixpkgs' source survives).
   flakeSources = map (x: x.flake.outPath) (
     builtins.genericClosure {
       startSet = [

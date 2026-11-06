@@ -27,7 +27,7 @@
         git-hooks.follows = "git-hooks";
       };
     };
-    # The App Store catalog (design/catalog.md): app entries, Store index and vendor terms, locked
+    # The App Store catalog: app entries, Store index and vendor terms, locked
     # per release like the other inputs.
     hinteros-catalog = {
       url = "git+https://git.hinteros.org/hinteros-catalog.git?ref=pre-1.0";
@@ -53,7 +53,7 @@
 
       overlayModule = import ./nixos/modules/overlay.nix { inherit self; };
 
-      # The catalog (design/catalog.md) as a keyed module: importing it twice is harmless.
+      # The catalog as a keyed module: importing it twice is harmless.
       catalogModule = {
         key = "hinteros:catalog";
         imports = [

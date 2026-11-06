@@ -1,4 +1,4 @@
-# Plex, Tailscale and Cloudflare Tunnel (design/server.md, M10 step 2) on a built box with SSH on:
+# Plex, Tailscale and Cloudflare Tunnel (M10) on a built box with SSH on:
 #   - firewall from the entries' `ports`: Plex's 32400/tcp and Tailscale's 41641/udp open to all
 #     sources (a LAN node reaches 32400 also from 198.51.100.0/24, outside allowFrom), Plex's GDM
 #     ports (32410, 32412-32414/udp) to the local networks only, and on tailscale0 the `lan`

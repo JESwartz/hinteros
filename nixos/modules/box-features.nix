@@ -1,4 +1,4 @@
-# Box features (apps.md, "Box requirements"): the closed list of box-wide settings an app can ask
+# Box features: the closed list of box-wide settings an app can ask
 # for in its catalog entry (`box`). A feature runs nothing and installs nothing for users; it is
 # on when any owner (a profile, the guest, the starter set) has an app that needs it.
 #
@@ -17,7 +17,7 @@ let
   # Feature -> NixOS config. Keep in step with hinteros-catalog's lib `features`.
   features = {
     # 32-bit graphics drivers and audio for Steam's 32-bit runtime and games. Steam's FHS env
-    # finds them at /run/opengl-driver-32 (spike 8 item 4).
+    # finds them at /run/opengl-driver-32.
     graphics32 = {
       hardware.graphics.enable32Bit = true;
       services.pipewire.alsa.support32Bit = true;

@@ -66,7 +66,7 @@ let
   hostname = settings.hostname or null;
   hostnameOk =
     builtins.isString hostname && builtins.match "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" hostname != null;
-  # The automatic clean-up (storage.md). Absent fields: today's policy (maintenance.nix defaults).
+  # The automatic clean-up. Absent fields: today's policy (maintenance.nix defaults).
   cleanup = settings.cleanup or { };
   cleanupFrequencies = [
     "daily"
@@ -84,7 +84,7 @@ let
   };
   # A frequency a later release adds: the default, with a warning.
   frequencyKnown = lib.elem (cleanup.frequency or "weekly") cleanupFrequencies;
-  # The time zone (time-zone.md): a zone name of tzdata, e.g. "America/Chicago"; absent means
+  # The time zone: a zone name of tzdata, e.g. "America/Chicago"; absent means
   # UTC. time-zone.nix applies it from the live state.json at activation, not from here (a zone
   # this tzdata does not have: UTC).
   timeZone = settings.timeZone or null;
@@ -100,7 +100,7 @@ let
   unknownFeatures = lib.filter (f: !(lib.elem f cfg.knownBoxFeatures)) requirements;
   unknownServices = lib.filter (s: !(lib.elem s serviceIds)) services;
 
-  # Accounts (profiles.md, "Declarative accounts"): `p<N>` is the Unix user `hinteros-p<N>`.
+  # Accounts: `p<N>` is the Unix user `hinteros-p<N>`.
   idOk = id: builtins.isString id && builtins.match "p[1-9][0-9]{0,2}" id != null;
   ids = map (p: p.id or null) profiles;
   # More than 8 profiles fail on purpose, unlike the unknown values above that are left out with

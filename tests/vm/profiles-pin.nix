@@ -1,5 +1,4 @@
-# PINs (profiles.md "PINs and locking", "PAM: where the PIN and the kill are enforced",
-# "Authority"; DECISIONS D9, D14, H2, J4; VM `profiles-pin`). Greeter mode; p1 = `hinteros-p1`
+# PINs (VM `profiles-pin`). Greeter mode; p1 = `hinteros-p1`
 # (James, the admin profile, locked, PIN 2468), p2 = `hinteros-p2` (Sam, locked, PIN 1357), p3 =
 # `hinteros-p3`, a spare account (no metadata), and the admin account `hinteros-admin`.
 #   - greetd's PAM stack, probed over greetd's IPC as root: it refuses root, the admin account,

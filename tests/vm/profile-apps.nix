@@ -1,8 +1,8 @@
-# Per-profile apps through the real chain (apps.md build plan step 6, VM `profile-apps`, single
+# Per-profile apps through the real chain (VM `profile-apps`, single
 # user): a launcher-like client of the session socket (API 0.18) -> the session daemon's relay ->
 # hinteros-system (0.5) -> a job unit -> the profile's Nix profile -> the published link -> the
 # session daemon's apps.list. Install Moonlight into p1 with no new system generation, roll back,
-# remove with delete_data. NEEDS the M7 daemon (DECISIONS D2-D10).
+# remove with delete_data. NEEDS the M7 daemon.
 #
 # STUBBED: evaluating and building envs (system/stub-nix-envs.nix): the envs this test uses are
 # built with the VM (config.hinteros.appEnv.build), the stub answers the job's `nix eval`/`nix

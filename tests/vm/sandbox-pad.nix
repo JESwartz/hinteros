@@ -1,4 +1,4 @@
-# Controller input and the app sandbox (design/sandbox.md, step 4): while HinterOS UI is in front
+# Controller input and the app sandbox: while HinterOS UI is in front
 # (a PIN, a password), no sandboxed app may read the controller. An app with the `gamepad`
 # permission gets /dev/input; there it can open InputPlumber's virtual pads (uaccess), and the
 # physical pads are grabbed and hidden by InputPlumber. The session daemon puts every pad in

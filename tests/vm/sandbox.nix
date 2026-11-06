@@ -1,4 +1,4 @@
-# The app sandbox under cage (design/sandbox.md): apps.launch starts an app in the session
+# The app sandbox under cage: apps.launch starts an app in the session
 # daemon's bwrap sandbox. A probe app records from inside what it can reach: none of the
 # HinterOS sockets, the D-Bus buses, uinput, the compositor's Wayland socket or the real home;
 # the X display, pulse/native and a writable home of its own work. ~/Downloads is there only with

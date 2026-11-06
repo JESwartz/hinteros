@@ -33,7 +33,7 @@ let
   userFor = id: "hinteros-${id}";
   uidFor = id: 20000 + lib.toInt (lib.removePrefix "p" id);
 
-  # The PAM helper (profiles.md, "PAM: where the PIN and the kill are enforced"): a subcommand of
+  # The PAM helper (it enforces the PIN and ends other accounts' processes): a subcommand of
   # hinteros-system. pam_exec runs it with an empty PATH.
   pin = "${lib.getExe config.hinteros.daemon.system.package} pin";
 
@@ -167,7 +167,7 @@ in
       })
 
       (lib.mkIf greeterOn {
-        # DECISIONS D2/D8: the profile session the greeter starts over greetd IPC.
+        # The profile session the greeter starts over greetd IPC.
         hinteros.daemon.session.settings.greeter.session_command = [
           "/run/current-system/hinteros-console/session"
         ];
@@ -185,8 +185,8 @@ in
         # The profile sessions (greetd's `greetd` service): hinteros members only (never the admin
         # account or root); no PIN when the helper says the profile may be entered without one
         # (unlocked, the guest, a one-time token, the spare in first-boot mode), else the PIN;
-        # pam_permit for setcred (spike 7). Before pam_systemd opens the session, every other
-        # account's processes are ended (spike 7: logind alone leaves SIGTERM-ignoring ones).
+        # pam_permit for setcred. Before pam_systemd opens the session, every other
+        # account's processes are ended (logind alone leaves SIGTERM-ignoring ones).
         # First of all, `splash` shows the launcher's "Loading <name>…" page on greetd's VT
         # (PAM_TTY): between the last frame of the picker and the first of the session (~2 s on
         # real hardware) the framebuffer of that VT is what the TV shows. The helper starts a
@@ -217,7 +217,7 @@ in
           '';
         };
 
-        # spike 7: a closed session's processes end about 140 ms later; `end-others` handles the
+        # A closed session's processes end about 140 ms later; `end-others` handles the
         # ones that ignore SIGTERM. No lingering user managers.
         services.logind.settings.Login = {
           KillUserProcesses = true;

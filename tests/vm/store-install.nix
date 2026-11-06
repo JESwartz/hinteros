@@ -1,4 +1,4 @@
-# The Store backend per profile (session API 0.18 / system API 0.10, apps.md), through the real
+# The Store backend per profile (session API 0.18 / system API 0.10), through the real
 # chain: a client of the session socket (as the launcher would be) -> the session daemon's relay
 # -> hinteros-system (seat0 owner, polkit `org.hinteros.system.apps` granted to the hinteros group,
 # audit) -> a job unit as root -> p1's Nix profile, terms-accepted.json, the removal of app data
@@ -24,7 +24,7 @@ let
     [ "firefox" ]
   ];
   key = lib.concatStringsSep ",";
-  # An env with only its manifest (DECISIONS D3).
+  # An env with only its manifest.
   envOf =
     ids:
     pkgs.writeTextDir "share/hinteros/apps.json" (

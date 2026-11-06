@@ -1,8 +1,6 @@
-# Switching profiles without a reboot (profiles.md "A switch, step by step", "PAM: where the PIN
-# and the kill are enforced", "Device access per seat"; VM `profiles-switch` and
-# `profiles-blocked-app`). Greeter mode; p1 = `hinteros-p1` (admin, unlocked, PIN 1357), whose apps
-# are one stubborn "Moonlight" (an app that ignores SIGTERM, like a hung game); p2 =
-# `hinteros-p2` (locked, PIN 2468, no apps).
+# Switching profiles without a reboot (VM `profiles-switch` and `profiles-blocked-app`). Greeter
+# mode; p1 = `hinteros-p1` (admin, unlocked, PIN 1357), whose apps are one stubborn "Moonlight" (an
+# app that ignores SIGTERM, like a hung game); p2 = `hinteros-p2` (locked, PIN 2468, no apps).
 #   - p1 opens from the picker without a PIN. Beside the stubborn app it leaves things the
 #     session daemon never started: a transient user service, a `setsid` process and a process
 #     holding /dev/uinput open (which only works through uaccess).
@@ -89,7 +87,7 @@ profiles.mkTest {
         machine.wait_until_fails(f"test -e {path}.cmd", timeout=30)
 
     def lan_filter(owner, gone):
-        # design/sandbox.md `lan`: the table filters the nolan cgroup of the profile in front only
+        # `lan`: the table filters the nolan cgroup of the profile in front only
         # (the other's session ended, and its daemon cleared its own).
         machine.wait_until_succeeds(f"${pkgs.nftables}/bin/nft list table inet hinteros_lan | grep -q 'comment \"uid {uid(owner)}\"'", timeout=60)
         machine.wait_until_fails(f"${pkgs.nftables}/bin/nft list table inet hinteros_lan | grep -q 'comment \"uid {uid(gone)}\"'", timeout=60)

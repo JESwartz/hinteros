@@ -205,7 +205,7 @@ pkgs.runCommand "hinteros-state-check"
     jq '. + {nonsense: true}' states/minimal/system/state.json > unknown.json
     hinteros-system check-state unknown.json
 
-    # settings.timeZone (time-zone.md): absent in every state above; a zone name is accepted, a
+    # settings.timeZone: absent in every state above; a zone name is accepted, a
     # value that is not a string is not.
     jq '.settings.timeZone = "America/Chicago"' states/minimal/system/state.json > tz.json
     hinteros-system check-state tz.json

@@ -22,7 +22,7 @@ let
       extraModules = extra;
     }).config;
 
-  # The automatic clean-up from state.json `settings.cleanup` (storage.md).
+  # The automatic clean-up from state.json `settings.cleanup`.
   state2 = cleanup: {
     schemaVersion = 2;
     base = "unstable";
@@ -450,7 +450,7 @@ let
         ];
       };
 
-    # The time zone (time-zone.md): NixOS does not own /etc/localtime; the activation script
+    # The time zone: NixOS does not own /etc/localtime; the activation script
     # reads the live state.json after `etc`, whatever the state says at evaluation.
     testTimeZoneWiring =
       let

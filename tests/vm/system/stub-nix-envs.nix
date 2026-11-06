@@ -1,7 +1,7 @@
 # A stub `nix` for the job unit's PATH in the per-profile app tests: app envs are prebuilt by the
 # test (config.hinteros.appEnv.build of the id sets it uses, in the VM's closure) and listed in
-# `envs` = { "<ids joined by ,>" = { drv; out; }; }, so a job's env evaluation (DECISIONS D3:
-# `nix eval --impure --json --expr '…(builtins.readFile /run/hinteros/jobs/<job>/envs.json)'`)
+# `envs` = { "<ids joined by ,>" = { drv; out; }; }, so a job's env evaluation
+# (`nix eval --impure --json --expr '…(builtins.readFile /run/hinteros/jobs/<job>/envs.json)'`)
 # and build (`nix build '<drv>^out' …`) need neither the device flake's inputs nor a network.
 #   - `eval` with an expr naming an envs.json: prints [{drv, out}] for its id lists (sorted,
 #     de-duplicated; an id set the test did not prebuild fails like an evaluation error);

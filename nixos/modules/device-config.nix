@@ -3,7 +3,7 @@
 # boot-time oneshot (hinteros-config-sync) restores that snapshot into /etc/hinteros when the
 # two differ, so /etc/hinteros always describes the generation that is running, also after a
 # rollback (from Settings or from boot counting). The one exception is state.json's
-# `settings.timeZone` (time-zone.md): it changes without a rebuild, so the sync keeps the live one.
+# `settings.timeZone`: it changes without a rebuild, so the sync keeps the live one.
 {
   config,
   lib,
@@ -36,7 +36,7 @@ let
       ''
     else if cfg.embeddedFlake != null && config.hinteros.state != null then
       # A checked-in device (the dev box): a generated device flake naming the system repo by
-      # store path, so `path:/etc/hinteros` evaluates like on any box (spike 8 item 6).
+      # store path, so `path:/etc/hinteros` evaluates like on any box.
       pkgs.runCommand "hinteros-config-snapshot"
         {
           inherit (cfg.embeddedFlake) flake lock;
@@ -84,7 +84,7 @@ let
       trap 'rm -rf "$work" ''${tmp:+"$tmp"}' EXIT
 
       # What each managed file must be: the snapshot's. Except `settings.timeZone` in state.json,
-      # which is live (time-zone.md): hinteros-system changes it without a rebuild, so a zone in
+      # which is live: hinteros-system changes it without a rebuild, so a zone in
       # the live state.json is kept (activation has already applied it).
       want() {
         if [ "$1" = state.json ] && [ -e "$work/state.json" ]; then

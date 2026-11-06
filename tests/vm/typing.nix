@@ -148,7 +148,7 @@ in
     machine.screenshot("typing-before")
 
     # The extension is installed and active in the kiosk profile (policy force-install on ESR),
-    # which is in the app's sandbox home (design/sandbox.md)...
+    # which is in the app's sandbox home...
     machine.wait_until_succeeds(
         "jq -e '.addons[] | select(.id == \"hinteros-osk@hinteros\" and .active == true)' "
         "/home/hinteros-p1/.local/share/hinteros/sandbox/firefox/.local/share/hinteros/firefox/firefox/extensions.json",

@@ -52,8 +52,8 @@ in
 
     # Autologin: InputPlumber's shipped polkit rule grants its actions to this group (or wheel).
     # With the greeter no account is in it: the active local session of a profile (or the
-    # greeter) gets the actions instead (profiles.md, "Device access per seat"; spike 7: polkit
-    # sees the profile's user service as active and local, a system service as that user not).
+    # greeter) gets the actions instead (polkit sees the profile's user service as active and
+    # local, a system service as that user not).
     users.groups.inputplumber = { };
     users.users.${config.hinteros.session.user}.extraGroups = lib.optionals (!greeterOn) [
       "inputplumber"

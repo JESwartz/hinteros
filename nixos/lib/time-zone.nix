@@ -1,4 +1,4 @@
-# The one rule for a time zone name in state.json `settings.timeZone` (time-zone.md): one or more
+# The one rule for a time zone name in state.json `settings.timeZone`: one or more
 # `/`-separated parts that each start with a capital letter (this keeps out `..`, absolute paths
 # and tzdata's other files: `posix/`, `right/`, `zone1970.tab`, `tzdata.zi`, ...), naming a file
 # of tzdata's zoneinfo. state.nix checks it at evaluation (`wellFormed` must hold; `ok`, which

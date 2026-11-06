@@ -1,6 +1,6 @@
-# Locked profiles at the picker and after sleep (profiles.md "PINs and locking", "Boot, sleep and
-# other entries"; VM `profiles-lock`). Greeter mode; p1 = `hinteros-p1` (James, admin, unlocked, PIN
-# 2468), p2 = `hinteros-p2` (Sam, locked, PIN 1357), p3 = `hinteros-p3` (Alex, unlocked, PIN 3690).
+# Locked profiles at the picker and after sleep (VM `profiles-lock`). Greeter mode; p1 =
+# `hinteros-p1` (James, admin, unlocked, PIN 2468), p2 = `hinteros-p2` (Sam, locked, PIN 1357), p3 =
+# `hinteros-p3` (Alex, unlocked, PIN 3690).
 #   - The picker asks a locked profile for its PIN (a wrong one is refused) and opens an unlocked
 #     one without asking.
 #   - Sleep: the session daemon holds a logind sleep delay inhibitor. On logind's

@@ -1,7 +1,6 @@
-# The Jellyfin app signs in to the box's own Jellyfin server by itself (design/server.md, spike S1
-# "seed page"). Greeter mode, `jellyfin-server` on from boot, p1 (`hinteros-p1`, admin) has the
-# Jellyfin app (jellyfin-desktop, Qt WebEngine, in the app sandbox, software rendering), p2 has
-# none.
+# The Jellyfin app signs in to the box's own Jellyfin server by itself (a seed page). Greeter mode,
+# `jellyfin-server` on from boot, p1 (`hinteros-p1`, admin) has the Jellyfin app (jellyfin-desktop,
+# Qt WebEngine, in the app sandbox, software rendering), p2 has none.
 #   - Jellyfin serves the seed page /web/hinteros/signin.html (+ signin.js) from the web
 #     directory bound over its own, and the rest of jellyfin-web still;
 #   - apps.launch jellyfin-desktop from p1's session: the session daemon gets p1's token

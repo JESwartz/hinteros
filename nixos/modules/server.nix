@@ -1,4 +1,4 @@
-# The Server section (M10, design/server.md): what the system gives the enabled catalog services
+# The Server section (M10): what the system gives the enabled catalog services
 # (`hinteros.catalog.services`, state.json `services`) beyond their restricted `service` modules,
 # which may not touch the network. Driven by the entries' metadata:
 #   - the firewall from their `ports`: `lan` → the local networks (`hinteros.ssh.allowFrom`, the
@@ -76,7 +76,7 @@ let
   # The nixpkgs unit's command line, so the wizard sees the server the real unit starts.
   jfCommand = "${lib.getExe jf.package} --datadir '${jf.dataDir}' --configdir '${jf.configDir}' --cachedir '${jf.cacheDir}' --logdir '${jf.logDir}'";
 
-  # Jellyfin's first run (design/server.md, "Jellyfin first run"). An unconfigured Jellyfin lets
+  # Jellyfin's first run. An unconfigured Jellyfin lets
   # anyone who reaches it create the admin, so it never runs where anyone could: this unit has
   # PrivateNetwork (loopback only, its own) and starts Jellyfin in it as the jellyfin user, does
   # the wizard over loopback, makes the API key for hinteros-system, stops it and writes the
@@ -222,7 +222,7 @@ let
     '';
   };
 
-  # The Jellyfin app's sign-in page (spike S1): jellyfin-web with `hinteros/signin.html` and
+  # The Jellyfin app's sign-in page: jellyfin-web with `hinteros/signin.html` and
   # `signin.js` added, bound read-only over the web directory the server is started with
   # (`--webdir` in the package's wrapper), so Jellyfin serves it at /web/hinteros/signin.html
   # without a rebuild of the server. The session daemon starts the app there with the profile's

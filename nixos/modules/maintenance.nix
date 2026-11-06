@@ -16,7 +16,7 @@ let
   # With the greeter the launcher runs as the greeter or as whichever profile is on screen.
   greeterOn = config.hinteros.profiles.greeter.enable or false;
 
-  # The automatic clean-up (storage.md): trim the system's generations and every app profile's,
+  # The automatic clean-up: trim the system's generations and every app profile's,
   # then collect garbage, under one flock. The daemon's manual clean-up jobs (their own trim and
   # `nix-store --gc`) are serialised with it by Nix's profile and GC locks; they may take the flock
   # too. No boot entry is rewritten: entries are the newest `configurationLimit` (keepSystem, at

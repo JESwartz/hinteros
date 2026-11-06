@@ -1,4 +1,4 @@
-# Firefox for the TV apps (apps.md, "Firefox kiosk apps"; spike 8 item 3):
+# Firefox for the TV apps:
 #   - box-wide: the enterprise policies at /etc/firefox/policies/policies.json (telemetry off,
 #     DRM and VA-API prefs, the force-installed OSK extension and no other add-on, and on ESR the
 #     locked `xpinstall.signatures.required = false`). Firefox reads that file whichever binary runs,
@@ -63,7 +63,7 @@ let
       extraPrefsFiles = (old.extraPrefsFiles or [ ]) ++ [
         (p.writeText "firefox-autoconfig.js" autoConfig)
       ];
-      # The OSK extension's host manifest, in Firefox's own MOZ_SYSTEM_DIR (spike 8: the only
+      # The OSK extension's host manifest, in Firefox's own MOZ_SYSTEM_DIR (the only
       # system place the wrapped Firefox looks).
       nativeMessagingHosts = (old.nativeMessagingHosts or [ ]) ++ [ p.hinteros-session ];
     });
@@ -222,7 +222,7 @@ in
           # Autoplay without a mouse click, for TV UIs.
           "media.autoplay.default" = lock 0;
         }
-        # Spike 8: on ESR this locked policy pref is enough for the unsigned OSK extension, so a
+        # On ESR this locked policy pref is enough for the unsigned OSK extension, so a
         # Firefox from any env gets it from this box-wide file.
         // lib.optionalAttrs (cfg.oskExtension == "esr-unsigned") {
           "xpinstall.signatures.required" = lock false;

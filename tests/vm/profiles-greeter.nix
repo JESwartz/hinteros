@@ -1,4 +1,4 @@
-# Greeter mode end to end (profiles.md "The pieces", DECISIONS D7-D9, S4, J1-J3): a box
+# Greeter mode end to end: a box
 # with `hinteros.profiles.greeter.enable` boots into the picker (cage + the launcher with
 # --greeter, the session daemon in greeter mode as `hinteros-greeter`). Profiles: p1 =
 # `hinteros-p1`, the admin, locked with PIN 2468; p2 = `hinteros-p2`, unlocked, no PIN; the guest. A

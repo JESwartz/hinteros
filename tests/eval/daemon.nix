@@ -50,7 +50,7 @@ let
   template = builtins.readFile ../../nixos/templates/device-flake.nix.in;
 
   results = lib.runTests {
-    # Profiles (DECISIONS D5): the session daemon runs for every account, the usage scan, and
+    # Profiles: the session daemon runs for every account, the usage scan, and
     # the polkit grant that leaves ssh and the admin PIN reset to the admin password.
     testProfileUnits = {
       expr = [
@@ -134,7 +134,7 @@ let
           false
         ];
       };
-    # The time zone helper (time-zone.md): the service itself never writes /etc; this oneshot,
+    # The time zone helper: the service itself never writes /etc; this oneshot,
     # started on demand, may write /etc/hinteros and /run/hinteros only (not all of /etc:
     # systemd-timedated, which NixOS ships bus-activated, replaces /etc/localtime), with no
     # network; its only capabilities reach the request and the lock in the service's run

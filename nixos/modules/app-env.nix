@@ -1,4 +1,4 @@
-# Per-profile apps (apps.md, "The app env", "Where it lives", "The session side"; spike 8).
+# Per-profile apps.
 #
 #   config.hinteros.appEnv.build [ "<catalog app id>" ... ]
 #
@@ -14,7 +14,7 @@
 # system's own pkgs never lists app packages. A changed predicate changes no
 # derivation hash, so free apps still come from the cache.
 #
-# The rest of this module is the system side of per-profile apps (build plan step 6):
+# The rest of this module is the system side of per-profile apps:
 #   - /nix/var/nix/profiles/hinteros/{apps/<user>,starter}: root-owned Nix profiles (GC roots),
 #     set by hinteros-system's jobs with `nix-env -p … --set <env>`;
 #   - /run/hinteros/apps/<user>: the link sessions read, published by hinteros-system;
@@ -78,7 +78,7 @@ let
           throw "hinteros.appEnv.build: hinteros.forbidUnfree is set but the env needs unfree packages: ${lib.concatStringsSep ", " forbidden}"
         else
           pkgsFor unfree;
-      # The box's inputs to apps (catalog.md, format 3). Steam is stock pkgs.steam (spike 8) with
+      # The box's inputs to apps (catalog entry format 3). Steam is stock pkgs.steam with
       # our sockets hidden (lib/steam.nix); its drivers come from /run/opengl-driver(-32) at run time.
       box = {
         firefoxKiosk = config.hinteros.firefoxKiosk.mkWrapper p;
@@ -124,7 +124,7 @@ let
         box = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.boxFeatures or [ ]) sel));
       }
       // {
-        # DECISIONS D3: `steam` is `{path}` or null.
+        # `steam` is `{path}` or null.
         steam =
           if steam != null && steam.package != null then { path = lib.getExe steam.package; } else null;
       };

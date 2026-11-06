@@ -1,7 +1,6 @@
-# Eval-level tests for profiles.nix and the per-profile session wiring (profiles.md, apps.md
-# "The session side"): accounts from a state, the guest, the greeter mode with its PAM
-# stack, uaccess instead of static groups, group-based grants, and what stays as it was in
-# autologin mode. Nothing is built.
+# Eval-level tests for profiles.nix and the per-profile session wiring: accounts from a state, the
+# guest, the greeter mode with its PAM stack, uaccess instead of static groups, group-based grants,
+# and what stays as it was in autologin mode. Nothing is built.
 { self, pkgs }:
 let
   inherit (pkgs) lib;
@@ -105,7 +104,7 @@ let
         [ ]
       ];
     };
-    # Grants are written against the group in both modes (profiles.md, "Device access per seat").
+    # Grants are written against the group in both modes.
     testGroupGrants = {
       expr = [
         (lib.hasInfix ''subject.isInGroup("hinteros") && subject.local && subject.active'' (polkit auto))
@@ -149,7 +148,7 @@ let
         "ter-v32b"
       ];
     };
-    # The PAM stack (profiles.md, "PAM: where the PIN and the kill are enforced").
+    # The PAM stack: where the PIN and the kill of other accounts' processes are enforced.
     testGreeterPam =
       let
         p = pam greeter "greetd";

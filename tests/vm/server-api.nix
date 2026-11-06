@@ -1,4 +1,4 @@
-# The Server section through the real chain (design/server.md, M10 build step 3; system API 0.11,
+# The Server section through the real chain (M10; system API 0.11,
 # session API 0.19): the launcher's calls on p1's session daemon -> the relay -> hinteros-system
 # (seat0 owner, polkit `org.hinteros.system.services`, the admin PIN) -> job units -> the services.
 # Greeter mode; p1 = `hinteros-p1` (James, admin, PIN 2468), p2 = `hinteros-p2` (Sam, PIN 1357),

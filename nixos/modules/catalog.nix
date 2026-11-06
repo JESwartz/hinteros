@@ -1,4 +1,4 @@
-# The App Store catalog (design/catalog.md, repo hinteros-catalog; entry format 3) in the system.
+# The App Store catalog (repo hinteros-catalog; entry format 3) in the system.
 # The flake supplies the data (`hinteros.catalog.*`, see flake.nix); this module
 #   - turns every `kind = "app"` entry into a box-wide `hinteros.apps.<id>` with the entry's `app`
 #     settings (as defaults) and its name and icon fields. `app` is called with `{ pkgs, lib,
@@ -45,7 +45,7 @@ let
   liveServices = lib.filterAttrs (_: e: (e.kind or "app") == "service") live;
   enabled = lib.filterAttrs (id: _: config.hinteros.apps.${id}.enable) liveApps;
 
-  # The box's inputs to the box-wide apps (catalog.md, format 3).
+  # The box's inputs to the box-wide apps (catalog entry format 3).
   box = {
     firefoxKiosk = config.hinteros.firefoxKiosk.wrapper;
     steam = import ../lib/steam.nix pkgs.steam;

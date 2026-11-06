@@ -1,4 +1,4 @@
-# Hardening baseline on built systems (threat-model.md). Non-dev boxes: the session user is not
+# Hardening baseline on built systems. Non-dev boxes: the session user is not
 # in wheel, cannot sudo, cannot talk to the nix daemon; the admin account's sudo always asks for
 # its password; with SSH on (state.json) the admin logs in with username + password, from the
 # local networks only (a global IPv6 source is refused), while the session user and root cannot;
@@ -6,7 +6,7 @@
 # and nix, the session user still nothing. Kernel sysctls (kptr, dmesg, perf, BPF, io_uring,
 # ptrace, protected files) have their hardened values; the session user cannot read dmesg.
 #
-# Profiles (profiles.md "One Unix user per profile", "Device access per seat"; DECISIONS D4, S2):
+# Profiles (one Unix user per profile, device access per seat):
 # on a box in greeter mode (started after the others), every account (p1, p2, the guest)
 # and the greeter are in no device group, wheel or systemd-journal, the accounts have homes 0700,
 # no sudo, no nix daemon and no password; root-held state (profiles.json, PINs) is 0600/0700
@@ -243,8 +243,8 @@ in
       lan.fail(f"{KEY} root@{DEV} true")
       lan.fail(f"{KEY} hinteros-p1@{DEV} true")
 
-      # ---- profiles (profiles.md "One Unix user per profile", "Device access per seat"): a
-      # box in greeter mode, after the others are down --------------------------------------------
+      # ---- profiles (one Unix user per profile, device access per seat): a box in greeter
+      # mode, after the others are down -----------------------------------------------------------
       for m in (machine, quiet, dev, lan):
           m.shutdown()
       machine = profilebox

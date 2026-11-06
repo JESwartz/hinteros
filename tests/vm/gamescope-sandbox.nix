@@ -1,4 +1,4 @@
-# The display split under gamescope (design/sandbox.md, step 3), headless as in
+# The display split under gamescope, headless as in
 # tests/vm/gamescope.nix: gamescope runs 2 + 4 Xwaylands (#0 the home app and the OSK, #1 Steam's
 # game display, #2-#5 the app displays, one per running app). A sandboxed app started with
 # apps.launch must land on #2, at the output size (1280x1024; the nested size is 640x512, which

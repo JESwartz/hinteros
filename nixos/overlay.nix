@@ -22,7 +22,7 @@ final: prev: {
   # HDR or VRR can show the console with those colours. (Resetting them here could need the same
   # full modeset on i915, as an infoframe change, and is not tested on hardware.)
   #
-  # The app sandbox's display split (design/sandbox.md, step 3: home app and OSK on Xwayland
+  # The app sandbox's display split (home app and OSK on Xwayland
   # #0, Steam games on #1, apps on #2):
   # xwayland-no-abstract-socket.patch: gamescope's wlroots opened each Xwayland on the socket
   #   file *and* the abstract socket @/tmp/.X11-unix/X<n>. Abstract sockets belong to the network

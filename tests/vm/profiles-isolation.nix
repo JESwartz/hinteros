@@ -1,5 +1,4 @@
-# Two profiles are two Unix users (profiles.md "One Unix user per profile", "Per profile vs.
-# shared", "Authority"; threat-model B2; VM `profiles-isolation`). Greeter mode; p1 = `hinteros-p1`
+# Two profiles are two Unix users (VM `profiles-isolation`). Greeter mode; p1 = `hinteros-p1`
 # (James, admin, unlocked, PIN 2468; apps Firefox and YouTube), p2 = `hinteros-p2` (Sam,
 # unlocked, PIN 1357; no apps).
 #   - p1 leaves Steam, launcher, Firefox profile and private files in its home; p2 (the active

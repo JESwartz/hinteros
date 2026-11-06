@@ -128,7 +128,7 @@ let
   # runs through it too, so both see the same files. A wrapper, not fixed paths: the uid is only
   # known at login.
   #
-  # The display mode is the box's, not the user's (profiles.md "Per profile vs. shared"):
+  # The display mode is the box's, not the user's:
   # `display.keep` saves it for every profile (hinteros-system writes /run/hinteros/gamescope-modes
   # from runtime.json, also at boot), and every session (a profile, a fresh one, the guest whose
   # home is new at every boot, the picker) starts gamescope with it, so a switch never makes the
@@ -235,7 +235,7 @@ let
     [ sessionStart ] ++ compositorPrefix ++ compositorCommand.${cfg.compositor} ++ homeCommand
   );
 
-  # The greeter (profiles.md, "The pieces"). greetd runs `greeterLink` as `hinteros-greeter` at
+  # The greeter. greetd runs `greeterLink` as `hinteros-greeter` at
   # boot and whenever a profile's session ends. `hinteros-session greet` takes the fast path
   # into a profile (greetd IPC, no UI) or execs `pickerLink`: the compositor with the launcher in
   # greeter mode, and the session daemon in greeter mode as a child of the greeter session (so it

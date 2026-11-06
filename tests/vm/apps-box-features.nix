@@ -1,8 +1,7 @@
-# Box features follow the apps that need them (apps.md "Box requirements"; build plan step 6, VM
-# `apps-box-features`). Greeter mode; p1 = `hinteros-p1` (James, admin, unlocked) and p2 =
-# `hinteros-p2` (Sam, unlocked), both without apps; state.json `requirements: []`. Steam is the
-# catalog's entry (box = [graphics32, steam-devices], vendor terms) with the fake Steam as its
-# package.
+# Box features follow the apps that need them (VM `apps-box-features`). Greeter mode; p1 =
+# `hinteros-p1` (James, admin, unlocked) and p2 = `hinteros-p2` (Sam, unlocked), both without apps;
+# state.json `requirements: []`. Steam is the catalog's entry (box = [graphics32, steam-devices],
+# vendor terms) with the fake Steam as its package.
 #   - p1 installs Steam (terms accepted): the job's `box` stage turns both features on with
 #     exactly one rebuild (state.json `requirements`, 32-bit graphics drivers, Valve's udev rules),
 #     then p1's env has Steam.

@@ -66,7 +66,7 @@ in
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     home = "/home/hinteros-p1"
-    # Apps run in the sandbox (design/sandbox.md): the profile path Firefox gets is under $HOME,
+    # Apps run in the sandbox: the profile path Firefox gets is under $HOME,
     # which is the app's sandbox home on disk.
     def on_disk(app, path):
         return f"{home}/.local/share/hinteros/sandbox/{app}" + path.removeprefix(home)
