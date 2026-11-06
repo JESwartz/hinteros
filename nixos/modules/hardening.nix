@@ -1,5 +1,4 @@
-# Hardening baseline (hinteros-docs/design/threat-model.md, "What must change ... before a box is
-# given out"; system-api.md, "Required changes elsewhere"). On with the session. Anything that
+# Hardening baseline: what a box needs before it is given out. On with the session. Anything that
 # would make the session user (so: any game or web page) root, or let it reach the nix daemon
 # as a trusted user, is a build error unless `hinteros.dev.enable` is set, and that option only
 # ever adds a separate `deploy` user, never privileges for the session user.

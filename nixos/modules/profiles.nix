@@ -1,4 +1,4 @@
-# Profiles (hinteros-docs/design/profiles.md): one Unix user per account, the guest, and the
+# Profiles: one Unix user per account, the guest, and the
 # greeter mode with the PAM stack that enforces PINs and the kill on switch, plus device access
 # per seat (uaccess) instead of static groups.
 #

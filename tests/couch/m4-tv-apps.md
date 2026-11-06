@@ -55,4 +55,4 @@ Crunchyroll DRM items before each release.
 
 ## Result
 
-Record the verdicts (Jellyfin Qt platform, UA accepted, DRM resolution) in `hinteros-docs`.
+Record the verdicts (Jellyfin Qt platform, UA accepted, DRM resolution) in the test notes.

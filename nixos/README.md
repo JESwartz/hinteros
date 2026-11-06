@@ -115,9 +115,8 @@ gamescope's and the home app's stdout/stderr are in the journal: `journalctl -t 
 `gamescope-size` test covers this (headless, so no live mode change; `gamescopectl screenshot`
 repaints at the nested size).
 
-Display split (app sandbox, `hinteros-docs/design/sandbox.md` step 3): each running app gets an
-app display of its own (`:2` and up; the daemon picks a free one, README "Own display" there),
-and in the sandbox only that socket file, so it cannot read or type into the home app (PIN
+Display split (app sandbox): each running app gets an app display of its own (`:2` and up; the
+daemon picks a free one), and in the sandbox only that socket file, so it cannot read or type into the home app (PIN
 entry), the OSK on `:0` or another app. Steam and its games use none. Patches (`overlay.nix`):
 no Xwayland listens on an abstract socket `@/tmp/.X11-unix/X<n>` (else reachable from the
 sandbox, which shares the network namespace), and every one from `#2` on starts without

@@ -1,4 +1,4 @@
-# Translates a device's state.json (see hinteros-docs/design/device-config.md) into
+# Translates a device's state.json into
 # hinteros.* and NixOS options. This is the only place that reads the state. A bad value of a
 # field it knows fails evaluation, so mistakes surface at build time, before a switch. A field it
 # does not know is ignored: a box that moves to an older channel has to evaluate the newer

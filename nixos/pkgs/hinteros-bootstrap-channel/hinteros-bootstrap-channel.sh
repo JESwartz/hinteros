@@ -1,6 +1,5 @@
 # hinteros-bootstrap-channel [--allow-downgrade] <stable|beta> <rev>: move this box onto a channel
-# at a given signed revision, outside the update UI (hinteros-docs/design/distribution.md,
-# "Migration from today").
+# at a given signed revision, outside the update UI.
 # For a box whose running generation does not trust the release key yet (installed before the
 # first signed release) and for boxes whose update keys are out of date. Run as root (sudo) over
 # SSH by the owner, with the rev `promote` printed. Never back: a rev that does not descend from

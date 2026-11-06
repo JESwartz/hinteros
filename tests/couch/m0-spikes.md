@@ -3,7 +3,7 @@
 Run on the dev box (mini PC #1) on the TV, with no keyboard attached once the session is up.
 For every item record **pass/fail + notes** (and the TV, resolution and pad used).
 Covers spike 1 (Flutter under gamescope), spike 3 (Steam and the launcher together),
-spike 4 (InputPlumber) and spike 5 (on-screen keyboard). Background: `hinteros-docs/spikes/`.
+spike 4 (InputPlumber) and spike 5 (on-screen keyboard).
 
 ## 0. Deploy to the dev box
 
@@ -66,5 +66,5 @@ Needs `steam -silent` running, and the launcher as the home app.
 
 ## Result
 
-Record the verdicts back in the spike notes (`hinteros-docs/spikes/`), including the decisions
+Record the verdicts in the spike notes, including the decisions
 (Flutter vs. fallback, input layer, Guide-chord policy).

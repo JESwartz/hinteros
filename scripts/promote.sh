@@ -1,5 +1,4 @@
-# promote: move a HinterOS channel (hinteros-docs/design/distribution.md, "The release pipeline",
-# "Promote script checks"). Run by the owner on the dev machine:
+# promote: move a HinterOS channel. Run by the owner on the dev machine:
 #
 #   nix run .#promote                [--dry-run] [--skip-ci] [--key <path>]
 #

@@ -1,4 +1,4 @@
-# Device config snapshots (hinteros-docs/design/device-config.md, "Snapshots and rollback").
+# Device config snapshots.
 # Every system toplevel embeds the config dir it was built from at `$out/hinteros/`, and a
 # boot-time oneshot (hinteros-config-sync) restores that snapshot into /etc/hinteros when the
 # two differ, so /etc/hinteros always describes the generation that is running, also after a

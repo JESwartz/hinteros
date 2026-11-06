@@ -10,7 +10,7 @@
   - installer: `install-offline`, `install-offline-hw`, `install-offline-m900`, `install-app-failure`, `install-validation`, `install-newer`, `install-keep-data`, `installer-ui`, `installer-save-log`
   - server: `server-api`, `server-network`, `server-jellyfin`, `server-jellyfin-signin`
 
-  `system-update` runs an update end to end through `hinteros-job@`: `update.check`/`update.apply` and `channel.check`/`channel.set` (to an older channel) from a signed `file://` channel repo, with the fetch into the mirror, `ssh-keygen -Y verify` against the running generation's allowed_signers, refused tips, the flake.lock rewrite and a switch; only the system build is a stub. Not covered by a VM test yet: the `https` transport (SSL_CERT_FILE, a git server with a test CA) and a real build from a binary cache (`update-verify` in hinteros-docs/design/system-api.md).
+  `system-update` runs an update end to end through `hinteros-job@`: `update.check`/`update.apply` and `channel.check`/`channel.set` (to an older channel) from a signed `file://` channel repo, with the fetch into the mirror, `ssh-keygen -Y verify` against the running generation's allowed_signers, refused tips, the flake.lock rewrite and a switch; only the system build is a stub. Not covered by a VM test yet: the `https` transport (SSL_CERT_FILE, a git server with a test CA) and a real build from a binary cache (the planned `update-verify` test).
 
   `vm/system/` holds the shared node (`node.nix`) and the Python socket clients the system tests run inside the VM; `vm/install/` the installer tests' helpers.
 

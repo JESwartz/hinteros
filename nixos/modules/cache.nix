@@ -1,7 +1,6 @@
-# The HinterOS binary cache as a substituter (hinteros-docs/design/distribution.md, "Substituters
-# on boxes"): cache.nixos.org first, the HinterOS cache second, so the home lab only serves what
-# cache.nixos.org lacks. OFF until the cache exists (Phase 2); the keys come from
-# `release/cache-keys` through release.nix.
+# The HinterOS binary cache as a substituter: cache.nixos.org first, the HinterOS cache second,
+# so the home lab only serves what cache.nixos.org lacks. OFF until the cache exists (Phase 2);
+# the keys come from `release/cache-keys` through release.nix.
 { config, lib, ... }:
 let
   cfg = config.hinteros.cache;

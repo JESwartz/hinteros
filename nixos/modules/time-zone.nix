@@ -1,4 +1,4 @@
-# The time zone (hinteros-docs/design/time-zone.md). It is imperative: NixOS does not own
+# The time zone. It is imperative: NixOS does not own
 # /etc/localtime (`time.timeZone = null`). An activation script points /etc/localtime at
 # /etc/zoneinfo/<zone>, with <zone> from `settings.timeZone` of the *live* state.json (read when it
 # runs, not at evaluation: hinteros-system changes the zone without a rebuild, so a value baked into

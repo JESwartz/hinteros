@@ -1,4 +1,4 @@
-# Builds the flake.lock of a device flake (see hinteros-docs/design/device-config.md) whose single
+# Builds the flake.lock of a device flake whose single
 # input `hinteros` is pinned to a given revision of this repo, by embedding the system repo's
 # own lock: every input `hinteros` locks becomes a node of the device lock, so the whole input
 # graph is resolved without contacting anything. Used by the installer ISO: the pinned revision

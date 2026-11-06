@@ -1,4 +1,4 @@
-# The time zone (hinteros-docs/design/time-zone.md), with the real hinteros-system, its helper
+# The time zone, with the real hinteros-system, its helper
 # unit hinteros-time-zone-apply, activation and hinteros-config-sync. Greeter mode; p1 = James,
 # the admin profile (PIN 2468); p2 = Sam (PIN 1357), on screen. state.json starts with
 # `settings.timeZone` "America/Chicago".

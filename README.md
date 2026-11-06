@@ -13,7 +13,6 @@ hardware profiles and system tests.
 | Repo | Contents |
 |---|---|
 | [`hinteros`](https://justsomeshed.com/JSwartz/HinterOS/hinteros) (this one) | System flake, NixOS modules, hardware profiles, VM tests |
-| `hinteros-docs` | Project-wide docs: roadmap, testing workflow, decisions (kept locally, not published) |
 | [`hinteros-launcher`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher) | Flutter launcher (the TV/console UI) |
 | [`hinteros-daemon`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon) | Rust system daemon (controller input, Home button, app launching, settings, rebuilds) |
 | [`hinteros-catalog`](https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog) | The App Store catalog (apps and services) |

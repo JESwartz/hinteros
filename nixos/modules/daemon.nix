@@ -1,4 +1,4 @@
-# HinterOS daemons (see hinteros-docs/design/api.md):
+# HinterOS daemons:
 #   hinteros-session: systemd user service of the session user, serves the session API on
 #                     $XDG_RUNTIME_DIR/hinteros/session.sock (0600), which the launcher talks to.
 #   hinteros-system:  privileged system service, serves the internal system API on

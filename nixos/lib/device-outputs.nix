@@ -1,6 +1,5 @@
 # hinteros.lib.deviceOutputs: the outputs of a device flake, given its config dir. All a device
 # does lives here, so /etc/hinteros/flake.nix never needs rewriting on an installed box.
-# See hinteros-docs/design/device-config.md.
 { self }:
 dir:
 let

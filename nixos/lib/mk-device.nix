@@ -1,5 +1,4 @@
 # hinteros.lib.mkDevice: builds a device's nixosSystem from its state.json contents.
-# See hinteros-docs/design/device-config.md.
 { self, nixpkgs }:
 {
   # Decoded state.json (an attrset).
