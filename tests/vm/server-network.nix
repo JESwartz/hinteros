@@ -132,7 +132,8 @@ in
           print(show)
           families = [l for l in show.splitlines() if l.startswith("RestrictAddressFamilies=")][0]
           assert set(families.split("=", 1)[1].split()) == {"AF_INET", "AF_INET6", "AF_UNIX"}, show
-          assert "IPAddressDeny=0.0.0.0/0 ::/0" in show, show
+          deny = [l for l in show.splitlines() if l.startswith("IPAddressDeny=")][0]
+          assert set(deny.split("=", 1)[1].split()) == {"0.0.0.0/0", "::/0"}, show
           assert "127.0.0.0/8" in show and "::1/128" in show, show
           cg = "/sys/fs/cgroup/system.slice/hinteros-system.service/cgroup.procs"
           machine.succeed(f"sh -c 'echo $$ > {cg}; exec curl -fsS -m 5 http://127.0.0.1:32400/'")
