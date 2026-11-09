@@ -1,5 +1,4 @@
-"""greetd's IPC as a greeter speaks it, run as root to probe greetd's PAM stack directly
-(profiles.md "PAM: where the PIN and the kill are enforced"):
+"""greetd's IPC as a greeter speaks it, run as root to probe greetd's PAM stack directly:
 
     greetd.py USER [ANSWER...]
 

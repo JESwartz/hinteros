@@ -42,6 +42,7 @@
     pkgs.parted
     pkgs.dosfstools
     pkgs.e2fsprogs
+    pkgs.btrfs-progs
   ];
 
   # The installer VM's own ssh etc. are irrelevant.

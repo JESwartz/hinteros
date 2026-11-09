@@ -1,8 +1,7 @@
-# Box features follow the apps that need them (apps.md "Box requirements"; build plan step 6, VM
-# `apps-box-features`). Greeter mode; p1 = `hinteros` (James, admin, unlocked) and p2 =
-# `hinteros-p2` (Sam, unlocked), both without apps; state.json `requirements: []`. Steam is the
-# catalog's entry (box = [graphics32, steam-devices], vendor terms) with the fake Steam as its
-# package.
+# Box features follow the apps that need them (VM `apps-box-features`). Greeter mode; p1 =
+# `hinteros-p1` (James, admin, unlocked) and p2 = `hinteros-p2` (Sam, unlocked), both without apps;
+# state.json `requirements: []`. Steam is the catalog's entry (box = [graphics32, steam-devices],
+# vendor terms) with the fake Steam as its package.
 #   - p1 installs Steam (terms accepted): the job's `box` stage turns both features on with
 #     exactly one rebuild (state.json `requirements`, 32-bit graphics drivers, Valve's udev rules),
 #     then p1's env has Steam.
@@ -55,7 +54,7 @@ profiles.mkTest {
     steam.ids = [ "steam" ];
   };
   appProfiles = {
-    hinteros = "empty";
+    hinteros-p1 = "empty";
     hinteros-p2 = "empty";
   };
   specialisations.box = st [
@@ -85,43 +84,43 @@ profiles.mkTest {
         e = sys_err(user, "apps.install", {"ids": ["steam"], "revision": mine["revision"]}, 3014)
         assert e["data"]["id"] == "steam", e
         version = e["data"]["version"]
-        j = sys_ok(user, "apps.install", {"ids": ["steam"], "revision": mine["revision"], "accepted_terms": {"steam": version}})["job_id"]
+        j = start_job(user, "apps.install", {"ids": ["steam"], "revision": mine["revision"], "accepted_terms": {"steam": version}})
         done = wait_job(user, j)
         assert done["state"] == "succeeded" and done["kind"] == "apps_install", done
         return version
 
     def remove_steam(user):
         mine = sys_ok(user, "apps.list")
-        j = sys_ok(user, "apps.remove", {"ids": ["steam"], "revision": mine["revision"], "delete_data": False})["job_id"]
+        j = start_job(user, "apps.remove", {"ids": ["steam"], "revision": mine["revision"], "delete_data": False})
         done = wait_job(user, j)
         assert done["state"] == "succeeded" and done["kind"] == "apps_remove", done
 
-    enter("p1", "hinteros")
-    jobs_idle("hinteros")
+    enter("p1", "hinteros-p1")
+    jobs_idle("hinteros-p1")
     gens0 = system_generations()
 
     with subtest("before: no features"):
         assert state_json()["requirements"] == []
         assert features_on() == (False, False), features_on()
-        assert sys_ok("hinteros", "apps.list")["box"] == []
+        assert sys_ok("hinteros-p1", "apps.list")["box"] == []
 
     with subtest("p1 installs Steam: the box stage turns the features on with one rebuild"):
         stub_build(systems["box"])
-        version = install_steam("hinteros")
+        version = install_steam("hinteros-p1")
         assert state_json()["requirements"] == FEATURES, state_json()
         assert current_system() == systems["box"]
         assert system_generations() == gens0 + 1
         assert len(builds()) == 1, builds()
         assert features_on() == (True, True), features_on()
-        assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/apps/hinteros").strip() == env_path("steam")
-        m = json.loads(machine.succeed("cat /run/hinteros/apps/hinteros/share/hinteros/apps.json"))
+        assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/apps/hinteros-p1").strip() == env_path("steam")
+        m = json.loads(machine.succeed("cat /run/hinteros/apps/hinteros-p1/share/hinteros/apps.json"))
         assert m["box"] == FEATURES and m["steam"] is not None, m
-        assert sys_ok("hinteros", "apps.list")["box"] == FEATURES
-        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))
+        assert sys_ok("hinteros-p1", "apps.list")["box"] == FEATURES
+        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert "steam" in json.dumps(terms) and version in json.dumps(terms), terms
 
     with subtest("p2 installs Steam too: no rebuild"):
-        switch("hinteros", "p2", "hinteros-p2")
+        switch("hinteros-p1", "p2", "hinteros-p2")
         install_steam("hinteros-p2")
         assert len(builds()) == 1, builds()
         assert system_generations() == gens0 + 1
@@ -137,7 +136,7 @@ profiles.mkTest {
         e = sys_err("hinteros-p2", "rollback", {"generation": old[0]["generation"]}, 3016)
         assert e["data"] == {"pin": "admin"}, e
         stub_build(systems["box"])
-        j = sys_ok("hinteros-p2", "rollback", {"generation": old[0]["generation"], "admin_pin": "2468"})["job_id"]
+        j = start_job("hinteros-p2", "rollback", {"generation": old[0]["generation"], "admin_pin": "2468"})
         done = wait_job("hinteros-p2", j)
         assert done["state"] == "succeeded" and done["kind"] == "rollback", done
         assert done["result"]["features_readded"] == FEATURES, done
@@ -151,9 +150,9 @@ profiles.mkTest {
     with subtest("removing Steam everywhere leaves the features on until a rebuild"):
         remove_steam("hinteros-p2")
         assert state_json()["requirements"] == FEATURES
-        switch("hinteros-p2", "p1", "hinteros")
-        remove_steam("hinteros")
-        assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/apps/hinteros").strip() == env_path("empty")
+        switch("hinteros-p2", "p1", "hinteros-p1")
+        remove_steam("hinteros-p1")
+        assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/apps/hinteros-p1").strip() == env_path("empty")
         assert state_json()["requirements"] == FEATURES, state_json()
         assert len(builds()) == 2, builds()
         assert system_generations() == gens0 + 1
@@ -161,8 +160,8 @@ profiles.mkTest {
 
     with subtest("the next system job that rebuilds anyway drops them"):
         stub_build(systems[""])
-        j = sys_ok("hinteros", "rebuild")["job_id"]
-        done = wait_job("hinteros", j)
+        j = start_job("hinteros-p1", "rebuild")
+        done = wait_job("hinteros-p1", j)
         assert done["state"] == "succeeded", done
         assert state_json()["requirements"] == [], state_json()
         assert current_system() == systems[""]

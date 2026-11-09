@@ -9,6 +9,8 @@
   bash,
   coreutils,
   util-linux,
+  btrfs-progs,
+  dosfstools,
   gnugrep,
   gnused,
   gawk,
@@ -21,6 +23,9 @@
   mkpasswd,
   networkmanager,
   nixos-install,
+  efibootmgr,
+  lvm2,
+  mdadm,
   nixos-facter,
   systemd,
   nix,
@@ -34,7 +39,7 @@
   appsJson,
   catalogIndex,
   stateVersion,
-  repoUrl ? "https://justsomeshed.com/JSwartz/HinterOS/hinteros.git",
+  repoUrl ? "https://git.hinteros.org/hinteros.git",
   isoRev ? "unknown",
   # The release version of that revision (its release/version), shown next to a newer one.
   isoVersion ? "0.0.0",
@@ -85,6 +90,8 @@ stdenvNoCC.mkDerivation {
         lib.makeBinPath [
           coreutils
           util-linux
+          btrfs-progs
+          dosfstools
           gnugrep
           gnused
           gawk
@@ -97,6 +104,9 @@ stdenvNoCC.mkDerivation {
           mkpasswd
           networkmanager
           nixos-install
+          efibootmgr
+          lvm2 # dmsetup
+          mdadm
           nixos-facter
           systemd
           nix

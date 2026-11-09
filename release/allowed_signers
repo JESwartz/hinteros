@@ -2,7 +2,6 @@
 # "<principal> ssh-ed25519 <key> [comment]" per line (nixos/modules/release.nix turns them into
 # hinteros.update.allowedSigners; lines starting with # are comments). A box checks a new tip
 # against the list of the generation it is RUNNING, so a key added here counts only once a
-# release containing it is installed. See hinteros-docs/design/distribution.md, "Signing".
-# The offline backup key ("backup ssh-ed25519 ... hinteros-backup") is added here once it has
-# been generated; until then a lost or leaked release key means re-bootstrapping every box.
+# release containing it is installed.
 release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtzB3OuVIbG4WhjiNynpKPiTEJKdD5vicRouH8CQsrk hinteros-release
+backup ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAk10EKzqLAzjITxmiUbyzae4iweuOqVpnTqqf4y7TiF hinteros-backup

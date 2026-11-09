@@ -7,7 +7,7 @@
 # written to the profile's user.js.
 #
 # Firefox runs on Xwayland (MOZ_ENABLE_WAYLAND=0): native-Wayland Firefox hung or crashed under
-# gamescope and in VMs (hinteros-docs spikes/05-on-screen-keyboard.md).
+# gamescope and in VMs.
 {
   lib,
   writeShellApplication,

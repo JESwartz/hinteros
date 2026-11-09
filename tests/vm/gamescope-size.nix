@@ -108,13 +108,13 @@ in
 
     def check(m, w, h, nested=None):
         m.wait_for_unit("multi-user.target")
-        m.wait_until_succeeds("pgrep -u hinteros -f '/bin/gamescope '")
-        uid = m.succeed("id -u hinteros").strip()
+        m.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/gamescope '")
+        uid = m.succeed("id -u hinteros-p1").strip()
         env = f"XDG_RUNTIME_DIR=/run/user/{uid}"
         sock = f"/run/user/{uid}/hinteros/session.sock"
 
         def as_user(cmd, display=":0"):
-            return f"runuser -u hinteros -- env {env} DISPLAY={display} sh -c {shlex.quote(cmd)}"
+            return f"runuser -u hinteros-p1 -- env {env} DISPLAY={display} sh -c {shlex.quote(cmd)}"
 
         def geometry(args, display=":0"):
             out = m.succeed(as_user(f"xwininfo {args}", display))
@@ -146,7 +146,7 @@ in
             return [(x, y) for x in xs for y in ys]
 
         def shot():
-            m.execute(f"rm -f /tmp/shot.png; runuser -u hinteros -- env {env} gamescopectl screenshot /tmp/shot.png")
+            m.execute(f"rm -f /tmp/shot.png; runuser -u hinteros-p1 -- env {env} gamescopectl screenshot /tmp/shot.png")
             m.sleep(2)
             if m.execute("test -s /tmp/shot.png")[0] != 0:
                 return None, []
@@ -172,7 +172,7 @@ in
                 raise Exception(f"not filled with {colour}: {last}")
 
         # The daemon focuses the home app (base layer), the home app is sized to the output.
-        m.wait_for_unit("hinteros-session.service", "hinteros")
+        m.wait_for_unit("hinteros-session.service", "hinteros-p1")
         m.wait_until_succeeds(as_user("xprop -root GAMESCOPECTRL_BASELAYER_APPID | grep -q 4100000000"), timeout=90)
         assert geometry("-root") == (w, h), ("Xwayland :0 root", geometry("-root"))
         # Every app display (:2-:5) follows the output too (xwayland-size-all.patch).
@@ -193,7 +193,7 @@ in
 
         # An X11 app the daemon starts (on the apps' Xwayland, :2) gets the output size too.
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "gamescope-size-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "gamescope-size-test", "version": "0"}}}
         launch = {"jsonrpc": "2.0", "id": 1, "method": "apps.launch", "params": {"id": "appfill"}}
         payload = "".join(json.dumps(x) + "\n" for x in (hello, launch))
         out = m.succeed(as_user(f"(printf %s {shlex.quote(payload)}; sleep 3) | socat -t3 - UNIX-CONNECT:{sock}"))
@@ -205,7 +205,7 @@ in
 
         # Apps on Xwayland; gamescope's own output in the journal.
         for pat in ("/bin/gamescope ", "hinteros-session --config"):
-            pid = m.succeed(f"pgrep -u hinteros -f '{pat}' | head -n1").strip()
+            pid = m.succeed(f"pgrep -u hinteros-p1 -f '{pat}' | head -n1").strip()
             assert "GDK_BACKEND=x11" in m.succeed(f"tr '\\0' '\\n' < /proc/{pid}/environ"), pat
         m.wait_until_succeeds("journalctl -t hinteros-compositor | grep -q gamescope")
 

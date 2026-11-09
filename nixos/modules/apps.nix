@@ -3,18 +3,15 @@
 # kind, command, input and the icon fields; see the hinteros-daemon README) and its package is
 # installed.
 #
-# This is the pre-M7 model, kept for schema-1 boxes (until hinteros-system migrates them to
-# per-profile apps, apps.md "The v1 -> v2 migration") and for test VMs without a state. On
-# schema 2, state.nix turns every app off: apps live in each profile's own Nix profile
-# (app-env.nix), and the daemon reads them from the profile's env manifest instead.
+# Only test VMs without a state use it. On a device every app is off: apps live in each profile's
+# own Nix profile (app-env.nix), and the daemon reads them from the profile's env manifest instead.
 #
 # The apps themselves come from the catalog (catalog.nix: one `hinteros.apps.<id>` per entry,
 # with the entry's settings as defaults). The entry shape and the session.toml entries are shared
-# with the app envs (nixos/lib/app-entries.nix), so a schema-1 box and a profile env list the
-# same apps the same way. The `onIso` apps (jellyfin, youtube, firefox) are enabled whenever the
-# session is, until a state.json selects the apps; a device enables any other catalog id with
-# `hinteros.apps.<id>.enable = true` (Plex and Steam are unfree: allowed by name from the entry,
-# see unfree.nix).
+# with the app envs (nixos/lib/app-entries.nix), so a test VM and a profile env list the same
+# apps the same way. The `onIso` apps (jellyfin-desktop, youtube, firefox) are enabled whenever the session
+# is; a test VM enables any other catalog id with `hinteros.apps.<id>.enable = true` (Plex and
+# Steam are unfree: allowed by name from the entry, see unfree.nix).
 {
   config,
   lib,
@@ -39,7 +36,7 @@ in
   options.hinteros.apps = lib.mkOption {
     type = lib.types.attrsOf (lib.types.submodule (entriesLib.appModuleWith kioskCmd));
     default = { };
-    description = "Apps shown in the launcher of every profile (box-wide, schema 1); see the module header.";
+    description = "Apps shown in the launcher of every profile (box-wide, test VMs); see the module header.";
   };
 
   config = lib.mkMerge [

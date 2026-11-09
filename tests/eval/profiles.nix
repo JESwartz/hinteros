@@ -1,23 +1,18 @@
-# Eval-level tests for profiles.nix and the per-profile session wiring (profiles.md, apps.md
-# "The session side"): accounts from a schema-2 state, the guest, the greeter mode with its PAM
-# stack, uaccess instead of static groups, group-based grants, and what stays as it was in
-# autologin mode. Nothing is built.
+# Eval-level tests for profiles.nix and the per-profile session wiring: accounts from a state, the
+# guest, the greeter mode with its PAM stack, uaccess instead of static groups, group-based grants,
+# and what stays as it was in autologin mode. Nothing is built.
 { self, pkgs }:
 let
   inherit (pkgs) lib;
 
   state = {
     schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
     settings.ssh.enable = false;
     profiles = [
-      {
-        id = "p1";
-        user = "hinteros";
-      }
-      {
-        id = "p2";
-        user = "hinteros-p2";
-      }
+      { id = "p1"; }
+      { id = "p2"; }
     ];
     requirements = [ ];
     services = [ ];
@@ -27,20 +22,16 @@ let
     extra:
     (self.lib.mkDevice {
       inherit state;
-      extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
+      extraModules = extra;
     }).config;
 
   auto = mk [ { hinteros.profiles.greeter.enable = false; } ];
   greeter = mk [ { hinteros.profiles.greeter.enable = true; } ];
-  # Schema 2's default is the greeter; schema 1 (not migrated yet) keeps autologin.
-  schema2Default = mk [ ];
-  schema1Default =
+  # A state's default is the greeter; test VMs without one keep autologin.
+  stateDefault = mk [ ];
+  noState =
     (self.lib.mkDevice {
-      state = {
-        schemaVersion = 1;
-        settings.ssh.enable = false;
-        apps = [ ];
-      };
+      state = null;
       extraModules = [ { system.stateVersion = "25.11"; } ];
     }).config;
   greeterDev = mk [
@@ -63,14 +54,14 @@ let
   results = lib.runTests {
     testGreeterDefault = {
       expr = {
-        schema2 = schema2Default.hinteros.profiles.greeter.enable;
-        schema1 = schema1Default.hinteros.profiles.greeter.enable;
-        schema1Autologin = schema1Default.services.greetd.settings ? initial_session;
+        state = stateDefault.hinteros.profiles.greeter.enable;
+        noState = noState.hinteros.profiles.greeter.enable;
+        noStateAutologin = noState.services.greetd.settings ? initial_session;
       };
       expected = {
-        schema2 = true;
-        schema1 = false;
-        schema1Autologin = true;
+        state = true;
+        noState = false;
+        noStateAutologin = true;
       };
     };
     # Test VMs point kiosk apps at local pages in every env that has them.
@@ -88,7 +79,7 @@ let
       expr = [
         auto.services.greetd.settings.initial_session.user
         (lib.hasSuffix "/hinteros-console/session" auto.services.greetd.settings.initial_session.command)
-        (lib.sort lib.lessThan (lib.unique auto.users.users.hinteros.extraGroups))
+        (lib.sort lib.lessThan (lib.unique auto.users.users.hinteros-p1.extraGroups))
         auto.users.users.hinteros-p2.extraGroups
         auto.users.users.hinteros-p2.uid
         (auto.users.users ? hinteros-greeter)
@@ -97,7 +88,7 @@ let
         (failed auto)
       ];
       expected = [
-        "hinteros"
+        "hinteros-p1"
         true
         [
           "hinteros"
@@ -113,11 +104,11 @@ let
         [ ]
       ];
     };
-    # Grants are written against the group in both modes (profiles.md, "Device access per seat").
+    # Grants are written against the group in both modes.
     testGroupGrants = {
       expr = [
         (lib.hasInfix ''subject.isInGroup("hinteros") && subject.local && subject.active'' (polkit auto))
-        (lib.hasInfix ''subject.user == "hinteros"'' (polkit auto))
+        (lib.hasInfix ''subject.user == "hinteros-p1"'' (polkit auto))
       ];
       expected = [
         true
@@ -157,7 +148,7 @@ let
         "ter-v32b"
       ];
     };
-    # The PAM stack (profiles.md, "PAM: where the PIN and the kill are enforced").
+    # The PAM stack: where the PIN and the kill of other accounts' processes are enforced.
     testGreeterPam =
       let
         p = pam greeter "greetd";
@@ -247,7 +238,7 @@ let
     # uaccess replaces the static groups; InputPlumber and power go to the active session.
     testGreeterDevices = {
       expr = [
-        (lib.unique greeter.users.users.hinteros.extraGroups)
+        (lib.unique greeter.users.users.hinteros-p1.extraGroups)
         greeter.users.users.hinteros-p2.extraGroups
         (lib.any (p: p.name or "" == "70-hinteros-uinput.rules") greeter.services.udev.packages)
         # Never keyboards: no profile may read one (the hinteros-keyboard unit does).
@@ -267,6 +258,7 @@ let
         true
         true
         [
+          "hinteros-system"
           "hinteros-greeter"
           "hinteros-keyboard"
         ]

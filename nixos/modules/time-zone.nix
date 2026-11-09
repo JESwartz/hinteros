@@ -1,10 +1,14 @@
-# The time zone (hinteros-docs/design/time-zone.md). It is imperative: NixOS does not own
+# The time zone. It is imperative: NixOS does not own
 # /etc/localtime (`time.timeZone = null`). An activation script points /etc/localtime at
 # /etc/zoneinfo/<zone>, with <zone> from `settings.timeZone` of the *live* state.json (read when it
 # runs, not at evaluation: hinteros-system changes the zone without a rebuild, so a value baked into
 # the generation would undo that on the next boot). Absent, or not a zone of this tzdata: UTC.
 # Activation runs at every boot and every switch (also a rollback, which restores state.json),
-# so /etc/localtime follows state.json. hinteros-system's `time_zone.set` writes both at once.
+# so /etc/localtime follows state.json. hinteros-system's `time_zone.set` writes both at once:
+# state.json itself, /etc/localtime through systemd-timedated (`SetTimezone`), so its helper unit
+# (daemon.nix) needs no write access to /etc beyond /etc/hinteros. /etc/localtime stays one link
+# straight at /etc/zoneinfo/<zone>, as timedated writes it: readers that take the zone name from
+# that one link (OpenJDK, timedated itself, .NET) need that.
 {
   config,
   lib,

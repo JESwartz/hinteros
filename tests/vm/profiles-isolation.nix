@@ -1,5 +1,4 @@
-# Two profiles are two Unix users (profiles.md "One Unix user per profile", "Per profile vs.
-# shared", "Authority"; threat-model B2; VM `profiles-isolation`). Greeter mode; p1 = `hinteros`
+# Two profiles are two Unix users (VM `profiles-isolation`). Greeter mode; p1 = `hinteros-p1`
 # (James, admin, unlocked, PIN 2468; apps Firefox and YouTube), p2 = `hinteros-p2` (Sam,
 # unlocked, PIN 1357; no apps).
 #   - p1 leaves Steam, launcher, Firefox profile and private files in its home; p2 (the active
@@ -86,7 +85,7 @@ profiles.mkTest {
       environment.systemPackages = [ pkgs.pulseaudio ];
     };
   appProfiles = {
-    hinteros = "p1";
+    hinteros-p1 = "p1";
     hinteros-p2 = "empty";
   };
 
@@ -95,14 +94,14 @@ profiles.mkTest {
     ''
       boot_box()
       DISPLAY_ENV = "${nodes.machine.hinteros.session.displayEnvWrapper}"
-      P1 = "/nix/var/nix/profiles/hinteros/apps/hinteros"
+      P1 = "/nix/var/nix/profiles/hinteros/apps/hinteros-p1"
       P2 = "/nix/var/nix/profiles/hinteros/apps/hinteros-p2"
       P1_FILES = [
-          "/home/hinteros/.local/share/Steam/config/loginusers.vdf",
-          "/home/hinteros/.local/share/Steam/steamapps/appmanifest_1.acf",
-          "/home/hinteros/.config/hinteros/launcher.json",
-          "/home/hinteros/.local/share/hinteros/firefox/youtube/cookies.sqlite",
-          "/home/hinteros/notes.txt",
+          "/home/hinteros-p1/.local/share/Steam/config/loginusers.vdf",
+          "/home/hinteros-p1/.local/share/Steam/steamapps/appmanifest_1.acf",
+          "/home/hinteros-p1/.config/hinteros/launcher.json",
+          "/home/hinteros-p1/.local/share/hinteros/firefox/youtube/cookies.sqlite",
+          "/home/hinteros-p1/notes.txt",
       ]
 
       def default_sink(user):
@@ -114,31 +113,31 @@ profiles.mkTest {
           return f"runuser -u hinteros-p2 -- sh -c {json.dumps(cmd)}"
 
       with subtest("p1's session leaves its files; box-wide choices"):
-          enter("p1", "hinteros")
+          enter("p1", "hinteros-p1")
           for f in P1_FILES:
-              machine.succeed(f"runuser -u hinteros -- sh -c 'mkdir -p \"$(dirname {f})\" && echo secret-of-p1 > {f}'")
-          u1 = uid("hinteros")
-          assert sess_ok("hinteros", "system.display.save_mode", {"display": "QEMU Monitor", "width": 1280, "height": 720, "refresh": 60}) == {}
+              machine.succeed(f"runuser -u hinteros-p1 -- sh -c 'mkdir -p \"$(dirname {f})\" && echo secret-of-p1 > {f}'")
+          u1 = uid("hinteros-p1")
+          assert sess_ok("hinteros-p1", "system.display.save_mode", {"display": "QEMU Monitor", "width": 1280, "height": 720, "refresh": 60}) == {}
           # Before any choice: PipeWire's own default (the sink with the higher priority).
           machine.wait_until_succeeds(
-              f"runuser -u hinteros -- env XDG_RUNTIME_DIR=/run/user/{u1} pactl get-default-sink | grep -qx hinteros_sink_a",
+              f"runuser -u hinteros-p1 -- env XDG_RUNTIME_DIR=/run/user/{u1} pactl get-default-sink | grep -qx hinteros_sink_a",
               timeout=60,
           )
-          assert sess_ok("hinteros", "system.audio.save_output", {"node": "hinteros_sink_b"}) == {}
+          assert sess_ok("hinteros-p1", "system.audio.save_output", {"node": "hinteros_sink_b"}) == {}
           assert machine.succeed("cat /run/hinteros/gamescope-modes") == "QEMU Monitor:1280x720@60\n"
           assert machine.succeed("cat /run/hinteros/audio-output") == "hinteros_sink_b\n"
           for f in ["gamescope-modes", "audio-output"]:
-              assert machine.succeed(f"stat -c '%a %U' /run/hinteros/{f}").strip() == "644 root", f
+              assert machine.succeed(f"stat -c '%a %U' /run/hinteros/{f}").strip() == "644 hinteros-system", f
           p1_env = machine.succeed(f"readlink -f {P1}").strip()
           assert p1_env == env_path("p1")
           p1_gens = machine.succeed(f"nix-env -p {P1} --list-generations")
-          switch("hinteros", "p2", "hinteros-p2")
-          machine.wait_until_fails("pgrep -u hinteros", timeout=30)
+          switch("hinteros-p1", "p2", "hinteros-p2")
+          machine.wait_until_fails("pgrep -u hinteros-p1", timeout=30)
 
       with subtest("p2 cannot read p1's home, runtime dir or session socket"):
-          assert machine.succeed("stat -c '%a %U' /home/hinteros").strip() == "700 hinteros"
+          assert machine.succeed("stat -c '%a %U' /home/hinteros-p1").strip() == "700 hinteros-p1"
           assert machine.succeed("stat -c '%a %U' /home/hinteros-p2").strip() == "700 hinteros-p2"
-          machine.fail(as_p2("ls /home/hinteros"))
+          machine.fail(as_p2("ls /home/hinteros-p1"))
           for f in P1_FILES:
               machine.fail(as_p2(f"cat {f}"))
               machine.fail(as_p2(f"test -e {f}"))
@@ -165,7 +164,7 @@ profiles.mkTest {
           assert mine["ids"] == [], mine
           machine.fail(as_p2(f"ln -sfn /tmp {P1}"))
           machine.fail(as_p2(f"rm {P1}"))
-          machine.fail(as_p2("rm /run/hinteros/apps/hinteros"))
+          machine.fail(as_p2("rm /run/hinteros/apps/hinteros-p1"))
           machine.fail(as_p2("ln -sfn /tmp /run/hinteros/apps/hinteros-p2"))
           j = sys_ok("hinteros-p2", "apps.install", {"ids": ["moonlight"], "revision": mine["revision"]})["job_id"]
           done = wait_job("hinteros-p2", j)
@@ -179,15 +178,15 @@ profiles.mkTest {
           # p1's apps are as they were.
           assert machine.succeed(f"readlink -f {P1}").strip() == p1_env
           assert machine.succeed(f"nix-env -p {P1} --list-generations") == p1_gens
-          assert machine.succeed("readlink -f /run/hinteros/apps/hinteros").strip() == p1_env
+          assert machine.succeed("readlink -f /run/hinteros/apps/hinteros-p1").strip() == p1_env
           reg = json.loads(machine.succeed("cat /var/lib/hinteros/apps/registry.json"))
           assert reg["owners"]["p1"]["ids"] == ["firefox", "youtube"], reg
           assert reg["owners"]["p2"]["ids"] == ["moonlight"], reg
           machine.fail(as_p2("cat /var/lib/hinteros/apps/registry.json"))
 
       with subtest("p1, not on screen, cannot change anything"):
-          rev = sys_ok("hinteros", "settings.get")["revision"]
-          p1_rev = sys_ok("hinteros", "apps.list")["revision"]
+          rev = sys_ok("hinteros-p1", "settings.get")["revision"]
+          p1_rev = sys_ok("hinteros-p1", "apps.list")["revision"]
           for method, params in [
               ("apps.install", {"ids": ["moonlight"], "revision": p1_rev}),
               ("apps.remove", {"ids": ["youtube"], "revision": p1_rev, "delete_data": False}),
@@ -198,7 +197,7 @@ profiles.mkTest {
               ("audio.save_output", {"node": "p1-was-here"}),
               ("settings.set", {"revision": rev, "changes": {}}),
           ]:
-              e = sys_err("hinteros", method, params, 3002)
+              e = sys_err("hinteros-p1", method, params, 3002)
               assert e["data"]["reason"] == "seat", (method, e)
           assert profiles_file()["profiles"]["p1"]["name"] == "James"
           assert machine.succeed("cat /run/hinteros/audio-output") == "hinteros_sink_b\n"
@@ -230,7 +229,7 @@ profiles.mkTest {
           assert rt["display_modes"] == {"QEMU Monitor": "1920x1080@50"}, rt
           # p1's next session starts with it too.
           out = machine.succeed(
-              f"runuser -u hinteros -- env HOME=/home/hinteros {DISPLAY_ENV} sh -c 'cat \"$GAMESCOPE_MODE_SAVE_FILE\"'"
+              f"runuser -u hinteros-p1 -- env HOME=/home/hinteros-p1 {DISPLAY_ENV} sh -c 'cat \"$GAMESCOPE_MODE_SAVE_FILE\"'"
           )
           assert out == "QEMU Monitor:1920x1080@50\n", out
 

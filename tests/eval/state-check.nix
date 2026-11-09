@@ -4,15 +4,19 @@
 # or IO); the check fails if it rejects any of
 #   (a) devices/*/state.json,
 #   (b) the state.json files hinteros-install writes (`--state-dir`, the real installer code path
-#       and plan validation) for representative plans (schema 2: the picks are the starter set,
+#       and plan validation) for representative plans (the picks are the starter set,
 #       not state; their box features are `requirements`),
 #   (c) the VM test fixtures (tests/vm/fixtures/*/state.json).
+# It also runs `hinteros-system check-catalog` (the same Index::parse, stricter than the catalog's
+# JSON schema) on the catalog index the system ships: one entry it refuses refuses the whole index.
 # Builds a few text files; no VM.
 { self, pkgs }:
 let
   inherit (pkgs) lib;
   sys = (pkgs.extend self.overlays.default).hinteros-system;
   installer = self.nixosConfigurations.installer.config.hinteros.installer.package;
+  # The same installer built for the beta channel (a beta ISO).
+  betaInstaller = installer.override { defaultChannel = "beta"; };
   index = self.nixosConfigurations.installer.config.hinteros.catalog.index;
   entries = self.inputs.hinteros-catalog.catalog;
   appIds = import ../../nixos/lib/app-ids.nix entries;
@@ -99,7 +103,7 @@ pkgs.runCommand "hinteros-state-check"
   ''
     export HINTEROS_INSTALL_LOG=$TMPDIR/install.log
     # Terms of every app that has them, accepted at the catalog's version.
-    terms=$(jq -c '[.apps[] | select(.terms != null) | {key: .id, value: .terms.version}] | from_entries' \
+    terms=$(jq -c '[.entries[] | select(.terms != null) | {key: .id, value: .terms.version}] | from_entries' \
       ${index}/share/hinteros/catalog.json)
 
     mkdir states
@@ -109,9 +113,10 @@ pkgs.runCommand "hinteros-state-check"
         hinteros-install --plan plan.json --state-dir states/${n} > progress.log || { cat progress.log; exit 1; }
       '') planFiles
     )}
-    # Schema 2: the spare p1, no apps; the picks are the starter set and their box features the
+    # The spare p1, no apps; the picks are the starter set and their box features the
     # requirements.
-    test "$(jq -c '[.schemaVersion, .profiles, has("apps"), .requirements, .services]' states/minimal/system/state.json)" = '[2,[{"id":"p1","user":"hinteros"}],false,[],[]]'
+    test "$(jq -c '[.schemaVersion, .profiles, has("apps"), .requirements, .services]' states/minimal/system/state.json)" = '[2,[{"id":"p1"}],false,[],[]]'
+    test "$(jq -c .disk states/minimal/system/state.json)" = '{"layout":"gpt-esp-btrfs","rootUuid":"00000000-0000-0000-0000-000000000000","espUuid":"0000-0000"}'
     test "$(jq -c .requirements states/online-one/apps/state.json)" = '["graphics32","steam-devices"]'
     test "$(jq -c .requirements states/offline-all-on-iso/apps/state.json)" = '[]'
     test "$(jq -c '[.version, .ids, .by]' states/online-one/apps/starter.json)" = '[1,["steam"],"installer"]'
@@ -127,20 +132,87 @@ pkgs.runCommand "hinteros-state-check"
     test "$rc" = 2 || { cat short.log; echo "a short admin password: exit $rc, not 2" >&2; exit 1; }
     grep -q '"code":"admin-password-short"' short.log || { cat short.log; exit 1; }
 
+    # keepData: the disk, the channel and the network; the hostname, admin account (password
+    # optional) and ssh only if they change. No state of its own. What it does not take (apps) is
+    # refused, a bad hostname too; a normal plan still needs them.
+    echo '{"disk":"/dev/vdb","diskSeq":1,"keepData":true,"channel":"beta","network":"offline"}' > keep.json
+    hinteros-install --plan keep.json --state-dir states-keep > keep.log || { cat keep.log; exit 1; }
+    test ! -e states-keep
+    jq '. + {hostname: "tv", admin: {user: "alex"}, ssh: {enable: true}}' keep.json > keep-host.json
+    hinteros-install --plan keep-host.json --state-dir states-keep > keep-host.log || { cat keep-host.log; exit 1; }
+    test ! -e states-keep
+    jq '. + {apps: ["youtube"]}' keep.json > keep-apps.json
+    rc=0
+    hinteros-install --plan keep-apps.json --state-dir states-keep > keep-apps.log || rc=$?
+    test "$rc" = 2 || { cat keep-apps.log; echo "keepData with apps: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"keep-data-field"' keep-apps.log || { cat keep-apps.log; exit 1; }
+    jq '. + {hostname: "-tv"}' keep.json > keep-badhost.json
+    rc=0
+    hinteros-install --plan keep-badhost.json --state-dir states-keep > keep-badhost.log || rc=$?
+    test "$rc" = 2 || { cat keep-badhost.log; exit 1; }
+    grep -q '"code":"hostname-invalid"' keep-badhost.log || { cat keep-badhost.log; exit 1; }
+    jq '.keepData = "yes"' keep.json > keep-bad.json
+    rc=0
+    hinteros-install --plan keep-bad.json --state-dir states-keep > keep-bad.log || rc=$?
+    test "$rc" = 2 || { cat keep-bad.log; exit 1; }
+    grep -q '"code":"keep-data-invalid"' keep-bad.log || { cat keep-bad.log; exit 1; }
+    jq '.keepData = false' keep.json > keep-off.json
+    rc=0
+    hinteros-install --plan keep-off.json --state-dir states-keep > keep-off.log || rc=$?
+    test "$rc" = 2 || { cat keep-off.log; exit 1; }
+    grep -q '"code":"hostname-invalid"' keep-off.log || { cat keep-off.log; exit 1; }
+    grep -q '"code":"admin-missing"' keep-off.log || { cat keep-off.log; exit 1; }
+
+    # A profile's account name is no admin's.
+    jq --argjson t "$terms" '. + {acceptedTerms: $t} | .admin.user = "hinteros-p1"' ${planFiles.minimal} > reserved.json
+    rc=0
+    hinteros-install --plan reserved.json --state-dir states-reserved > reserved.log || rc=$?
+    test "$rc" = 2 || { cat reserved.log; echo "admin user hinteros-p1: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"admin-user-reserved"' reserved.log || { cat reserved.log; exit 1; }
+
+    # A beta installer: a plan for the stable channel needs the stable tip as `rev` (its own beta
+    # revision is no stable release); beta, the default, is fine. A stable installer on beta is fine
+    # (online-ssh above).
+    jq --argjson t "$terms" '. + {acceptedTerms: $t, channel: "stable"}' ${planFiles.minimal} > stable.json
+    rc=0
+    ${lib.getExe' betaInstaller "hinteros-install"} --plan stable.json --state-dir states-beta > stable.log || rc=$?
+    test "$rc" = 2 || { cat stable.log; echo "stable plan on a beta installer: exit $rc, not 2" >&2; exit 1; }
+    grep -q '"code":"channel-needs-rev"' stable.log || { cat stable.log; exit 1; }
+    jq 'del(.channel)' stable.json > beta.json
+    ${lib.getExe' betaInstaller "hinteros-install"} --plan beta.json --state-dir states-beta > beta.log || { cat beta.log; exit 1; }
+    # A keepData plan takes no `rev`: the message names a stable installer instead.
+    jq '.channel = "stable"' keep.json > keep-stable.json
+    rc=0
+    ${lib.getExe' betaInstaller "hinteros-install"} --plan keep-stable.json --state-dir states-beta > keep-stable.log || rc=$?
+    test "$rc" = 2 || { cat keep-stable.log; echo "keepData stable plan on a beta installer: exit $rc, not 2" >&2; exit 1; }
+    grep -q 'stable installer.*"code":"channel-needs-rev"' keep-stable.log || { cat keep-stable.log; exit 1; }
+    rm -r states-beta
+
     find states -name state.json | sort
     hinteros-system check-state ${
       lib.concatStringsSep " " (map toString (deviceStates ++ fixtureStates))
     } $(find states -name state.json | sort)
 
-    # The guard guards: a state with a field the daemon does not know is rejected (exit 1).
-    echo '{"schemaVersion":1,"nonsense":true}' > bad.json
-    if hinteros-system check-state bad.json; then echo "check-state accepted a bad state" >&2; exit 1; fi
+    hinteros-system check-catalog ${index}/share/hinteros/catalog.json
 
-    # settings.timeZone (time-zone.md): absent in every state above; a zone name is accepted, a
+    # The guard guards: another schema (exit 1) and a state without a required field are rejected.
+    jq '.schemaVersion = 1' states/minimal/system/state.json > bad.json
+    if hinteros-system check-state bad.json; then echo "check-state accepted schema 1" >&2; exit 1; fi
+    jq 'del(.stateVersion)' states/minimal/system/state.json > bad.json
+    if hinteros-system check-state bad.json; then echo "check-state accepted a state without stateVersion" >&2; exit 1; fi
+
+    # A field the daemon does not know is ignored (a box on an older channel reads a newer state).
+    jq '. + {nonsense: true}' states/minimal/system/state.json > unknown.json
+    hinteros-system check-state unknown.json
+
+    # settings.timeZone: absent in every state above; a zone name is accepted, a
     # value that is not a string is not.
     jq '.settings.timeZone = "America/Chicago"' states/minimal/system/state.json > tz.json
     hinteros-system check-state tz.json
     jq '.settings.timeZone = 5' states/minimal/system/state.json > tz-bad.json
     if hinteros-system check-state tz-bad.json; then echo "check-state accepted timeZone 5" >&2; exit 1; fi
+    # The disk's UUIDs are extra fields the daemon keeps.
+    jq '.disk.rootUuid = "11111111-2222-3333-4444-555555555555"' states/minimal/system/state.json > disk.json
+    hinteros-system check-state disk.json
     touch $out
   ''

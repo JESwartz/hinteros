@@ -1,4 +1,4 @@
-# Per-profile apps (apps.md, "The app env", "Where it lives", "The session side"; spike 8).
+# Per-profile apps.
 #
 #   config.hinteros.appEnv.build [ "<catalog app id>" ... ]
 #
@@ -11,14 +11,14 @@
 #
 # The env's packages come from a second nixpkgs instance (same revision, overlays and config as
 # the system) whose allowUnfreePredicate allows exactly the selected entries' unfreePackages; the
-# system's own pkgs never lists app packages on schema 2. A changed predicate changes no
+# system's own pkgs never lists app packages. A changed predicate changes no
 # derivation hash, so free apps still come from the cache.
 #
-# The rest of this module is the system side of per-profile apps (build plan step 6):
+# The rest of this module is the system side of per-profile apps:
 #   - /nix/var/nix/profiles/hinteros/{apps/<user>,starter}: root-owned Nix profiles (GC roots),
 #     set by hinteros-system's jobs with `nix-env -p … --set <env>`;
 #   - /run/hinteros/apps/<user>: the link sessions read, published by hinteros-system;
-#   - with `perProfile` (schema 2): session.toml `[apps] profile`. The env is never on any
+#   - with a state: session.toml `[apps] profile`. The env is never on any
 #     unsandboxed process's PATH or XDG_DATA_DIRS (a package is not trusted outside the sandbox:
 #     a Vulkan layer, a font or a `bin/` name of its own would load into gamescope, the launcher
 #     or the daemon). The session daemon reads it by path: the manifest, the commands (absolute
@@ -59,20 +59,26 @@ let
     else
       e;
 
-  build =
-    ids0:
+  # Tombstones are dropped (the update's apps stage removes them from every env).
+  selectionOf =
+    ids0: lib.filter (e: e.status != "removed") (map entryOf (lib.sort lib.lessThan (lib.unique ids0)));
+  unfreeOf =
+    sel: lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.license.unfreePackages) sel));
+
+  # An env, with `pkgsFor unfree` as its nixpkgs (envPkgsFor, or buildAll's shared instances).
+  buildWith =
+    pkgsFor: ids0:
     let
-      # Tombstones are dropped (the update's apps stage removes them from every env).
-      sel = lib.filter (e: e.status != "removed") (map entryOf (lib.sort lib.lessThan (lib.unique ids0)));
+      sel = selectionOf ids0;
       ids = map (e: e.id) sel;
-      unfree = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.license.unfreePackages) sel));
+      unfree = unfreeOf sel;
       forbidden = lib.subtractLists config.hinteros.unfreeExceptions unfree;
       p =
         if config.hinteros.forbidUnfree && forbidden != [ ] then
           throw "hinteros.appEnv.build: hinteros.forbidUnfree is set but the env needs unfree packages: ${lib.concatStringsSep ", " forbidden}"
         else
-          envPkgsFor unfree;
-      # The box's inputs to apps (catalog.md, format 3). Steam is stock pkgs.steam (spike 8) with
+          pkgsFor unfree;
+      # The box's inputs to apps (catalog entry format 3). Steam is stock pkgs.steam with
       # our sockets hidden (lib/steam.nix); its drivers come from /run/opengl-driver(-32) at run time.
       box = {
         firefoxKiosk = config.hinteros.firefoxKiosk.mkWrapper p;
@@ -115,10 +121,10 @@ let
         system_rev = cfg.systemRev;
         inherit ids;
         apps = entriesLib.toEntries apps;
-        box = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.box or [ ]) sel));
+        box = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: e.boxFeatures or [ ]) sel));
       }
       // {
-        # DECISIONS D3: `steam` is `{path}` or null.
+        # `steam` is `{path}` or null.
         steam =
           if steam != null && steam.package != null then { path = lib.getExe steam.package; } else null;
       };
@@ -141,6 +147,21 @@ let
       ];
       passthru = { inherit ids manifest; };
     };
+
+  build = buildWith envPkgsFor;
+
+  # Every owner's env, with one nixpkgs instance per distinct unfree set: an instance is a full
+  # evaluation of nixpkgs, and owners often need the same set (each with steam, say).
+  buildAll =
+    owners:
+    let
+      key = lib.concatStringsSep " ";
+      sets = lib.mapAttrs (_: ids0: unfreeOf (selectionOf ids0)) owners;
+      shared = lib.listToAttrs (
+        map (u: lib.nameValuePair (key u) (envPkgsFor u)) (lib.unique (lib.attrValues sets))
+      );
+    in
+    lib.mapAttrs (_: buildWith (u: shared.${key u})) owners;
 in
 {
   options.hinteros.appEnv = {
@@ -154,17 +175,8 @@ in
     buildAll = lib.mkOption {
       type = lib.types.raw;
       readOnly = true;
-      default = lib.mapAttrs (_: build);
+      default = buildAll;
       description = "`{ <owner> = [ ids ]; }` -> `{ <owner> = env; }`: every owner's env in one evaluation (the update's apps stage).";
-    };
-
-    perProfile = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Apps are per profile (state.json schema 2): the session daemon reads each profile's env
-        manifest (`[apps] profile`). Off: the box-wide `hinteros.apps` (schema 1).
-      '';
     };
 
     systemRev = lib.mkOption {
@@ -204,12 +216,14 @@ in
       ];
     }
 
-    (lib.mkIf cfg.perProfile {
+    # Every device: the session daemon reads each profile's env manifest. Test VMs without a state
+    # have the box-wide `hinteros.apps`.
+    (lib.mkIf (config.hinteros.state != null) {
       assertions = [
         {
           # session.toml `apps` is either the profile table or the box-wide array, never both.
           assertion = !(lib.any (a: a.enable) (lib.attrValues config.hinteros.apps));
-          message = "hinteros.appEnv.perProfile: box-wide apps (hinteros.apps.<id>.enable) are on; apps are per profile on schema 2.";
+          message = "hinteros.apps: box-wide apps (hinteros.apps.<id>.enable) are on; with a state, apps are per profile.";
         }
       ];
       # %u: the session daemon's own user.

@@ -5,7 +5,7 @@ diff -ru c/src/steamcompmgr.cpp d/src/steamcompmgr.cpp
  	return false;
  }
  
-+// HinterOS: Xwayland #2 and later hold the apps the session daemon starts (design/sandbox.md).
++// HinterOS: Xwayland #2 and later hold the apps the session daemon starts.
 +// Nothing set there counts beyond what an ordinary X11 app needs: no Steam or gamescope property
 +// of a window (STEAM_GAME, STEAM_OVERLAY, STEAM_INPUT_FOCUS, GAMESCOPE_EXTERNAL_OVERLAY, ...) and
 +// no property of the root window (GAMESCOPECTRL_BASELAYER_*, the tunables). An app's windows get

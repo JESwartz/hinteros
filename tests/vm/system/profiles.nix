@@ -1,5 +1,5 @@
-# Shared parts of the profile VM tests (profiles.md "VM tests", apps.md build plan steps 6-10):
-# a schema-2 box with profile accounts, their metadata and PINs as hinteros-system keeps them,
+# Shared parts of the profile VM tests:
+# a box with profile accounts, their metadata and PINs as hinteros-system keeps them,
 # optional prebuilt app envs (with the stub `nix` of stub-nix-envs.nix, so jobs need no network),
 # specialisations that stand for the systems the jobs' apply flow "builds", and Python helpers
 # that drive the greeter-mode daemon (the picker's buttons), a profile's session daemon (the
@@ -8,7 +8,7 @@
 #   mkTest {
 #     name; testScript;              # testScript: a string or { nodes, ... }: string, run after
 #                                    #   the Python helpers below
-#     state;                         # state.json (schema 2: mkState { ... }; or a schema-1 set)
+#     state;                         # state.json (mkState { ... })
 #     profiles ? { };                # { p1 = { name; color ? "teal"; admin ? false;
 #                                    #          locked ? false; pin ? null; }; ... }
 #     envs ? { };                    # { <key> = { ids; rooted ? true; }; } app envs built with
@@ -20,11 +20,12 @@
 #                                    #   hinteros-system starts, if the profile does not exist
 #     starter ? null;                # <env key>: the starter env, set the same way
 #     specialisations ? { };         # { <name> = <state>; } systems the stub "builds"
+#                                    #   (or { state; module; }: with more config)
 #     overrides ? { };               # hinteros.appEnv.overrides (merged into every env)
 #     extraModule ? { };             # more config for the node
 #   }
 #
-# The node is a greeter-mode box by default (schema 2 turns it on) with cage, like
+# The node is a greeter-mode box by default (a state turns it on) with cage, like
 # profiles-greeter. /etc/hinteros is the device config snapshot (an embedded flake whose
 # flake.nix only carries the channel line the daemon reads, and the state), so each
 # specialisation's snapshot matches the state.json a job writes for it.
@@ -32,7 +33,7 @@
 let
   inherit (pkgs) lib;
 
-  userOf = id: if id == "p1" then "hinteros" else "hinteros-${id}";
+  userOf = id: "hinteros-${id}";
   numOf = id: lib.toInt (lib.removePrefix "p" id);
 
   # The channel line hinteros-system reads (the device flake is never evaluated: the stub nix
@@ -59,7 +60,7 @@ in
 rec {
   inherit userOf pinHash stubbornApp;
 
-  # state.json schema 2 (DECISIONS D6).
+  # state.json.
   mkState =
     {
       accounts ? [
@@ -68,23 +69,21 @@ rec {
       ],
       requirements ? [ ],
       guest ? true,
+      services ? [ ],
     }:
     {
       schemaVersion = 2;
       base = "unstable";
+      stateVersion = "25.11";
       settings = {
         ssh.enable = false;
         guest.enable = guest;
       };
-      profiles = map (id: {
-        inherit id;
-        user = userOf id;
-      }) accounts;
-      inherit requirements;
-      services = [ ];
+      profiles = map (id: { inherit id; }) accounts;
+      inherit requirements services;
     };
 
-  # profiles.json (DECISIONS D4) for `profiles`; `next` is one past the highest account.
+  # profiles.json for `profiles`; `next` is one past the highest account.
   profilesJson =
     state: profiles:
     pkgs.writeText "profiles.json" (
@@ -228,9 +227,18 @@ rec {
       };
       boot.loader.grub.enable = lib.mkForce false;
 
-      specialisation = lib.mapAttrs (_: st: {
-        configuration.hinteros.state = lib.mkOverride 40 st;
-      }) specialisations;
+      specialisation = lib.mapAttrs (
+        _: s:
+        let
+          withModule = s ? state;
+        in
+        {
+          configuration = {
+            imports = lib.optional withModule (s.module or { });
+            hinteros.state = lib.mkOverride 40 (if withModule then s.state else s);
+          };
+        }
+      ) specialisations;
 
       system.extraDependencies = lib.mapAttrsToList (_: e: e.env) (
         lib.filterAttrs (_: e: e.rooted) built
@@ -256,7 +264,7 @@ rec {
     import json
     import time
 
-    ENV = "HINTEROS_SESSION_API=0.18 HINTEROS_SYSTEM_API=0.10 PYTHONPATH=/etc/hinteros-test"
+    ENV = "HINTEROS_SESSION_API=1.0 HINTEROS_SYSTEM_API=1.0 PYTHONPATH=/etc/hinteros-test"
 
     def env_path(key):
         """The store path of a prebuilt app env (mkTest `envs`)."""
@@ -345,6 +353,18 @@ rec {
                 return
             time.sleep(1)
         raise AssertionError("jobs still running")
+
+    def start_job(user, method, params=None):
+        """sys_ok of a method that starts a job; returns its job_id. The launcher's update check
+        at session start is a job of its own and may start at any moment after enter() or
+        switch() (jobs_idle cannot see it coming): on job_busy, wait for it and try again."""
+        for _ in range(5):
+            r = sysrpc(user, method, params)
+            if r.get("error", {}).get("code") != 3005:
+                break
+            jobs_idle(user)
+        assert "result" in r and r["result"]["job_id"], (user, method, params, r)
+        return r["result"]["job_id"]
 
     def session_of(user):
         """`user`'s session is up (its daemon and compositor) and the picker is gone."""

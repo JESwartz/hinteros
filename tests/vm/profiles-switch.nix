@@ -1,8 +1,6 @@
-# Switching profiles without a reboot (profiles.md "A switch, step by step", "PAM: where the PIN
-# and the kill are enforced", "Device access per seat"; VM `profiles-switch` and
-# `profiles-blocked-app`). Greeter mode; p1 = `hinteros` (admin, unlocked, PIN 1357), whose apps
-# are one stubborn "Moonlight" (an app that ignores SIGTERM, like a hung game); p2 =
-# `hinteros-p2` (locked, PIN 2468, no apps).
+# Switching profiles without a reboot (VM `profiles-switch` and `profiles-blocked-app`). Greeter
+# mode; p1 = `hinteros-p1` (admin, unlocked, PIN 1357), whose apps are one stubborn "Moonlight" (an
+# app that ignores SIGTERM, like a hung game); p2 = `hinteros-p2` (locked, PIN 2468, no apps).
 #   - p1 opens from the picker without a PIN. Beside the stubborn app it leaves things the
 #     session daemon never started: a transient user service, a `setsid` process and a process
 #     holding /dev/uinput open (which only works through uaccess).
@@ -55,7 +53,7 @@ profiles.mkTest {
     empty.ids = [ ];
   };
   appProfiles = {
-    hinteros = "moon";
+    hinteros-p1 = "moon";
     hinteros-p2 = "empty";
   };
 
@@ -74,9 +72,9 @@ profiles.mkTest {
         return [m["params"] for m in read_log(path) if m.get("method") == name]
 
     def start_switch(path, target, pin=None):
-        machine.succeed("runuser -u hinteros -- mkdir -p /tmp/sw")
+        machine.succeed("runuser -u hinteros-p1 -- mkdir -p /tmp/sw")
         machine.succeed(
-            f"(runuser -u hinteros -- env {ENV} HINTEROS_SESSION_SOCK={sock('hinteros')} "
+            f"(runuser -u hinteros-p1 -- env {ENV} HINTEROS_SESSION_SOCK={sock('hinteros-p1')} "
             f"python3 /etc/hinteros-test/switcher.py {path} {target} {pin or '''} >/dev/null 2>&1 &)"
         )
         machine.wait_until_succeeds(f"grep -q response {path}", timeout=60)
@@ -85,11 +83,11 @@ profiles.mkTest {
 
     def press(path, command):
         # The pop-up's button (switcher.py reads it as the session user).
-        machine.succeed(f"runuser -u hinteros -- sh -c 'echo {command} > {path}.cmd'")
+        machine.succeed(f"runuser -u hinteros-p1 -- sh -c 'echo {command} > {path}.cmd'")
         machine.wait_until_fails(f"test -e {path}.cmd", timeout=30)
 
     def lan_filter(owner, gone):
-        # design/sandbox.md `lan`: the table filters the nolan cgroup of the profile in front only
+        # `lan`: the table filters the nolan cgroup of the profile in front only
         # (the other's session ended, and its daemon cleared its own).
         machine.wait_until_succeeds(f"${pkgs.nftables}/bin/nft list table inet hinteros_lan | grep -q 'comment \"uid {uid(owner)}\"'", timeout=60)
         machine.wait_until_fails(f"${pkgs.nftables}/bin/nft list table inet hinteros_lan | grep -q 'comment \"uid {uid(gone)}\"'", timeout=60)
@@ -105,35 +103,35 @@ profiles.mkTest {
         picker_up()
         g = greeter("p1")
         assert len(g["outcomes"]) == 1 and g["outcomes"][0]["ok"] is True, g
-        session_of("hinteros")
+        session_of("hinteros-p1")
         for _ in range(60):
-            if "moonlight" in [a["id"] for a in sess_ok("hinteros", "apps.list")["apps"]]:
+            if "moonlight" in [a["id"] for a in sess_ok("hinteros-p1", "apps.list")["apps"]]:
                 break
             machine.sleep(1)
-        assert "moonlight" in [a["id"] for a in sess_ok("hinteros", "apps.list")["apps"]]
-        lan_filter("hinteros", "hinteros-p2")
+        assert "moonlight" in [a["id"] for a in sess_ok("hinteros-p1", "apps.list")["apps"]]
+        lan_filter("hinteros-p1", "hinteros-p2")
 
     with subtest("p1 leaves processes the session daemon never started"):
-        u1 = uid("hinteros")
+        u1 = uid("hinteros-p1")
         user_env = f"XDG_RUNTIME_DIR=/run/user/{u1} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{u1}/bus"
-        machine.succeed(f"runuser -u hinteros -- env {user_env} systemd-run --user --unit=leftover sleep 1000")
-        machine.succeed("runuser -u hinteros -- setsid -f sleep 1001 </dev/null >/dev/null 2>&1")
+        machine.succeed(f"runuser -u hinteros-p1 -- env {user_env} systemd-run --user --unit=leftover sleep 1000")
+        machine.succeed("runuser -u hinteros-p1 -- setsid -f sleep 1001 </dev/null >/dev/null 2>&1")
         # Opening /dev/uinput works only through the active session's uaccess ACL.
         print(machine.succeed("ls -l /dev/uinput; getfacl -p /dev/uinput; loginctl list-sessions --no-legend"))
-        machine.succeed("runuser -u hinteros -- python3 -c 'open(\"/dev/uinput\", \"wb\")'")
+        machine.succeed("runuser -u hinteros-p1 -- python3 -c 'open(\"/dev/uinput\", \"wb\")'")
         machine.succeed(
-            "runuser -u hinteros -- setsid -f python3 -c "
+            "runuser -u hinteros-p1 -- setsid -f python3 -c "
             "'import time; f = open(\"/dev/uinput\", \"wb\"); time.sleep(100000)' </dev/null >/dev/null 2>&1"
         )
-        machine.wait_until_succeeds("pgrep -u hinteros -f 'sleep 1000'")
-        machine.wait_until_succeeds("pgrep -u hinteros -f 'sleep 1001'")
-        holder = machine.wait_until_succeeds("pgrep -u hinteros -f 'dev/uinput'", timeout=30).split()[0]
+        machine.wait_until_succeeds("pgrep -u hinteros-p1 -f 'sleep 1000'")
+        machine.wait_until_succeeds("pgrep -u hinteros-p1 -f 'sleep 1001'")
+        holder = machine.wait_until_succeeds("pgrep -u hinteros-p1 -f 'dev/uinput'", timeout=30).split()[0]
         machine.succeed(f"ls -l /proc/{holder}/fd | grep -q /dev/uinput")
 
     with subtest("a stubborn app: no silent force-close; Cancel switch keeps the profile"):
-        r = sess("hinteros", "apps.launch", {"id": "moonlight"})
+        r = sess("hinteros-p1", "apps.launch", {"id": "moonlight"})
         assert "result" in r, r
-        app = machine.wait_until_succeeds("pgrep -u hinteros -f stubborn-app").split()[0]
+        app = machine.wait_until_succeeds("pgrep -u hinteros-p1 -f stubborn-app").split()[0]
         L = "/tmp/sw/cancel.log"
         start_switch(L, "p2", "2468")
         # The hint with p2's one-time token is written; the app got SIGTERM and ignored it.
@@ -145,7 +143,7 @@ profiles.mkTest {
         # Nothing is killed while the pop-up waits for an answer.
         machine.sleep(15)
         machine.succeed(f"kill -0 {app}")
-        machine.succeed("pgrep -u hinteros -f '/bin/cage '")
+        machine.succeed("pgrep -u hinteros-p1 -f '/bin/cage '")
         machine.fail("pgrep -u hinteros-p2")
         assert len(events(L, "switch_blocked")) == 1, read_log(L)
         # Keep waiting: asked again after another 10 s.
@@ -158,15 +156,15 @@ profiles.mkTest {
         machine.wait_until_succeeds(f"grep -q '\"done\": \"cancelled\"' {L}", timeout=30)
         machine.fail("test -e /run/hinteros/switch.json")
         machine.succeed(f"kill -0 {app}")
-        machine.succeed("pgrep -u hinteros -f '/bin/cage '")
+        machine.succeed("pgrep -u hinteros-p1 -f '/bin/cage '")
         machine.sleep(5)
         machine.fail("pgrep -u hinteros-p2")
-        assert sess_ok("hinteros", "profile.current")["id"] == "p1"
+        assert sess_ok("hinteros-p1", "profile.current")["id"] == "p1"
 
     with subtest("the locked p2: a wrong PIN is refused in p1's session, nothing closes"):
-        r = sess("hinteros", "session.switch_profile", {"id": "p2", "pin": "0000"})
+        r = sess("hinteros-p1", "session.switch_profile", {"id": "p2", "pin": "0000"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "target", r
-        r = sess("hinteros", "session.switch_profile", {"id": "p2"})
+        r = sess("hinteros-p1", "session.switch_profile", {"id": "p2"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "target", r
         machine.succeed(f"kill -0 {app}")
         machine.fail("test -e /run/hinteros/switch.json")
@@ -182,13 +180,13 @@ profiles.mkTest {
         assert stages[0] == "closing_apps" and stages[-1] == "ending", stages
         # end-others: the app, the user service, the setsid process, the uinput holder, the
         # session: every process of the uid.
-        machine.wait_until_fails("pgrep -u hinteros", timeout=30)
+        machine.wait_until_fails("pgrep -u hinteros-p1", timeout=30)
         machine.fail(f"kill -0 {app}")
         cur = sess_ok("hinteros-p2", "profile.current")
         assert cur["id"] == "p2" and cur["locked"] and not cur["admin"], cur
         # The token was used up.
         machine.fail("test -e /run/hinteros/switch.json")
-        lan_filter("hinteros-p2", "hinteros")
+        lan_filter("hinteros-p2", "hinteros-p1")
 
     with subtest("devices follow the active session; no static device groups"):
         # Keyboards never: no profile has an ACL on one or can read it (a game could log the admin
@@ -201,13 +199,13 @@ profiles.mkTest {
         for dev in keyboards:
             acl = machine.succeed(f"getfacl -p {dev}")
             assert "user:hinteros" not in acl, (dev, acl)
-            for u in ["hinteros", "hinteros-p2"]:
+            for u in ["hinteros-p1", "hinteros-p2"]:
                 machine.fail(f"runuser -u {u} -- test -r {dev}")
         for dev in ["/dev/uinput"] + machine.succeed("ls /dev/dri/card* /dev/dri/renderD* 2>/dev/null || true").split():
             acl = machine.succeed(f"getfacl -p {dev}")
             assert "user:hinteros-p2:" in acl, (dev, acl)
-            assert "user:hinteros:" not in acl, (dev, acl)
-        for u in ["hinteros", "hinteros-p2", "hinteros-greeter"]:
+            assert "user:hinteros-p1:" not in acl, (dev, acl)
+        for u in ["hinteros-p1", "hinteros-p2", "hinteros-greeter"]:
             groups = set(machine.succeed(f"id -nG {u}").split())
             assert not groups & {"video", "input", "uinput", "inputplumber", "wheel"}, (u, groups)
 
@@ -228,7 +226,7 @@ profiles.mkTest {
         machine.succeed("systemd-run --uid=hinteros-p2 --unit=p2-system sleep 1000")
         pid = machine.succeed("systemctl show -p MainPID --value p2-system.service").strip()
         machine.fail(f"pkcheck --action-id {action} --process {pid}")
-        machine.succeed("systemd-run --uid=hinteros --unit=p1-system sleep 1000")
+        machine.succeed("systemd-run --uid=hinteros-p1 --unit=p1-system sleep 1000")
         pid = machine.succeed("systemctl show -p MainPID --value p1-system.service").strip()
         machine.fail(f"pkcheck --action-id {action} --process {pid}")
         machine.succeed("systemctl stop p1-system.service")
@@ -239,12 +237,12 @@ profiles.mkTest {
         assert current_system() == systems[""]
 
     with subtest("back to the unlocked p1: no PIN; nothing of p2 is left"):
-        switch("hinteros-p2", "p1", "hinteros")
+        switch("hinteros-p2", "p1", "hinteros-p1")
         machine.wait_until_fails("pgrep -u hinteros-p2", timeout=30)
         machine.fail("systemctl is-active p2-system.service")
         acl = machine.succeed("getfacl -p /dev/uinput")
-        assert "user:hinteros:" in acl and "user:hinteros-p2:" not in acl, acl
-        lan_filter("hinteros", "hinteros-p2")
+        assert "user:hinteros-p1:" in acl and "user:hinteros-p2:" not in acl, acl
+        lan_filter("hinteros-p1", "hinteros-p2")
         assert machine.succeed("cat /proc/sys/kernel/random/boot_id").strip() == boot_id
   '';
 }

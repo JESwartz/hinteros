@@ -1,4 +1,4 @@
-# Hardening baseline on built systems (threat-model.md). Non-dev boxes: the session user is not
+# Hardening baseline on built systems. Non-dev boxes: the session user is not
 # in wheel, cannot sudo, cannot talk to the nix daemon; the admin account's sudo always asks for
 # its password; with SSH on (state.json) the admin logs in with username + password, from the
 # local networks only (a global IPv6 source is refused), while the session user and root cannot;
@@ -6,8 +6,8 @@
 # and nix, the session user still nothing. Kernel sysctls (kptr, dmesg, perf, BPF, io_uring,
 # ptrace, protected files) have their hardened values; the session user cannot read dmesg.
 #
-# Profiles (profiles.md "One Unix user per profile", "Device access per seat"; DECISIONS D4, S2):
-# on a schema-2 box in greeter mode (started after the others), every account (p1, p2, the guest)
+# Profiles (one Unix user per profile, device access per seat):
+# on a box in greeter mode (started after the others), every account (p1, p2, the guest)
 # and the greeter are in no device group, wheel or systemd-journal, the accounts have homes 0700,
 # no sudo, no nix daemon and no password; root-held state (profiles.json, PINs) is 0600/0700
 # root; app profiles and the published links are root's; the sockets and the public view have
@@ -28,15 +28,13 @@ let
   '';
 
   stateFor = ssh: {
-    schemaVersion = 1;
+    schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
     settings.ssh.enable = ssh;
-    profiles = [
-      {
-        id = "p1";
-        name = "T";
-        user = "hinteros";
-      }
-    ];
+    profiles = [ { id = "p1"; } ];
+    requirements = [ ];
+    services = [ ];
   };
 
   box = extra: {
@@ -46,6 +44,8 @@ let
       ../../nixos/vm
       extra
     ];
+    # Autologin of p1 (greeter mode: the `greeter` node).
+    hinteros.profiles.greeter.enable = false;
     virtualisation.memorySize = lib.mkForce 1536;
   };
 
@@ -103,7 +103,7 @@ in
       };
       envs.empty.ids = [ ];
       appProfiles = {
-        hinteros = "empty";
+        hinteros-p1 = "empty";
         hinteros-p2 = "empty";
       };
     };
@@ -151,19 +151,19 @@ in
 
       # ---- non-dev: the session user ---------------------------------------------------------
       for m in (machine, quiet):
-          assert "wheel" not in m.succeed("id -nG hinteros").split(), "session user in wheel"
-          m.fail("runuser -u hinteros -- sudo -n true")
-          m.fail("runuser -u hinteros -- sudo -S true < /dev/null")
+          assert "wheel" not in m.succeed("id -nG hinteros-p1").split(), "session user in wheel"
+          m.fail("runuser -u hinteros-p1 -- sudo -n true")
+          m.fail("runuser -u hinteros-p1 -- sudo -S true < /dev/null")
           # No nix daemon access at all (allowed-users = root).
-          m.fail(f"runuser -u hinteros -- {NIX}")
-          m.fail(f"runuser -u hinteros -- {NIX} --option substituters http://203.0.113.9")
-          m.fail("runuser -u hinteros -- nix-store --query --hash /run/current-system")
+          m.fail(f"runuser -u hinteros-p1 -- {NIX}")
+          m.fail(f"runuser -u hinteros-p1 -- {NIX} --option substituters http://203.0.113.9")
+          m.fail("runuser -u hinteros-p1 -- nix-store --query --hash /run/current-system")
           m.succeed("grep -E '^trusted-users = root( root)*$' /etc/nix/nix.conf")
           m.succeed("grep -E '^allowed-users = root$' /etc/nix/nix.conf")
           m.fail("id deploy")
           # Persistent journal the session user cannot read; polkit admin identities.
           m.succeed("test -d /var/log/journal")
-          m.fail("runuser -u hinteros -- journalctl -b --system -n1 | grep -q systemd")
+          m.fail("runuser -u hinteros-p1 -- journalctl -b --system -n1 | grep -q systemd")
           m.succeed("grep -R 'unix-user:0' /etc/polkit-1/rules.d/")
           # Enabling SSH is a polkit action that wants the admin password.
           pk = m.succeed("pkaction --action-id org.hinteros.system.ssh --verbose")
@@ -173,7 +173,7 @@ in
           for key, want in KERNEL_SYSCTLS.items():
               got = m.succeed(f"sysctl -n {key}").strip()
               assert got == want, (key, got, want)
-          m.fail("runuser -u hinteros -- dmesg")
+          m.fail("runuser -u hinteros-p1 -- dmesg")
           # kptr_restrict 2: no kernel addresses, also for root.
           m.fail("grep -qv '^0000000000000000 ' /proc/kallsyms")
 
@@ -190,15 +190,15 @@ in
       sshd = machine.succeed("sshd -T").lower()
       for want in ("passwordauthentication yes", "permitrootlogin no", "allowusers hinteros-admin"):
           assert want in sshd, want
-      assert "allowusers hinteros\n" not in sshd
+      assert "allowusers hinteros-p1\n" not in sshd
       machine.succeed("test -f /etc/ssh/ssh_host_ed25519_key")
       machine.succeed("! readlink -f /etc/ssh/ssh_host_ed25519_key | grep -q /nix/store")
 
       lan.succeed(pw("hinteros-admin", MACHINE, "true"))
       lan.fail(pw("hinteros-admin", MACHINE, "true", "wrong"))
-      lan.fail(pw("hinteros", MACHINE, "true"))
+      lan.fail(pw("hinteros-p1", MACHINE, "true"))
       lan.fail(pw("root", MACHINE, "true"))
-      lan.fail(f"{KEY} hinteros@{MACHINE} true")
+      lan.fail(f"{KEY} hinteros-p1@{MACHINE} true")
       # Still unprivileged until sudo with the password.
       # sshd's per-source penalties (after the failed logins above) can refuse a connection for
       # a few seconds (ssh exits 255): retry those, but never count them as sudo's answer.
@@ -236,21 +236,21 @@ in
       dev.succeed("runuser -u deploy -- sudo -n true")
       dev.succeed(f"runuser -u deploy -- {NIX}")
       assert "wheel" in dev.succeed("id -nG deploy").split()
-      assert "wheel" not in dev.succeed("id -nG hinteros").split()
-      dev.fail("runuser -u hinteros -- sudo -n true")
-      dev.fail(f"runuser -u hinteros -- {NIX}")
+      assert "wheel" not in dev.succeed("id -nG hinteros-p1").split()
+      dev.fail("runuser -u hinteros-p1 -- sudo -n true")
+      dev.fail(f"runuser -u hinteros-p1 -- {NIX}")
       lan.succeed(f"{KEY} deploy@{DEV} sudo -n true")
       lan.fail(f"{KEY} root@{DEV} true")
-      lan.fail(f"{KEY} hinteros@{DEV} true")
+      lan.fail(f"{KEY} hinteros-p1@{DEV} true")
 
-      # ---- profiles (profiles.md "One Unix user per profile", "Device access per seat"): a
-      # schema-2 box in greeter mode, after the others are down -----------------------------------
+      # ---- profiles (one Unix user per profile, device access per seat): a box in greeter
+      # mode, after the others are down -----------------------------------------------------------
       for m in (machine, quiet, dev, lan):
           m.shutdown()
       machine = profilebox
       boot_box()
       picker_up()
-      ACCOUNTS = ["hinteros", "hinteros-p2", "hinteros-guest"]
+      ACCOUNTS = ["hinteros-p1", "hinteros-p2", "hinteros-guest"]
 
       def mode(path):
           return machine.succeed(f"stat -c '%a %U:%G' {path}").strip()
@@ -273,27 +273,31 @@ in
           assert machine.succeed("id -u hinteros-p2").strip() == "20002"
           assert machine.succeed("id -u hinteros-guest").strip() == "20000"
 
-      with subtest("profiles: root-held state, app profiles and published files"):
-          assert mode("/var/lib/hinteros").startswith("700 root:"), mode("/var/lib/hinteros")
-          assert mode("/var/lib/hinteros/pins").startswith("700 root:"), mode("/var/lib/hinteros/pins")
-          assert mode("/var/lib/hinteros/pins/p1").startswith("600 root:"), mode("/var/lib/hinteros/pins/p1")
-          assert mode("/var/lib/hinteros/profiles.json").startswith("600 root:"), mode("/var/lib/hinteros/profiles.json")
+      with subtest("profiles: the service's state, app profiles and published files"):
+          # hinteros-system is not root: its state is its own account's, private to it; root's own
+          # (the admin password hash, the jobs' staging) is apart, and only root may list it.
+          assert mode("/var/lib/hinteros").startswith("700 hinteros-system:"), mode("/var/lib/hinteros")
+          assert mode("/var/lib/hinteros-root") == "710 root:hinteros-system", mode("/var/lib/hinteros-root")
+          assert mode("/var/lib/hinteros/pins").startswith("700 hinteros-system:"), mode("/var/lib/hinteros/pins")
+          assert mode("/var/lib/hinteros/pins/p1").startswith("600 hinteros-system:"), mode("/var/lib/hinteros/pins/p1")
+          assert mode("/var/lib/hinteros/profiles.json").startswith("600 hinteros-system:"), mode("/var/lib/hinteros/profiles.json")
           assert mode("/nix/var/nix/profiles/hinteros").startswith("755 root:"), mode("/nix/var/nix/profiles/hinteros")
           assert mode("/nix/var/nix/profiles/hinteros/apps").startswith("755 root:"), mode("/nix/var/nix/profiles/hinteros/apps")
-          for u in ["hinteros", "hinteros-p2"]:
+          for u in ["hinteros-p1", "hinteros-p2"]:
               assert link_owner(f"/nix/var/nix/profiles/hinteros/apps/{u}") == "root", u
-          assert mode("/run/hinteros").startswith("755 root:"), mode("/run/hinteros")
+          assert mode("/run/hinteros").startswith("755 hinteros-system:"), mode("/run/hinteros")
           machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros-p2")
-          # D4 says 0755; the service makes it 0750 root:hinteros, which every account (all in
+          # D4 says 0755; the service makes it 0750 hinteros-system:hinteros, which every account (all in
           # `hinteros`) can still traverse.
-          assert mode("/run/hinteros/apps") in ("755 root:root", "755 root:hinteros", "750 root:hinteros"), mode("/run/hinteros/apps")
-          for u in ["hinteros", "hinteros-p2"]:
-              assert link_owner(f"/run/hinteros/apps/{u}") == "root", u
-          assert mode("/run/hinteros/profiles-public.json").startswith("644 root:"), mode("/run/hinteros/profiles-public.json")
-          assert mode("/run/hinteros/system.sock") == "660 root:hinteros", mode("/run/hinteros/system.sock")
-          assert mode("/run/hinteros/greeter.sock") == "660 root:hinteros-greeter", mode("/run/hinteros/greeter.sock")
+          assert mode("/run/hinteros/apps") == "750 hinteros-system:hinteros", mode("/run/hinteros/apps")
+          for u in ["hinteros-p1", "hinteros-p2"]:
+              assert link_owner(f"/run/hinteros/apps/{u}") in ("root", "hinteros-system"), u
+          assert mode("/run/hinteros/profiles-public.json").startswith("644 hinteros-system:"), mode("/run/hinteros/profiles-public.json")
+          assert mode("/run/hinteros/system.sock") == "660 hinteros-system:hinteros", mode("/run/hinteros/system.sock")
+          assert mode("/run/hinteros/greeter.sock") == "660 hinteros-system:hinteros-greeter", mode("/run/hinteros/greeter.sock")
           for u in ACCOUNTS:
               machine.fail(f"runuser -u {u} -- cat /var/lib/hinteros/profiles.json")
+              machine.fail(f"runuser -u {u} -- ls /var/lib/hinteros-root")
               machine.fail(f"runuser -u {u} -- touch /run/hinteros/apps/x")
               machine.fail(f"runuser -u {u} -- touch /nix/var/nix/profiles/hinteros/apps/x")
           # The guest's home is emptied at boot (never following symlinks).
@@ -305,13 +309,13 @@ in
       with subtest("profiles: device ACLs and runtime dirs follow the active session"):
           # At the picker no profile holds the devices.
           acl = machine.succeed("getfacl -p /dev/uinput")
-          assert "user:hinteros:" not in acl and "user:hinteros-p2:" not in acl, acl
-          enter("p1", "hinteros", "2468")
+          assert "user:hinteros-p1:" not in acl and "user:hinteros-p2:" not in acl, acl
+          enter("p1", "hinteros-p1", "2468")
           for dev in ["/dev/uinput"] + machine.succeed("ls /dev/dri/card* /dev/dri/renderD* 2>/dev/null || true").split():
               acl = machine.succeed(f"getfacl -p {dev}")
-              assert "user:hinteros:" in acl and "user:hinteros-p2:" not in acl, (dev, acl)
-          assert mode(f"/run/user/{uid('hinteros')}") == "700 hinteros:users"
-          cage = machine.succeed("pgrep -u hinteros -o -f '/bin/cage '").strip()
+              assert "user:hinteros-p1:" in acl and "user:hinteros-p2:" not in acl, (dev, acl)
+          assert mode(f"/run/user/{uid('hinteros-p1')}") == "700 hinteros-p1:users"
+          cage = machine.succeed("pgrep -u hinteros-p1 -o -f '/bin/cage '").strip()
           machine.fail(f"pkcheck --action-id org.freedesktop.login1.set-self-linger --process {cage}")
           machine.fail("runuser -u hinteros-p2 -- cat /dev/uinput")
 
@@ -327,26 +331,26 @@ in
               for u in ACCOUNTS:
                   machine.fail(f"runuser -u {u} -- test -r {dev}")
           machine.wait_until_succeeds("journalctl -b -u hinteros-keyboard | grep -q 'keyboard found'", timeout=30)
-          assert mode("/run/hinteros/keyboard.sock") == "660 root:hinteros-keyboard", mode("/run/hinteros/keyboard.sock")
+          assert mode("/run/hinteros/keyboard.sock") == "660 hinteros-system:hinteros-keyboard", mode("/run/hinteros/keyboard.sock")
           for u in ACCOUNTS:
               machine.fail(f"runuser -u {u} -- test -w /run/hinteros/keyboard.sock")
 
       with subtest("profiles: a session not in front is frozen, and thawed when it is again"):
-          u1 = uid("hinteros")
+          u1 = uid("hinteros-p1")
           slice = f"user-{u1}.slice"
           user_env = f"XDG_RUNTIME_DIR=/run/user/{u1} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{u1}/bus"
           # A process of p1 (in its slice) that opens /dev/uinput while p1 is in front and then
           # counts, like a game that would type into the admin console after a switch.
           machine.succeed(
-              f"runuser -u hinteros -- env {user_env} systemd-run --user --unit=uinput-holder python3 -c "
+              f"runuser -u hinteros-p1 -- env {user_env} systemd-run --user --unit=uinput-holder python3 -c "
               "'import time; f = open(\"/dev/uinput\", \"wb\"); n = 0\n"
-              "while True:\n n += 1; open(\"/home/hinteros/ticks\", \"w\").write(str(n)); time.sleep(0.1)'"
+              "while True:\n n += 1; open(\"/home/hinteros-p1/ticks\", \"w\").write(str(n)); time.sleep(0.1)'"
           )
-          holder = machine.wait_until_succeeds("pgrep -u hinteros -f 'dev/uinput'", timeout=30).split()[0]
-          machine.wait_until_succeeds("test -s /home/hinteros/ticks")
+          holder = machine.wait_until_succeeds("pgrep -u hinteros-p1 -f 'dev/uinput'", timeout=30).split()[0]
+          machine.wait_until_succeeds("test -s /home/hinteros-p1/ticks")
 
           def ticks():
-              return int(machine.succeed("cat /home/hinteros/ticks").strip() or 0)
+              return int(machine.succeed("cat /home/hinteros-p1/ticks").strip() or 0)
 
           def freezer():
               return machine.succeed(f"systemctl show -p FreezerState --value {slice}").strip()
@@ -372,9 +376,9 @@ in
           machine.succeed("chvt 1")
           machine.wait_until_succeeds(f"systemctl show -p FreezerState --value {slice} | grep -qx running", timeout=10)
           a = ticks()
-          machine.wait_until_succeeds(f"test \"$(cat /home/hinteros/ticks)\" -gt {a}", timeout=10)
-          machine.succeed("pgrep -u hinteros -f '/bin/cage '")
-          sess_ok("hinteros", "profile.current")
-          machine.succeed(f"runuser -u hinteros -- env {user_env} systemctl --user stop uinput-holder")
+          machine.wait_until_succeeds(f"test \"$(cat /home/hinteros-p1/ticks)\" -gt {a}", timeout=10)
+          machine.succeed("pgrep -u hinteros-p1 -f '/bin/cage '")
+          sess_ok("hinteros-p1", "profile.current")
+          machine.succeed(f"runuser -u hinteros-p1 -- env {user_env} systemctl --user stop uinput-holder")
     '';
 }

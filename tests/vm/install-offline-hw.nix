@@ -56,6 +56,7 @@ in
     import json
 
     ${builtins.readFile ./install/copy-plan.py}
+    ${builtins.readFile ./install/disk.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
@@ -89,17 +90,16 @@ in
         assert not heavy, heavy
 
     with subtest("the report is there, deferred, and not applied"):
-        installer.succeed("mkdir -p /mnt && mount /dev/disk/by-partlabel/hinteros-root /mnt")
+        mount_target()
         installer.succeed("cmp ${fixture} /mnt/etc/hinteros/facter.json")
         installer.succeed("test -e /mnt/etc/hinteros/facter.deferred")
-        installer.succeed("grep -q 'facter.deferred' /mnt/etc/hinteros/flake.nix")
         # The installed generation is the generic system: no microcode in its initrd/firmware setup.
         sysdir = installer.succeed("readlink -f /mnt/nix/var/nix/profiles/system").strip()
         installer.fail(f"test -e /mnt{sysdir}/kernel-modules/lib/firmware/intel-ucode")
         installer.succeed("test -d /mnt/var/lib/hinteros && umount -R /mnt")
 
     with subtest("control: the flake does read the report once the marker is gone"):
-        installer.succeed("mkdir -p /mnt && mount /dev/disk/by-partlabel/hinteros-root /mnt")
+        mount_target()
         installer.succeed("rm -rf /tmp/cfg && cp -r /mnt/etc/hinteros /tmp/cfg && umount -R /mnt")
         ref = "path:/tmp/cfg#nixosConfigurations.hinteros.config.system.build.toplevel"
         opts = "--extra-experimental-features 'nix-command flakes' --no-update-lock-file --option substituters 'auto?trusted=1' --dry-run"

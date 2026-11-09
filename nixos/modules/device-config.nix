@@ -1,9 +1,9 @@
-# Device config snapshots (hinteros-docs/design/device-config.md, "Snapshots and rollback").
+# Device config snapshots.
 # Every system toplevel embeds the config dir it was built from at `$out/hinteros/`, and a
 # boot-time oneshot (hinteros-config-sync) restores that snapshot into /etc/hinteros when the
 # two differ, so /etc/hinteros always describes the generation that is running, also after a
 # rollback (from Settings or from boot counting). The one exception is state.json's
-# `settings.timeZone` (time-zone.md): it changes without a rebuild, so the sync keeps the live one.
+# `settings.timeZone`: it changes without a rebuild, so the sync keeps the live one.
 {
   config,
   lib,
@@ -13,8 +13,10 @@
 let
   cfg = config.hinteros.deviceConfig;
 
-  # The files of a config dir that belong to a generation. facter.json describes hardware,
-  # not settings, so it is neither snapshotted nor touched by the sync.
+  # The files of a config dir that belong to a generation. facter.json describes hardware, and
+  # extra.nix (with the files it imports) this install's boot quirks; only the installer writes
+  # them (again on a keep-data install), for every generation alike. So neither is snapshotted
+  # or touched by the sync, and nothing else may write extra.nix.
   managed = [
     "flake.nix"
     "flake.lock"
@@ -34,7 +36,7 @@ let
       ''
     else if cfg.embeddedFlake != null && config.hinteros.state != null then
       # A checked-in device (the dev box): a generated device flake naming the system repo by
-      # store path, so `path:/etc/hinteros` evaluates like on any box (spike 8 item 6).
+      # store path, so `path:/etc/hinteros` evaluates like on any box.
       pkgs.runCommand "hinteros-config-snapshot"
         {
           inherit (cfg.embeddedFlake) flake lock;
@@ -82,7 +84,7 @@ let
       trap 'rm -rf "$work" ''${tmp:+"$tmp"}' EXIT
 
       # What each managed file must be: the snapshot's. Except `settings.timeZone` in state.json,
-      # which is live (time-zone.md): hinteros-system changes it without a rebuild, so a zone in
+      # which is live: hinteros-system changes it without a rebuild, so a zone in
       # the live state.json is kept (activation has already applied it).
       want() {
         if [ "$1" = state.json ] && [ -e "$work/state.json" ]; then
@@ -237,11 +239,12 @@ in
     systemd.services.hinteros-facter-release = {
       description = "Release the deferred hardware report in ${cfg.dir} once online";
       wantedBy = [ "multi-user.target" ];
-      wants = [ "network-online.target" ];
-      after = [ "network-online.target" ];
+      # No network-online.target: a box with no deferred report (or no network) must not wait
+      # for it at every boot. The script waits for the network itself.
       unitConfig.ConditionPathExists = "${cfg.dir}/facter.deferred";
       serviceConfig = {
-        Type = "oneshot";
+        # Not oneshot: multi-user.target would wait for the retries below (minutes when offline).
+        Type = "exec";
         ExecStart = lib.getExe (
           pkgs.writeShellApplication {
             name = "hinteros-facter-release";
@@ -250,7 +253,9 @@ in
               pkgs.coreutils
             ];
             text = ''
-              curl -fsS --max-time 10 -o /dev/null https://cache.nixos.org/nix-cache-info
+              # Up to about 5 min for the network to come up at boot, then Restart below.
+              curl -fsS --max-time 10 --retry 10 --retry-delay 30 --retry-all-errors -o /dev/null \
+                https://cache.nixos.org/nix-cache-info
               rm -f ${lib.escapeShellArg cfg.dir}/facter.deferred
               echo "online: the hardware report will be applied by the next rebuild"
             '';

@@ -18,7 +18,7 @@
     "mmc_block"
     "sdhci_pci"
     "rtsx_pci_sdmmc"
-    # USB host controllers, storage and keyboards (to type a disk password or reach a rescue shell)
+    # USB host controllers, storage and keyboards (to reach a rescue shell)
     "xhci_pci"
     "xhci_hcd"
     "ehci_pci"

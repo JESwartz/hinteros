@@ -60,27 +60,27 @@ in
     YT_UA = ${builtins.toJSON ytUserAgent}
 
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
+    uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
-    home = "/home/hinteros"
-    # Apps run in the sandbox (design/sandbox.md): the profile path Firefox gets is under $HOME,
+    home = "/home/hinteros-p1"
+    # Apps run in the sandbox: the profile path Firefox gets is under $HOME,
     # which is the app's sandbox home on disk.
     def on_disk(app, path):
         return f"{home}/.local/share/hinteros/sandbox/{app}" + path.removeprefix(home)
 
     # The session user may use uinput (keyboard-driven apps).
-    machine.succeed("id -nG hinteros | tr ' ' '\\n' | grep -qx uinput")
+    machine.succeed("id -nG hinteros-p1 | tr ' ' '\\n' | grep -qx uinput")
     machine.succeed("test -e /dev/uinput")
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "tv-apps-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "tv-apps-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
-        out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
         assert "error" not in replies[0], replies[0]
         return replies
@@ -94,11 +94,11 @@ in
     apps = ok("apps.list")["apps"]
     ids = [a["id"] for a in apps]
     print(ids)
-    for want in ("jellyfin", "youtube", "crunchyroll", "firefox"):
+    for want in ("jellyfin-desktop", "youtube", "crunchyroll", "firefox"):
         assert want in ids, ids
     assert "plex" not in ids, ids
     by_id = {a["id"]: a for a in apps}
-    assert by_id["youtube"]["kind"] == "web" and by_id["jellyfin"]["kind"] == "native", by_id
+    assert by_id["youtube"]["kind"] == "web" and by_id["jellyfin-desktop"]["kind"] == "native", by_id
     assert by_id["youtube"]["name"] == "YouTube", by_id["youtube"]
     # Store-only streaming apps that were installed show up like the other web apps.
     for want in ("netflix", "spotify"):
@@ -107,15 +107,15 @@ in
     assert by_id["netflix"]["name"] == "Netflix", by_id["netflix"]
     assert "disney-plus" not in ids, ids
     # Icons are found by the daemon at runtime (no network here): session.toml carries the catalog's fields.
-    toml = machine.succeed("cat $(ps -u hinteros -o args= | grep -o '/nix/store/[^ ]*hinteros-session.toml' | head -n1)")
+    toml = machine.succeed("cat $(ps -u hinteros-p1 -o args= | grep -o '/nix/store/[^ ]*hinteros-session.toml' | head -n1)")
     for want in ("desktop_id = \"org.jellyfin.JellyfinDesktop\"", "firefox_profile = ", "site_url = "):
         assert want in toml, toml
 
     # YouTube: apps.launch starts the kiosk wrapper with its own profile and the TV UA.
     ok("apps.launch", {"id": "youtube"})
-    machine.wait_until_succeeds("pgrep -u hinteros -f -- '--kiosk'", timeout=60)
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f -- '--kiosk'", timeout=60)
     ytprofile = f"{home}/.local/share/hinteros/firefox/youtube"
-    machine.wait_until_succeeds(f"pgrep -u hinteros -af firefox | grep -F -- '--profile {ytprofile}'")
+    machine.wait_until_succeeds(f"pgrep -u hinteros-p1 -af firefox | grep -F -- '--profile {ytprofile}'")
     machine.wait_until_succeeds(f"grep -F 'general.useragent.override' {on_disk('youtube', ytprofile)}/user.js")
     machine.wait_for_text("YOUTUBE", timeout=timedelta(seconds=180))
     machine.wait_for_text("PlayStation", timeout=timedelta(seconds=60))
@@ -126,12 +126,12 @@ in
         assert bad not in screen, screen
 
     ok("apps.close", {"id": "youtube"})
-    machine.wait_until_fails(f"pgrep -u hinteros -af firefox | grep -F -- '--profile {ytprofile}'", timeout=60)
+    machine.wait_until_fails(f"pgrep -u hinteros-p1 -af firefox | grep -F -- '--profile {ytprofile}'", timeout=60)
 
     # Crunchyroll: its own profile, no UA override, no first-run screen.
     ok("apps.launch", {"id": "crunchyroll"})
     crprofile = f"{home}/.local/share/hinteros/firefox/crunchyroll"
-    machine.wait_until_succeeds(f"pgrep -u hinteros -af firefox | grep -F -- '--profile {crprofile}' | grep -F -- '--kiosk'", timeout=60)
+    machine.wait_until_succeeds(f"pgrep -u hinteros-p1 -af firefox | grep -F -- '--profile {crprofile}' | grep -F -- '--kiosk'", timeout=60)
     machine.wait_for_text("CRUNCHYROLL", timeout=timedelta(seconds=180))
     machine.wait_for_text("Mozilla", timeout=timedelta(seconds=60))
     screen = machine.get_screen_text().lower()
@@ -148,7 +148,7 @@ in
     # Netflix (a Store-only streaming app): its own profile, no UA override, no first-run screen.
     ok("apps.launch", {"id": "netflix"})
     nfprofile = f"{home}/.local/share/hinteros/firefox/netflix"
-    machine.wait_until_succeeds(f"pgrep -u hinteros -af firefox | grep -F -- '--profile {nfprofile}' | grep -F -- '--kiosk'", timeout=60)
+    machine.wait_until_succeeds(f"pgrep -u hinteros-p1 -af firefox | grep -F -- '--profile {nfprofile}' | grep -F -- '--kiosk'", timeout=60)
     machine.wait_for_text("NETFLIX", timeout=timedelta(seconds=180))
     screen = machine.get_screen_text().lower()
     assert "playstation" not in screen, screen
@@ -159,10 +159,10 @@ in
     ok("apps.close", {"id": "netflix"})
 
     # Jellyfin: the desktop client starts and stays up (no server to log in to here).
-    ok("apps.launch", {"id": "jellyfin"})
-    machine.wait_until_succeeds("pgrep -u hinteros -f jellyfin-desktop", timeout=60)
+    ok("apps.launch", {"id": "jellyfin-desktop"})
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f jellyfin-desktop", timeout=60)
     machine.sleep(duration=timedelta(seconds=10))
-    machine.succeed("pgrep -u hinteros -f jellyfin-desktop")
+    machine.succeed("pgrep -u hinteros-p1 -f jellyfin-desktop")
     machine.screenshot("jellyfin")
   '';
 }

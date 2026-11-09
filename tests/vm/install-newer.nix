@@ -88,6 +88,7 @@ in
 
     ${builtins.readFile ./install/system-steps.py}
     ${builtins.readFile ./install/copy-plan.py}
+    ${builtins.readFile ./install/disk.py}
     REVS = json.loads('${builtins.toJSON revs}')
     CASES = {${lib.concatStringsSep ", " (lib.mapAttrsToList (n: v: ''"${n}": "${v}"'') cases)}}
     ONLINE = "HINTEROS_INSTALL_ONLINE_PROBE=file:///tmp/online "
@@ -239,7 +240,7 @@ in
         check_system_steps(lines, "download")
 
     with subtest("the device flake pins the newer revision, and the system is that release"):
-        installer.succeed("mount /dev/disk/by-partlabel/hinteros-root /mnt")
+        mount_target()
         flake = installer.succeed("cat /mnt/etc/hinteros/flake.nix")
         assert 'inputs.hinteros.url = "git+file:///srv/hinteros.git?ref=stable";' in flake, flake
         lock = json.loads(installer.succeed("cat /mnt/etc/hinteros/flake.lock"))

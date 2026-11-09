@@ -7,21 +7,19 @@ let
   inherit (pkgs) lib;
 
   state = {
-    schemaVersion = 1;
-    profiles = [
-      {
-        id = "p1";
-        name = "T";
-        user = "tester";
-      }
-    ];
+    schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
+    profiles = [ { id = "p1"; } ];
+    requirements = [ ];
+    services = [ ];
   };
 
   mk =
     extra:
     (self.lib.mkDevice {
       inherit state;
-      extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
+      extraModules = extra;
     }).config;
 
   key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
@@ -52,7 +50,7 @@ let
   template = builtins.readFile ../../nixos/templates/device-flake.nix.in;
 
   results = lib.runTests {
-    # Profiles (DECISIONS D5): the session daemon runs for every account, the usage scan, and
+    # Profiles: the session daemon runs for every account, the usage scan, and
     # the polkit grant that leaves ssh and the admin PIN reset to the admin password.
     testProfileUnits = {
       expr = [
@@ -60,6 +58,8 @@ let
         (c.systemd.user.services.hinteros-session.unitConfig ? ConditionUser)
         (lib.hasSuffix " usage" c.systemd.services.hinteros-usage.serviceConfig.ExecStart)
         c.systemd.services.hinteros-usage.serviceConfig.ProtectHome
+        # Reads homes the profiles control: read/search only, no other capability.
+        c.systemd.services.hinteros-usage.serviceConfig.CapabilityBoundingSet
         (lib.hasInfix ''action.id !== "org.hinteros.system.profiles.recover"'' rules)
         (lib.hasInfix "hinteros-greeter" rules)
         sys.SupplementaryGroups
@@ -69,10 +69,16 @@ let
         false
         true
         "read-only"
+        [ "CAP_DAC_READ_SEARCH" ]
         true
-        false
-        # keyboard.sock's group (chgrp without CAP_CHOWN).
-        [ "hinteros-keyboard" ]
+        true
+        # The Jellyfin setup's files, and greeter.sock's and keyboard.sock's groups (chgrp
+        # without CAP_CHOWN).
+        [
+          "hinteros-system"
+          "hinteros-greeter"
+          "hinteros-keyboard"
+        ]
       ];
     };
     # Ctrl+Super+D: the only reader of keyboards is its own sandboxed unit (no profile account
@@ -96,7 +102,7 @@ let
           c.systemd.services.hinteros-keyboard.wantedBy
           (c.users.groups ? hinteros-keyboard)
           (lib.hasInfix "/bin/hinteros-system --freeze-inactive" sys.ExecStart)
-          (lib.elem "input" c.users.users.tester.extraGroups)
+          (lib.elem "input" c.users.users.hinteros-p1.extraGroups)
           (off.systemd.services ? hinteros-keyboard)
           (off.users.groups ? hinteros-keyboard)
           off.systemd.services.hinteros-system.serviceConfig.SupplementaryGroups
@@ -121,12 +127,18 @@ let
           false
           false
           false
-          [ ]
+          [
+            "hinteros-system"
+            "hinteros-greeter"
+          ]
           false
         ];
       };
-    # The time zone helper (time-zone.md): the service itself never writes /etc; this oneshot,
-    # started on demand, may write /etc and /run/hinteros only, with no network or capabilities.
+    # The time zone helper: the service itself never writes /etc; this oneshot,
+    # started on demand, may write /etc/hinteros and /run/hinteros only (not all of /etc:
+    # systemd-timedated, which NixOS ships bus-activated, replaces /etc/localtime), with no
+    # network; its only capabilities reach the request and the lock in the service's run
+    # directory.
     testTimeZoneApplyUnit =
       let
         u = c.systemd.services.hinteros-time-zone-apply;
@@ -146,6 +158,11 @@ let
           s.RestrictAddressFamilies
           u.wantedBy
           (lib.elem "/etc" sys.ReadWritePaths)
+          (c.systemd.units ? "systemd-timedated.service")
+          # Its bus activation file comes with systemd in the system path; it writes /etc/localtime
+          # itself (not /etc/static, as with time.timeZone set).
+          (lib.elem c.systemd.package c.environment.systemPackages)
+          (c.systemd.services.systemd-timedated.environment ? SYSTEMD_ETC_LOCALTIME)
         ];
         expected = [
           "oneshot"
@@ -153,16 +170,87 @@ let
           true
           "strict"
           [
-            "/etc"
+            "/etc/hinteros"
             "/run/hinteros"
           ]
           true
           true
           true
-          [ "" ]
+          [
+            "CAP_DAC_OVERRIDE"
+            "CAP_CHOWN"
+          ]
           [ "AF_UNIX" ]
           [ ]
           false
+          true
+          true
+          false
+        ];
+      };
+    # hinteros-system is not root (daemon README, "Privileges"): its own system account, no
+    # capabilities, and on the system bus only its jobs, helper units and the freezer. The units
+    # that read what it cannot run as it with read-only access; root's own state is apart.
+    testServiceAccount =
+      let
+        svc = c.environment.etc."polkit-1/rules.d/40-hinteros-system.rules".text;
+        usage = c.systemd.services.hinteros-usage.serviceConfig;
+        boot = c.systemd.services.hinteros-boot-entries;
+      in
+      {
+        expr = [
+          sys.User
+          sys.Group
+          sys.AmbientCapabilities
+          c.users.users.hinteros-system.isSystemUser
+          (c.users.groups ? hinteros-system)
+          usage.User
+          usage.AmbientCapabilities
+          boot.serviceConfig.User
+          boot.serviceConfig.AmbientCapabilities
+          (lib.hasSuffix "/bin/hinteros-system boot-entries" boot.serviceConfig.ExecStart)
+          boot.wantedBy
+          c.systemd.paths.hinteros-boot-entries.pathConfig.PathChanged
+          (lib.elem "d /var/lib/hinteros-root 0710 root hinteros-system -" c.systemd.tmpfiles.rules)
+          c.systemd.services.hinteros-lan-filter.serviceConfig.CapabilityBoundingSet
+          (lib.hasInfix ''subject.user !== "hinteros-system"'' svc)
+          (lib.hasInfix "org.freedesktop.systemd1.manage-units" svc)
+          (lib.hasInfix ''^hinteros-job@[0-9a-f]{16}\.service$'' svc)
+          (lib.hasInfix ''unit === "hinteros-usage.service"'' svc)
+          (lib.hasInfix ''unit === "hinteros-time-zone-apply.service"'' svc)
+          (lib.hasInfix ''verb === "restart" && job("restart") && unit === "hinteros-lan-filter.service"'' svc)
+          # The method, not only the verb: StartTransientUnit and StopUnit ask with other messages.
+          (lib.hasInfix ''verb === "start" && job("start")'' svc)
+          (lib.hasInfix "freeze or thaw the processes of" svc)
+          (lib.hasInfix "return polkit.Result.NO;" svc)
+        ];
+        expected = [
+          "hinteros-system"
+          "hinteros"
+          [ "" ]
+          true
+          true
+          "hinteros-system"
+          [ "CAP_DAC_READ_SEARCH" ]
+          "hinteros-system"
+          [ "CAP_DAC_READ_SEARCH" ]
+          true
+          [ "hinteros-system.service" ]
+          "/boot/loader/entries"
+          true
+          [
+            "CAP_NET_ADMIN"
+            "CAP_DAC_READ_SEARCH"
+          ]
+          true
+          true
+          true
+          true
+          true
+          true
+          true
+          true
+          true
         ];
       };
     testSystemService = {
@@ -184,7 +272,7 @@ let
           "/run/hinteros"
           "/var/lib/hinteros"
         ]
-        [ "CAP_SYS_PTRACE" ]
+        [ "" ]
         [ "AF_UNIX" ]
         true
         [ "@system-service" ]
@@ -262,12 +350,14 @@ let
       ];
     };
     # lib.catalogIds: what the daemon's `nix eval ...#lib.catalogIds` reads from a target revision.
+    # `kind` lets it tell new apps from new services.
     testCatalogIds = {
       expr = [
         (lib.attrNames self.lib.catalogIds == lib.attrNames c.hinteros.catalog.entries)
         (lib.all (
           e:
           lib.attrNames e == [
+            "kind"
             "name"
             "status"
             "statusReason"
@@ -275,12 +365,16 @@ let
         ) (lib.attrValues self.lib.catalogIds))
         self.lib.catalogIds.crunchyroll.name
         self.lib.catalogIds.crunchyroll.status
+        self.lib.catalogIds.crunchyroll.kind
+        self.lib.catalogIds.jellyfin-server.kind
       ];
       expected = [
         true
         true
         "Crunchyroll"
         "available"
+        "app"
+        "service"
       ];
     };
     testDaemonsInSystemPath = {
@@ -311,6 +405,8 @@ let
           "send-event-no-blocking-send.patch"
           "pointer-response-curve.patch"
           "xpad-uhid-poll-rate.patch"
+          "dbus-clear-on-pass.patch"
+          "send-event-keep-active-inputs.patch"
         ]
         "0.81.0"
         true
@@ -399,11 +495,12 @@ pkgs.runCommand "hinteros-daemon-eval"
   ''
     if [ -n "$failures" ]; then echo "$failures" >&2; exit 1; fi
     cd $share/share
-    [ "$(jq -c . hinteros/release.json)" = "{\"dev\":false,\"stateSchema\":2,\"version\":\"$releaseVersion\"}" ]
-    [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://justsomeshed.com/JSwartz/HinterOS/hinteros.git"}' ]
-    # The vendor's release key (release/allowed_signers, through release.nix), namespace pinned,
+    [ "$(jq -c . hinteros/release.json)" = "{\"dev\":false,\"version\":\"$releaseVersion\"}" ]
+    [ "$(jq -c . hinteros/update/channels.json)" = '{"branches":{"beta":"beta","stable":"stable"},"repo":"https://git.hinteros.org/hinteros.git"}' ]
+    # The vendor's release and backup keys (release/allowed_signers, through release.nix), namespace pinned,
     # and nothing else.
-    [ "$(grep -v '^#' hinteros/update/allowed_signers | grep -c .)" = 1 ]
+    [ "$(grep -v '^#' hinteros/update/allowed_signers | grep -c .)" = 2 ]
+    grep -qx 'backup namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAk10EKzqLAzjITxmiUbyzae4iweuOqVpnTqqf4y7TiF hinteros-backup' hinteros/update/allowed_signers
     grep -qx 'release namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtzB3OuVIbG4WhjiNynpKPiTEJKdD5vicRouH8CQsrk hinteros-release' hinteros/update/allowed_signers
     # Signers replaced by an empty list: only comments, so nothing verifies.
     ! grep -v '^#' $shareNoKey/share/hinteros/update/allowed_signers | grep -q .
@@ -417,10 +514,14 @@ pkgs.runCommand "hinteros-daemon-eval"
     [ "$(grep -c '<allow_active>auth_admin</allow_active>' polkit-1/actions/org.hinteros.system.policy)" = 2 ]
     grep -q '<message>Authentication is required to turn remote login (SSH) on or off</message>' polkit-1/actions/org.hinteros.system.policy
     ! grep -q 'org.hinteros.system.ssh.admin' polkit-1/actions/org.hinteros.system.policy
+    # The service account owns every action (it asks about other users' processes; not root).
+    [ "$(grep -c '<annotate key="org.freedesktop.policykit.owner">unix-user:hinteros-system</annotate>' polkit-1/actions/org.hinteros.system.policy)" = 14 ]
     # With a key: the principal, the pinned namespace, the key, and dev in release.json.
     grep -qx 'owner namespaces="git" ssh-ed25519 .* owner@hinteros' $shareKey/share/hinteros/update/allowed_signers
     [ "$(jq .dev $shareKey/share/hinteros/release.json)" = true ]
     # The channel bootstrap script is on PATH (and passed shellcheck to get built).
     [ -x $bootstrapChannel/bin/hinteros-bootstrap-channel ]
+    # ... without its test hooks (tests/vm/bootstrap-channel.nix): a box ignores HINTEROS_CONFIG_DIR etc.
+    grep -qx test_hooks=0 $bootstrapChannel/bin/hinteros-bootstrap-channel
     echo "$channelLine" > $out
   ''

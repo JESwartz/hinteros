@@ -19,9 +19,9 @@
       ];
       # Only the user and groups of the session are needed, not a running compositor, so the
       # test node enables the input layer on its own.
-      hinteros.session.user = "hinteros";
+      hinteros.session.user = "hinteros-p1";
       hinteros.input.enable = true;
-      users.users.hinteros.isNormalUser = true;
+      users.users.hinteros-p1.isNormalUser = true;
 
       environment = {
         systemPackages = [
@@ -44,7 +44,7 @@
     MGRI = "org.shadowblip.InputManager"
     CD = "/org/shadowblip/InputPlumber/CompositeDevice0"
     CDI = "org.shadowblip.Input.CompositeDevice"
-    USER = "hinteros"
+    USER = "hinteros-p1"
 
     def bc(args):
         """busctl as the unprivileged session user (goes through polkit)."""
@@ -60,7 +60,10 @@
         machine.execute(f"(su {USER} -s /bin/sh -c 'timeout 60 gdbus monitor --system --dest {IP}' > /tmp/m.txt 2>&1 &)")
         machine.sleep(2)
         for a in actions:
-            pad(a)
+            if callable(a):
+                a()
+            else:
+                pad(a)
             machine.sleep(1)
         machine.sleep(3)
         evdev_out = machine.succeed("cat /tmp/r.txt; pkill -f '[r]eader.py'; pkill -f '[g]dbus monitor'; true")
@@ -104,6 +107,28 @@
     assert "ui_guide" in sig and "ui_back" in sig, sig
     assert bc(f"get-property {IP} {CD} {CDI} InterceptMode").split()[-1] == "2"
 
+    # Back to PASS while Guide is still held (the session daemon does this to tap Guide for
+    # Steam on a long press): the release goes to the gamepad, and the next Guide press must
+    # still reach D-Bus (dbus-clear-on-pass.patch; unpatched, the DBus target keeps Guide
+    # "pressed" and drops the press as a duplicate).
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+    to_pass = lambda: bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+    r, sig = window("Microsoft X-Box 360", ["press BTN_MODE", to_pass, "release BTN_MODE", "press BTN_MODE", "release BTN_MODE"])
+    assert sig.count("'ui_guide', 1.0") == 2, sig
+
+    # The whole long press as the session daemon does it: Guide held, PASS, a Guide tap for Steam
+    # through SendEvent, then the physical release. The tap reaches the virtual pad and the next
+    # Guide press still reaches D-Bus (send-event-keep-active-inputs.patch; unpatched, the tap's
+    # release makes InputPlumber drop the physical release and then the next press).
+    bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+    def tap():
+        bc(f"set-property {IP} {CD} {CDI} InterceptMode u 1")
+        bc(f"--timeout=5 call {IP} {CD} {CDI} SendEvent sv Gamepad:Button:Guide b true")
+        bc(f"--timeout=5 call {IP} {CD} {CDI} SendEvent sv Gamepad:Button:Guide b false")
+    r, sig = window("Microsoft X-Box 360", ["press BTN_MODE", tap, "release BTN_MODE", "press BTN_MODE", "release BTN_MODE"])
+    assert "BTN_MODE 1" in r, r
+    assert sig.count("'ui_guide', 1.0") == 2, sig
+
     # Xbox X/Y (real-hardware report: Y acted as "action", X as "context"). xpad sends BTN_Y for
     # the top Y button and BTN_X for the left X button; the kernel defines BTN_Y = BTN_WEST (0x134)
     # and BTN_X = BTN_NORTH (0x133). InputPlumber 0.81 (and upstream main) reads the codes
@@ -137,6 +162,34 @@
     r = machine.succeed("cat /tmp/r.txt; pkill -f '[r]eader.py'; true")
     assert "InputPlumber Mouse" in r.splitlines()[0], r
     assert "BTN_MOUSE 1" in r and "BTN_MOUSE 0" in r, r
+
+    # The right stick as the pointer: the response curve applies only where the profile's mouse
+    # motion sets `curve` (pointer-response-curve.patch); without it, upstream's linear mapping
+    # (any other profile, so never a game). Half deflection for 2 s at 1000 px/s: linear moves
+    # about 1000 px, curve 2.5 about (0.3/0.8)^2.5 = 9 % of that.
+    def pointer_px(curve):
+        target = "speed_pps: 1000" + (f"\n            curve: {curve}" if curve else "")
+        profile = (
+            "version: 1\nkind: DeviceProfile\nname: HinterOS pointer\nmapping:\n"
+            "  - name: Right stick pointer\n    source_event:\n      gamepad:\n        axis:\n"
+            "          name: RightStick\n    target_events:\n      - mouse:\n          motion:\n"
+            f"            {target}\n"
+        )
+        bc(f"--timeout=5 call {IP} {CD} {CDI} LoadProfileFromYaml s {shlex.quote(profile)}")
+        machine.execute("rm -f /tmp/r.txt")
+        machine.execute("(python3 /etc/reader.py 'InputPlumber Mouse' 10 > /tmp/r.txt 2>&1 &)")
+        machine.sleep(2)
+        pad("axis ABS_RX 16384")
+        machine.sleep(2)
+        pad("axis ABS_RX 0")
+        machine.sleep(1)
+        r = machine.succeed("cat /tmp/r.txt; pkill -f '[r]eader.py'; true")
+        return sum(int(l.split()[-1]) for l in r.splitlines() if "| REL_X " in l)
+    linear, curved = pointer_px(None), pointer_px(2.5)
+    print(f"pointer: linear {linear} px, curve 2.5 {curved} px")
+    assert 500 < linear < 1500, linear
+    assert 0 < curved < linear / 4, (linear, curved)
+
     # Still alive and answering: the profile goes back, ALL again, Guide still a signal.
     bc(f"--timeout=5 call {IP} {CD} {CDI} LoadProfileFromYaml s {shlex.quote(yaml.replace('HinterOS pointer', 'Default'))}")
     bc(f"set-property {IP} {CD} {CDI} InterceptMode u 2")

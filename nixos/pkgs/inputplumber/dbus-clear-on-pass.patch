@@ -1,0 +1,58 @@
+Leaving intercept mode: clear the DBus targets' state
+
+The DBus target drops a button event that matches the state it last saw
+(is_duplicate_event). A button pressed while the composite device
+intercepts (Always) goes to the DBus target; if the device goes back to
+Pass or None before the button is released, the release goes to the other
+targets, so the DBus target keeps the button "pressed" and drops every
+later press of it. clear_state() exists on the DBus target (it releases
+held buttons, stick directions and triggers) but is called only for the
+other targets.
+
+HinterOS hit this with Guide in Pass mode: the press switches to Always and
+reaches the session daemon; a long press makes the daemon set Pass while
+Guide is still held (to tap Guide for Steam), the release goes to the
+gamepad, and the next Guide presses never reach D-Bus until a release
+happens while intercepting. Same in v0.83.0 and master (2026-10).
+Upstream: https://github.com/ShadowBlip/InputPlumber
+(src/input/composite_device/mod.rs, fn set_intercept_mode).
+
+--- a/src/input/composite_device/mod.rs
++++ b/src/input/composite_device/mod.rs
+@@ -1239,8 +1239,12 @@
+         }
+         self.intercept_mode = mode;
+ 
+-        // Nothing else is required when turning off input interception.
++        // When turning off input interception, release whatever the DBus targets
++        // still hold: a button pressed while intercepting and released after the
++        // switch went to the other targets, and the DBus target would otherwise
++        // drop its next press as a duplicate.
+         if mode == InterceptMode::None || mode == InterceptMode::Pass {
++            self.targets.clear_dbus_state().await;
+             return;
+         }
+ 
+--- a/src/input/composite_device/targets.rs
++++ b/src/input/composite_device/targets.rs
+@@ -365,6 +365,20 @@
+         }
+     }
+ 
++    /// Clear the state of all DBus target devices: each releases the buttons,
++    /// stick directions and triggers it still holds.
++    pub async fn clear_dbus_state(&self) {
++        for (path, target) in &self.target_dbus_devices {
++            log::debug!("[{}] Clearing dbus device state: {path}", self.path);
++            if let Err(e) = target.clear_state().await {
++                log::error!(
++                    "[{}] Failed to clear dbus device state {path}: {e}",
++                    self.path
++                );
++            }
++        }
++    }
++
+     /// Clear the state of all target devices that are gamepads in order to
+     /// release any buttons, re-center any joysticks, etc.
+     pub async fn clear_gamepad_state(&self) {

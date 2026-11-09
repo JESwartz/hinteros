@@ -16,11 +16,13 @@ let
   # With the greeter the launcher runs as the greeter or as whichever profile is on screen.
   greeterOn = config.hinteros.profiles.greeter.enable or false;
 
-  # The automatic clean-up (storage.md): trim the system's generations and every app profile's,
+  # The automatic clean-up: trim the system's generations and every app profile's,
   # then collect garbage, under one flock. The daemon's manual clean-up jobs (their own trim and
   # `nix-store --gc`) are serialised with it by Nix's profile and GC locks; they may take the flock
-  # too. No boot entry is rewritten: entries are the newest `configurationLimit` (= keepSystem)
-  # generations of the last rebuild, which a trim to the newest keepSystem always keeps.
+  # too. No boot entry is rewritten: entries are the newest `configurationLimit` (keepSystem, at
+  # least 2) generations of the last rebuild, which a trim to the newest keepSystem keeps (with
+  # keepSystem = 1 the older entry is left without its system; with boot counting the trim waits
+  # for a good boot, so that is not the fallback of a boot that still needs one).
   #
   #   hinteros-cleanup [--system N] [--profiles N]
   #
@@ -116,9 +118,9 @@ let
     '';
   };
 
-  # "Launcher and daemon are up". Gates boot-complete.target, so systemd-bless-boot only marks
-  # the entry good once the console is really there; otherwise the boot counter runs out and
-  # systemd-boot falls back to the previous generation.
+  # "Launcher and daemon are up" (and stay up for stableSeconds). Gates boot-complete.target, so
+  # systemd-bless-boot only marks the entry good once the console is really there; otherwise the
+  # boot counter runs out and systemd-boot falls back to the previous generation.
   #
   # systemd-bless-boot only runs when the boot loader left LoaderBootCountPath (a volatile EFI
   # variable) for the generator. Some firmware drops systemd-boot's volatile variables (the
@@ -153,15 +155,47 @@ let
           fi
         done
       }
-      for _ in $(seq 1 ${toString cfg.bootCounting.healthTimeoutSeconds}); do
-        if systemctl is-active --quiet hinteros-system.service${lib.optionalString sessionCfg.enable " && systemctl is-active --quiet greetd.service && pgrep ${if greeterOn then "" else "-u ${sessionCfg.user} "}-f ${lib.escapeShellArg launcherName} >/dev/null"}; then
-          echo "daemon${lib.optionalString sessionCfg.enable " and launcher"} are up"
-          bless_booted_entry
-          exit 0
+      # A launcher process, not the on-screen keyboard (the same binary with --osk).
+      launcher_pid() {
+        local p cmd
+        for p in $(pgrep ${
+          if greeterOn then "" else "-u ${sessionCfg.user} "
+        }-f ${lib.escapeShellArg launcherName}); do
+          cmd=$(tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null) || continue
+          case " $cmd" in *" --osk "*) continue ;; esac
+          echo "$p"
+          return 0
+        done
+        return 1
+      }
+      # Prints what changes when a piece restarts (daemon restart count, greetd start, launcher PID).
+      up() {
+        systemctl is-active --quiet hinteros-system.service || return 1
+        local mark
+        mark=$(systemctl show -P NRestarts hinteros-system.service)
+        ${lib.optionalString sessionCfg.enable "systemctl is-active --quiet greetd.service || return 1"}
+        ${lib.optionalString sessionCfg.enable ''mark="$mark $(systemctl show -P ActiveEnterTimestampMonotonic greetd.service) $(launcher_pid)" || return 1''}
+        echo "$mark"
+      }
+      # Up without a restart for stableSeconds: a binary that crashes soon after each start
+      # (and is restarted) is not "up".
+      last="" since=0
+      for i in $(seq 1 ${
+        toString (cfg.bootCounting.healthTimeoutSeconds + cfg.bootCounting.stableSeconds)
+      }); do
+        if now=$(up); then
+          [ "$now" = "$last" ] || { last=$now since=$i; }
+          if [ $((i - since)) -ge ${toString cfg.bootCounting.stableSeconds} ]; then
+            echo "daemon${lib.optionalString sessionCfg.enable " and launcher"} are up"
+            bless_booted_entry
+            exit 0
+          fi
+        else
+          last=""
         fi
         sleep 1
       done
-      echo "daemon${lib.optionalString sessionCfg.enable " or launcher"} did not come up in time; not marking this boot good" >&2
+      echo "daemon${lib.optionalString sessionCfg.enable " or launcher"} did not stay up; not marking this boot good" >&2
       exit 1
     '';
   };
@@ -184,6 +218,14 @@ in
         default = 120;
         description = "How long after boot the launcher and daemon get to come up.";
       };
+      stableSeconds = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 20;
+        description = ''
+          How long the launcher and daemon must then stay up with no restart before the boot is
+          good, so a build that crashes soon after each start falls back too.
+        '';
+      };
     };
 
     keepGenerations = lib.mkOption {
@@ -191,7 +233,7 @@ in
       default = 5;
       description = ''
         System generations kept by the automatic clean-up (and boot entries kept by
-        systemd-boot), so rollback always has targets. The running and the booted generation are
+        systemd-boot, at least 2), so rollback always has targets. The running and the booted generation are
         never removed. state.json: `settings.cleanup.keepSystem`.
       '';
     };
@@ -269,30 +311,72 @@ in
         inherit (cfg.bootCounting) tries;
       };
 
-      systemd.services.hinteros-boot-health = {
-        description = "Check that the HinterOS daemon and launcher are up";
-        before = [ "boot-complete.target" ];
-        # Every boot: also when nothing pulls in boot-complete.target (no LoaderBootCountPath,
-        # see bootHealth), this check is what marks the boot good.
-        wantedBy = [ "multi-user.target" ];
-        unitConfig.RequiresMountsFor = [ "/boot" ];
-        after = [
-          "hinteros-system.service"
-        ]
-        ++ lib.optional sessionCfg.enable "greetd.service";
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          ExecStart = lib.getExe bootHealth;
-          TimeoutStartSec = cfg.bootCounting.healthTimeoutSeconds + 30;
+      systemd = {
+        services.hinteros-boot-health = {
+          description = "Check that the HinterOS daemon and launcher are up";
+          before = [ "boot-complete.target" ];
+          # Every boot: also when systemd-bless-boot does not run (no LoaderBootCountPath, see
+          # bootHealth), this check is what marks the boot good.
+          wantedBy = [ "multi-user.target" ];
+          unitConfig.RequiresMountsFor = [ "/boot" ];
+          after = [
+            "hinteros-system.service"
+          ]
+          ++ lib.optional sessionCfg.enable "greetd.service";
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = lib.getExe bootHealth;
+            TimeoutStartSec = cfg.bootCounting.healthTimeoutSeconds + cfg.bootCounting.stableSeconds + 30;
+          };
+        };
+        targets.boot-complete = {
+          requires = [ "hinteros-boot-health.service" ];
+          # Every boot, not only when systemd-bless-boot pulls it in: that is only on the first
+          # boot of an entry (later ones have no counter, so no LoaderBootCountPath), and never on
+          # firmware that drops the variable. nix-gc needs the target (below). multi-user.target
+          # already waits for hinteros-boot-health, so the boot takes no longer.
+          wantedBy = [ "multi-user.target" ];
+        };
+        # Never clean up during a boot that is not good yet: the trim could remove the generation
+        # boot counting falls back to (with keepSystem = 1, the only other one). A failed check
+        # fails the target, so there is no clean-up on that boot.
+        services.nix-gc = lib.mkIf cfg.gc.enable {
+          requisite = [ "boot-complete.target" ];
+          after = [ "boot-complete.target" ];
         };
       };
-      systemd.targets.boot-complete.requires = [ "hinteros-boot-health.service" ];
     })
 
     {
-      boot.loader.systemd-boot.configurationLimit = lib.mkDefault cfg.keepGenerations;
+      # At least two entries, so boot counting has a generation to fall back to also with
+      # keepSystem = 1 (the clean-up then removes it, once a boot of the new one was good).
+      boot.loader.systemd-boot.configurationLimit = lib.mkDefault (lib.max 2 cfg.keepGenerations);
     }
+
+    # The boot loader writes entries for the newest `configurationLimit` generations only. A
+    # switch to an older generation (`nix-env --switch-generation`, the daemon's rollback) would
+    # get no entry, and loader.conf would fall back to the newest: the next boot would undo the
+    # rollback without a word. Fail the install instead, so the switch fails before activation
+    # and the caller puts the old generation back.
+    (lib.mkIf config.boot.loader.systemd-boot.enable {
+      boot.loader.systemd-boot.extraInstallCommands =
+        let
+          sdBoot = config.boot.loader.systemd-boot;
+          entries = "${
+            if sdBoot.xbootldrMountPoint != null then
+              sdBoot.xbootldrMountPoint
+            else
+              config.boot.loader.efi.efiSysMountPoint
+          }/loader/entries";
+        in
+        ''
+          if ! ${lib.getExe pkgs.gnugrep} -qsE "(^| )init=$1/init( |$)" ${entries}/nixos-*.conf; then
+            echo "error: no boot entry for $1. Only the newest ${toString sdBoot.configurationLimit} system generations get one." >&2
+            exit 1
+          fi
+        '';
+    })
 
     (lib.mkIf cfg.gc.enable {
       nix.gc = {
@@ -306,12 +390,21 @@ in
       systemd.services.nix-gc.script = lib.mkForce ''
         exec ${lib.getExe cleanup} --system ${toString cfg.keepGenerations} --profiles ${toString cfg.keepProfileGenerations}
       '';
+      # In the background of whatever is on screen (as the daemon's jobs).
+      systemd.services.nix-gc.serviceConfig = {
+        Nice = 19;
+        IOSchedulingClass = "idle";
+      };
     })
 
     (lib.mkIf cfg.optimise.enable {
       nix.optimise = {
         automatic = true;
         dates = [ "weekly" ];
+      };
+      systemd.services.nix-optimise.serviceConfig = {
+        Nice = 19;
+        IOSchedulingClass = "idle";
       };
     })
 

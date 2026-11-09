@@ -1,1 +1,1 @@
-{"schemaVersion":2,"base":"unstable","settings":{"ssh":{"enable":false},"guest":{"enable":true}},"profiles":[{"id":"p1","user":"hinteros"},{"id":"p2","user":"hinteros-p2"}],"requirements":[],"services":[]}
+{"schemaVersion":2,"base":"unstable","stateVersion":"25.11","settings":{"ssh":{"enable":false},"guest":{"enable":true}},"profiles":[{"id":"p1"},{"id":"p2"}],"requirements":[],"services":[]}

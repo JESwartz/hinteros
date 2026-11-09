@@ -1,5 +1,5 @@
-# The app entry shared by the box-wide app registry (apps.nix, `hinteros.apps.<id>`, schema 1 and
-# the test VMs) and the per-profile app envs (app-env.nix, apps.md "The app env"): one submodule
+# The app entry shared by the box-wide app registry (apps.nix, `hinteros.apps.<id>`, the test VMs)
+# and the per-profile app envs (app-env.nix): one submodule
 # for an app's settings and one function that turns the enabled, listed apps into the daemon's
 # entries (session.toml `[[apps]]`, or the env manifest's `apps`), so both carry exactly the same
 # entries for the same apps.
@@ -145,8 +145,8 @@ rec {
           type = lib.types.bool;
           default = true;
           description = ''
-            Start the app in the session daemon's bwrap sandbox (session.toml `sandbox`, see
-            design/sandbox.md). Every catalog app except Steam; needs `hinteros.sandbox.enable`.
+            Start the app in the session daemon's bwrap sandbox (session.toml `sandbox`). Every
+            catalog app except Steam; needs `hinteros.sandbox.enable`.
           '';
         };
 
@@ -164,8 +164,8 @@ rec {
           };
           description = ''
             What the app may use in its sandbox (the catalog's `permissions`): `gamepad`, `mic`,
-            `downloads`, each `required` or `optional` (the profile user can deny it). Written
-            to session.toml as `permissions`.
+            `downloads`, `lan`, each `required` or `optional` (the profile user can deny it).
+            Written to session.toml as `permissions`.
           '';
         };
 

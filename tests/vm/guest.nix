@@ -1,5 +1,5 @@
-# The guest (profiles.md "Guest", apps.md "Where it lives"; build plan step 9, VM `guest`).
-# Greeter mode; p1 = `hinteros` (James, admin, unlocked); the starter set is Firefox + YouTube.
+# The guest (VM `guest`).
+# Greeter mode; p1 = `hinteros-p1` (James, admin, unlocked); the starter set is Firefox + YouTube.
 #   - The guest starts with the starter env (its link under /run points straight at it), enters
 #     from the picker without a PIN, has no PIN, is never admin, and cannot do admin actions
 #     without the admin PIN.
@@ -44,7 +44,7 @@ profiles.mkTest {
       rooted = false;
     };
   };
-  appProfiles.hinteros = "starter";
+  appProfiles.hinteros-p1 = "starter";
   starter = "starter";
 
   testScript = ''
@@ -81,6 +81,11 @@ profiles.mkTest {
     with subtest("the guest installs an app and writes files"):
         mine = sys_ok("hinteros-guest", "apps.list")
         assert mine["ids"] == ["firefox", "youtube"], mine
+        # The session checks for updates when it starts: that job holds the queue for a moment.
+        for _ in range(60):
+            if not [x for x in sys_ok("hinteros-guest", "jobs.list")["jobs"] if x["state"] == "running"]:
+                break
+            machine.sleep(1)
         j = sys_ok("hinteros-guest", "apps.install", {"ids": ["moonlight"], "revision": mine["revision"]})["job_id"]
         done = wait_job("hinteros-guest", j)
         assert done["state"] == "succeeded", done
@@ -102,24 +107,24 @@ profiles.mkTest {
         # What the wipe must remove beside the home: the guest's terms acceptances (a record of
         # p1's stays), its usage entry, its files in /tmp and /dev/shm (root's stay).
         machine.succeed(
-            "f=/var/lib/hinteros/terms-accepted.json; [ -e $f ] || echo '{}' > $f; "
-            "jq '.steam = [{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-guest\"}, "
-            "{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros\", \"profile\": \"p1\"}]' "
-            "$f > $f.new && mv $f.new $f && chmod 0600 $f"
+            "f=/var/lib/hinteros/terms-accepted.json; [ -e $f ] || echo '{\"version\": 1, \"accepted\": {}}' > $f; "
+            "jq '.accepted.steam = [{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-guest\"}, "
+            "{\"version\": \"v1\", \"accepted_at\": \"2026-10-13T00:00:00Z\", \"by\": \"hinteros-p1\", \"profile\": \"p1\"}]' "
+            "$f > $f.new && mv $f.new $f && chmod 0600 $f && chown hinteros-system:hinteros $f"
         )
         machine.succeed("systemctl start hinteros-usage.service")
-        assert "guest" in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json")), machine.succeed("cat /var/lib/hinteros/usage.json")
+        assert "guest" in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json"))["data"], machine.succeed("cat /var/lib/hinteros/usage.json")
         machine.succeed("runuser -u hinteros-guest -- sh -c 'echo x > /tmp/guest-left && echo x > /dev/shm/guest-shm'")
         machine.succeed("echo keep > /tmp/root-keeps")
         # Only the guest may end the guest session.
-        sys_err("hinteros", "guest.end", {}, 3002)
+        sys_err("hinteros-p1", "guest.end", {}, 3002)
         assert sess_ok("hinteros-guest", "session.end_guest") == {}
         machine.wait_until_fails("pgrep -u hinteros-guest -f '/bin/cage '", timeout=90)
         picker_up()
         machine.wait_until_fails("pgrep -u hinteros-guest", timeout=30)
         job = None
         for _ in range(120):
-            jobs = [j for j in sys_ok("hinteros", "jobs.list")["jobs"] if j["kind"] == "guest_end"]
+            jobs = [j for j in sys_ok("hinteros-p1", "jobs.list")["jobs"] if j["kind"] == "guest_end"]
             if jobs and jobs[-1]["state"] != "running":
                 job = jobs[-1]
                 break
@@ -131,14 +136,14 @@ profiles.mkTest {
         machine.fail("test -e /tmp/guest-left")
         machine.fail("test -e /dev/shm/guest-shm")
         assert machine.succeed("cat /tmp/root-keeps") == "keep\n"
-        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))
-        assert [r["by"] for r in terms.get("steam", [])] == ["hinteros"], terms
-        assert "guest" not in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json"))
+        terms = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
+        assert [r["by"] for r in terms.get("steam", [])] == ["hinteros-p1"], terms
+        assert "guest" not in json.loads(machine.succeed("cat /var/lib/hinteros/usage.json"))["data"]
         machine.fail("test -e /run/hinteros/guest-ending")
         assert public()["guest"]["enabled"] is True, public()
         assert greeter_call("greeter.list")["result"]["guest"], greeter_call("greeter.list")
         # The guest-only apps are garbage now, without a reboot.
-        jobs_idle("hinteros")
+        jobs_idle("hinteros-p1")
         machine.succeed("nix-store --gc")
         machine.fail(f"test -e {guest_env}")
         machine.fail(f"test -e {moonlight}")

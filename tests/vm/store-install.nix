@@ -1,9 +1,8 @@
-# The Store backend per profile (session API 0.18 / system API 0.10, apps.md), through the real
+# The Store backend per profile (session API 0.18 / system API 0.10), through the real
 # chain: a client of the session socket (as the launcher would be) -> the session daemon's relay
 # -> hinteros-system (seat0 owner, polkit `org.hinteros.system.apps` granted to the hinteros group,
 # audit) -> a job unit as root -> p1's Nix profile, terms-accepted.json, the removal of app data
 # in p1's home. Apps are per profile: no install touches state.json or the system generation.
-# (Schema 1's box-wide Store is gone with the migration; apps-migration covers that box.)
 #
 # STUBBED (system/stub-nix-envs.nix): building envs. Each id set this test reaches has a small
 # env with just its manifest (ids, no app entries), prebuilt with the VM; the stub answers the
@@ -25,7 +24,7 @@ let
     [ "firefox" ]
   ];
   key = lib.concatStringsSep ",";
-  # An env with only its manifest (DECISIONS D3).
+  # An env with only its manifest.
   envOf =
     ids:
     pkgs.writeTextDir "share/hinteros/apps.json" (
@@ -84,9 +83,9 @@ in
     import time
 
     envs = json.loads(machine.succeed("cat /etc/hinteros-envs.json"))
-    P = "/nix/var/nix/profiles/hinteros/apps/hinteros"
-    home = "/home/hinteros"
-    ENV = "HINTEROS_SYSTEM_API=0.10 HINTEROS_SESSION_API=0.18"
+    P = "/nix/var/nix/profiles/hinteros/apps/hinteros-p1"
+    home = "/home/hinteros-p1"
+    ENV = "HINTEROS_SYSTEM_API=1.0 HINTEROS_SESSION_API=1.0"
 
     machine.succeed("mkdir -p /run/stub")
     machine.wait_for_unit("multi-user.target")
@@ -96,16 +95,18 @@ in
       now=$(date +%s)
       printf '{"version":1,"next":2,"profiles":{"p1":{"name":"Test","color":"teal","admin":true,"locked":false,"created_at":%s,"last_used_at":null,"appearance":{"text_scale":1.0,"high_contrast":false,"reduce_motion":false}}}}' "$now" > /var/lib/hinteros/profiles.json
       chmod 0600 /var/lib/hinteros/profiles.json
+      # The service's file (it is not root), as if it had written it.
+      chown -R hinteros-system:hinteros /var/lib/hinteros
     """)
     machine.succeed("systemctl restart hinteros-system.service")
     machine.wait_for_unit("hinteros-system.service")
     machine.wait_until_succeeds("test -S /run/hinteros/system.sock")
-    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock")
+    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros-p1)/hinteros/session.sock")
     system = machine.succeed("readlink -f /run/current-system").strip()
     base_state = machine.succeed("cat /etc/hinteros/state.json")
 
     def sess(method, params=None):
-        out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/session.py {method} '{json.dumps(params or {})}'")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- env {ENV} python3 /etc/hinteros-test/session.py {method} '{json.dumps(params or {})}'")
         return json.loads(out)["response"]
 
     def ok(method, params=None):
@@ -119,7 +120,7 @@ in
         return r["error"]
 
     def sysrpc(method, params=None):
-        out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- env {ENV} python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
         return json.loads(out)["response"]
 
     def wait_job(jid, timeout=240):
@@ -161,17 +162,17 @@ in
         ids = [a["id"] for a in ok("apps.list")["apps"]]
         assert "steam" not in ids, ids
 
-    with subtest("store.list: the format-3 catalog for this profile, services hidden, terms texts on this box"):
+    with subtest("store.list: the catalog for this profile, services hidden, terms texts on this box"):
         r = ok("store.list")
-        assert r["index_version"] == 3 and r["more_after_update"] is False, r
+        assert r["index_version"] == 4 and r["more_after_update"] is False, r
         apps = {a["id"]: a for a in r["apps"]}
-        assert {"crunchyroll", "firefox", "jellyfin", "moonlight", "plex-htpc", "steam", "youtube"} <= set(apps), list(apps)
+        assert {"crunchyroll", "firefox", "jellyfin-desktop", "moonlight", "plex-htpc", "steam", "youtube"} <= set(apps), list(apps)
         assert "jellyfin-server" not in apps, "a service in the Store"
         assert all(a["state"] == "available" for a in apps.values()), apps
         t = apps["plex-htpc"]["terms"]
         assert t["version"] == "2025-10-30" and t["file"].startswith("/run/current-system/sw/share/hinteros/terms/"), t
         machine.succeed(f"test -s {t['file']}")
-        assert apps["crunchyroll"]["terms"] is None and apps["crunchyroll"]["free"] is True
+        assert apps["crunchyroll"]["terms"] is None and apps["crunchyroll"]["unfree"] is False
         machine.succeed("test -s /run/current-system/sw/share/hinteros/catalog.json")
 
     with subtest("hostile apps.* input is refused and nothing changes"):
@@ -228,12 +229,12 @@ in
         assert installed() == ["crunchyroll", "plex-htpc"]
         unchanged_box()
         # The record: root only, {id: [{version, accepted_at, by, profile}]}.
-        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
-        rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 hinteros-system"
+        rec = json.loads(machine.succeed("cat /var/lib/hinteros/terms-accepted.json"))["accepted"]
         assert list(rec) == ["plex-htpc"] and len(rec["plex-htpc"]) == 1, rec
         e = rec["plex-htpc"][0]
         assert sorted(e) == ["accepted_at", "by", "profile", "version"], e
-        assert e["version"] == "2025-10-30" and e["by"] == "hinteros" and e["profile"] == "p1", e
+        assert e["version"] == "2025-10-30" and e["by"] == "hinteros-p1" and e["profile"] == "p1", e
         assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ|\d{4}-\d\d-\d\dT[\d:.]+(Z|[+-]\d\d:\d\d)", e["accepted_at"]), e
         out = machine.succeed("journalctl -o json --no-pager HINTEROS_AUDIT=1")
         assert any(json.loads(l).get("HINTEROS_TERMS_ID") == "plex-htpc" for l in out.splitlines() if l.strip())
@@ -253,7 +254,7 @@ in
           echo x > $h/.local/share/plex-htpc/x
           ln -s /var/outside2 $h/.config/plex-htpc
           echo keep > $h/keep.txt
-          chown -R hinteros: $h
+          chown -R hinteros-p1: $h
         """)
         j = ok("system.apps.remove", {"ids": ["crunchyroll"], "revision": rev(), "delete_data": True})["job_id"]
         done = wait_job(j)
@@ -280,7 +281,7 @@ in
         j = ok("system.apps.install", {"ids": ["firefox"], "revision": rev()})["job_id"]
         assert wait_job(j)["state"] == "succeeded"
         env_is("firefox")
-        machine.succeed(f"mkdir -p {home}/.local/share/hinteros/firefox/firefox && echo x > {home}/.local/share/hinteros/firefox/firefox/m && chown -R hinteros: {home}/.local")
+        machine.succeed(f"mkdir -p {home}/.local/share/hinteros/firefox/firefox && echo x > {home}/.local/share/hinteros/firefox/firefox/m && chown -R hinteros-p1: {home}/.local")
         j = ok("system.apps.remove", {"ids": ["firefox"], "revision": rev(), "delete_data": False})["job_id"]
         assert wait_job(j)["state"] == "succeeded"
         assert installed() == []

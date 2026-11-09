@@ -6,21 +6,19 @@ let
   inherit (pkgs) lib;
 
   state = {
-    schemaVersion = 1;
-    profiles = [
-      {
-        id = "p1";
-        name = "T";
-        user = "tester";
-      }
-    ];
+    schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
+    profiles = [ { id = "p1"; } ];
+    requirements = [ ];
+    services = [ ];
   };
 
   mk =
     extra:
     (self.lib.mkDevice {
       inherit state;
-      extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
+      extraModules = extra;
     }).config;
 
   # Failing "hinteros hardening" assertion messages (as one string).
@@ -37,7 +35,7 @@ let
     st: extra:
     (self.lib.mkDevice {
       state = st;
-      extraModules = [ { system.stateVersion = "25.11"; } ] ++ extra;
+      extraModules = extra;
     }).config;
   sshState = state // {
     settings.ssh.enable = true;
@@ -67,12 +65,30 @@ let
       expected = "";
     };
     testWheelMemberFails = {
-      expr = failed (mk [ { users.users.tester.extraGroups = [ "wheel" ]; } ]);
+      expr = failed (mk [ { users.users.hinteros-p1.extraGroups = [ "wheel" ]; } ]);
       expected = true;
     };
     testWheelGroupMemberFails = {
-      expr = failed (mk [ { users.groups.wheel.members = [ "tester" ]; } ]);
+      expr = failed (mk [ { users.groups.wheel.members = [ "hinteros-p1" ]; } ]);
       expected = true;
+    };
+    # Profile groups are an allowlist: disk, kvm, tty ... fail, even in dev.
+    testProfileGroupAllowlist = {
+      expr = [
+        (failed (mk [ { users.users.hinteros-p1.extraGroups = [ "disk" ]; } ]))
+        (failed (mk [ { users.groups.kvm.members = [ "hinteros-p1" ]; } ]))
+        (failed (mk [
+          { hinteros.dev.enable = true; }
+          { users.users.hinteros-p1.extraGroups = [ "tty" ]; }
+        ]))
+        (failed (mk [ { users.users.bob.extraGroups = [ "disk" ]; } ]))
+      ];
+      expected = [
+        true
+        true
+        true
+        false
+      ];
     };
     testOtherWheelMemberFails = {
       expr = failed (mk [
@@ -89,7 +105,7 @@ let
       expr = [
         (failed (mk [
           { hinteros.dev.enable = true; }
-          { users.users.tester.extraGroups = [ "wheel" ]; }
+          { users.users.hinteros-p1.extraGroups = [ "wheel" ]; }
         ]))
         (failed (mk [
           { hinteros.dev.enable = true; }
@@ -111,7 +127,7 @@ let
         {
           security.sudo-rs.extraRules = [
             {
-              users = [ "tester" ];
+              users = [ "hinteros-p1" ];
               commands = [
                 {
                   command = "ALL";
@@ -125,7 +141,7 @@ let
       expected = true;
     };
     testNopasswdExtraConfigFails = {
-      expr = failed (mk [ { security.sudo-rs.extraConfig = "tester ALL=(ALL) NOPASSWD: ALL"; } ]);
+      expr = failed (mk [ { security.sudo-rs.extraConfig = "hinteros-p1 ALL=(ALL) NOPASSWD: ALL"; } ]);
       expected = true;
     };
     testPasswordlessWheelFails = {
@@ -137,7 +153,7 @@ let
         (failed (mk [ { security.sudo.enable = true; } ]))
         (failed (mk [
           adminOn
-          { security.sudo.extraConfig = "tester ALL=(ALL) NOPASSWD: ALL"; }
+          { security.sudo.extraConfig = "hinteros-p1 ALL=(ALL) NOPASSWD: ALL"; }
         ]))
       ];
       expected = [
@@ -152,7 +168,7 @@ let
     testSessionTrustedFailsEvenInDev = {
       expr = failed (mk [
         { hinteros.dev.enable = true; }
-        { nix.settings.trusted-users = [ "tester" ]; }
+        { nix.settings.trusted-users = [ "hinteros-p1" ]; }
       ]);
       expected = true;
     };
@@ -181,7 +197,11 @@ let
       expected = [
         true
         true
-        [ "wheel" ]
+        # hinteros-media: the admin copies media into /srv/media (server.nix).
+        [
+          "wheel"
+          "hinteros-media"
+        ]
         [
           "unix-user:0"
           "unix-user:hinteros-admin"
@@ -200,7 +220,7 @@ let
     testAdminDoesNotLicenseOtherWheel = {
       expr = failed (mk [
         adminOn
-        { users.users.tester.extraGroups = [ "wheel" ]; }
+        { users.users.hinteros-p1.extraGroups = [ "wheel" ]; }
       ]);
       expected = true;
     };
@@ -217,7 +237,7 @@ let
       ];
     };
     testSessionNeverAllowedOverSsh = {
-      expr = lib.elem "tester" (mkS sshState [ adminOn ]).services.openssh.settings.AllowUsers;
+      expr = lib.elem "hinteros-p1" (mkS sshState [ adminOn ]).services.openssh.settings.AllowUsers;
       expected = false;
     };
     testSshAdminPolkitAction = {
@@ -333,6 +353,41 @@ let
           ];
       expected = true;
     };
+    # Nothing else may open the port to all sources: openFirewall, or the port in allowed ports.
+    testSshOpenToAllFails = {
+      expr = map failed [
+        (mkS sshState [
+          adminOn
+          { services.openssh.openFirewall = true; }
+        ])
+        (mkS sshState [
+          adminOn
+          {
+            networking.firewall.allowedTCPPortRanges = [
+              {
+                from = 20;
+                to = 30;
+              }
+            ];
+          }
+        ])
+        (mkS sshState [
+          adminOn
+          { networking.firewall.allowedTCPPorts = [ 8096 ]; }
+        ])
+        # One interface (tailscale0 with a server) is that interface's choice.
+        (mkS sshState [
+          adminOn
+          { networking.firewall.interfaces.tailscale0.allowedTCPPorts = [ 22 ]; }
+        ])
+      ];
+      expected = [
+        true
+        true
+        false
+        false
+      ];
+    };
     testSshFirewallIptablesRule = {
       expr =
         lib.hasInfix
@@ -390,6 +445,10 @@ let
         (lib.sort (a: b: a < b) (
           lib.attrNames (lib.filterAttrs (_: w: w.enable) (mk [ adminOn ]).security.wrappers)
         ))
+        # With the admin, users are immutable: hashedPasswordFile applies at every activation (no
+        # `passwd` wrapper either).
+        (mk [ adminOn ]).users.mutableUsers
+        c.users.mutableUsers
       ];
       expected = [
         false
@@ -401,12 +460,13 @@ let
         true
         [
           "mount"
-          "passwd"
           "sudo"
           "sudoedit"
           "umount"
           "unix_chkpwd"
         ]
+        false
+        true
       ];
     };
     testSshOffByDefault = {
@@ -421,7 +481,7 @@ let
         dev.security.sudo-rs.enable
         (lib.sort (a: b: a < b) (lib.unique dev.nix.settings.trusted-users))
         dev.services.openssh.settings.AllowUsers
-        (lib.sort (a: b: a < b) dev.users.users.tester.extraGroups)
+        (lib.sort (a: b: a < b) dev.users.users.hinteros-p1.extraGroups)
         (builtins.length dev.warnings > 0)
       ];
       expected = [
@@ -433,20 +493,15 @@ let
           "root"
         ]
         [ "deploy" ]
-        [
-          "hinteros"
-          "inputplumber"
-          "uinput"
-          "video"
-        ]
+        [ "hinteros" ]
         true
       ];
     };
     testDevboxNoSessionPrivileges = {
       expr = [
         devbox.hinteros.dev.enable
-        (lib.elem "wheel" devbox.users.users.hinteros.extraGroups)
-        (lib.elem "hinteros" devbox.nix.settings.trusted-users)
+        (lib.elem "wheel" devbox.users.users.hinteros-p1.extraGroups)
+        (lib.elem "hinteros-p1" devbox.nix.settings.trusted-users)
       ];
       expected = [
         true

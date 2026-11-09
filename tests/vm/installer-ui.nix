@@ -72,12 +72,13 @@
     assert "welcome" in screen or "install" in screen, screen
 
     # Keyboard input reaches the app (cage -> the launcher): Enter on Welcome goes to the next
-    # step, Tab + Enter activates the next button. (The launcher's own key map is its repo's.)
+    # step, Tab + Enter activates the next button. (The launcher's own key map is its repo's.) The
+    # VM's disk holds no install, so the admin account comes after the internet.
     installer.send_key("ret")
     installer.wait_for_text("Internet", timeout=timedelta(seconds=60))
     installer.send_key("tab")
     installer.send_key("ret")
-    installer.wait_for_text("Choose the disk", timeout=timedelta(seconds=60))
+    installer.wait_for_text("Admin account", timeout=timedelta(seconds=60))
 
     # VT switching works while cage runs on tty1 (cage has a logind session on seat0): Ctrl+Alt+F2
     # gives the root console, which takes keystrokes; Ctrl+Alt+F1 brings the UI back.
@@ -90,7 +91,7 @@
     assert installer.succeed("cat /tmp/tty2-user").strip() == "root"
     installer.send_key("ctrl-alt-f1")
     installer.wait_until_succeeds("grep -qx tty1 /sys/class/tty/tty0/active", timeout=30)
-    installer.wait_for_text("Choose the disk", timeout=timedelta(seconds=60))
+    installer.wait_for_text("Admin account", timeout=timedelta(seconds=60))
 
     # `back` (and its alias `installer`) from the tty2 console returns to the UI; the console shows
     # the reminder above its prompt.
@@ -103,7 +104,7 @@
     installer.wait_for_text("return to the installer", timeout=timedelta(seconds=30))
     installer.send_chars("back\n")
     installer.wait_until_succeeds("grep -qx tty1 /sys/class/tty/tty0/active", timeout=30)
-    installer.wait_for_text("Choose the disk", timeout=timedelta(seconds=60))
+    installer.wait_for_text("Admin account", timeout=timedelta(seconds=60))
     installer.succeed("command -v back installer")
 
     # The UI exits: the console (getty) takes tty1 back.

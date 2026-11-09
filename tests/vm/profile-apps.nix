@@ -1,8 +1,8 @@
-# Per-profile apps through the real chain (apps.md build plan step 6, VM `profile-apps`, single
+# Per-profile apps through the real chain (VM `profile-apps`, single
 # user): a launcher-like client of the session socket (API 0.18) -> the session daemon's relay ->
 # hinteros-system (0.5) -> a job unit -> the profile's Nix profile -> the published link -> the
 # session daemon's apps.list. Install Moonlight into p1 with no new system generation, roll back,
-# remove with delete_data. NEEDS the M7 daemon (DECISIONS D2-D10).
+# remove with delete_data. NEEDS the M7 daemon.
 #
 # STUBBED: evaluating and building envs (system/stub-nix-envs.nix): the envs this test uses are
 # built with the VM (config.hinteros.appEnv.build), the stub answers the job's `nix eval`/`nix
@@ -77,9 +77,9 @@ in
     import time
 
     envs = json.loads(machine.succeed("cat /etc/hinteros-envs.json"))
-    P = "/nix/var/nix/profiles/hinteros/apps/hinteros"
-    home = "/home/hinteros"
-    ENV = "HINTEROS_SYSTEM_API=0.10 HINTEROS_SESSION_API=0.18"
+    P = "/nix/var/nix/profiles/hinteros/apps/hinteros-p1"
+    home = "/home/hinteros-p1"
+    ENV = "HINTEROS_SYSTEM_API=1.0 HINTEROS_SESSION_API=1.0"
 
     machine.succeed("mkdir -p /run/stub")
     machine.wait_for_unit("multi-user.target")
@@ -89,17 +89,38 @@ in
       now=$(date +%s)
       printf '{"version":1,"next":2,"profiles":{"p1":{"name":"Test","color":"teal","admin":true,"locked":false,"created_at":%s,"last_used_at":null,"appearance":{"text_scale":1.0,"high_contrast":false,"reduce_motion":false}}}}' "$now" > /var/lib/hinteros/profiles.json
       chmod 0600 /var/lib/hinteros/profiles.json
+      # The service's file (it is not root), as if it had written it.
+      chown -R hinteros-system:hinteros /var/lib/hinteros
     """)
     machine.succeed(f"nix-env -p {P} --set {envs['firefox,youtube']['out']}")
     machine.succeed("systemctl restart hinteros-system.service")
     machine.wait_for_unit("hinteros-system.service")
-    machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros")
-    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros)/hinteros/session.sock")
+    machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros-p1")
+    machine.wait_until_succeeds("test -S /run/user/$(id -u hinteros-p1)/hinteros/session.sock")
     system_gen = machine.succeed("readlink -f /run/current-system").strip()
 
     def sess(method, params=None):
-        out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/session.py {method} '{json.dumps(params or {})}'")
-        return json.loads(out)["response"]
+        # Early on the session start may restart a daemon that came up before the compositor
+        # (session.nix, try-restart): its socket goes away for a moment, and the client fails
+        # to connect. Only that is tried again; every answer counts.
+        cmd = f"runuser -u hinteros-p1 -- env {ENV} python3 /etc/hinteros-test/session.py {method} '{json.dumps(params or {})}'"
+        for _ in range(30):
+            status, out = machine.execute(cmd)
+            if status == 0:
+                return json.loads(out)["response"]
+            time.sleep(1)
+        return json.loads(machine.succeed(cmd))["response"]
+
+    def job(method, params):
+        # The launcher's update check at session start is a job of its own and may run at any
+        # moment (job_busy, 3005, while it runs): wait for it, then start ours.
+        for _ in range(5):
+            r = sess(method, params)
+            if r.get("error", {}).get("code") != 3005:
+                break
+            wait_job(r["error"]["data"]["job_id"])
+        assert "result" in r, (method, params, r)
+        return r["result"]["job_id"]
 
     def ok(method, params=None):
         r = sess(method, params)
@@ -107,7 +128,7 @@ in
         return r["result"]
 
     def sysrpc(method, params=None):
-        out = machine.succeed(f"runuser -u hinteros -- env {ENV} python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- env {ENV} python3 /etc/hinteros-test/rpc.py {method} '{json.dumps(params or {})}'")
         return json.loads(out)["response"]
 
     def wait_job(jid, timeout=240):
@@ -128,7 +149,7 @@ in
         return machine.succeed(f"nix-env -p {P} --list-generations").strip().splitlines()
 
     with subtest("the profile's env is what the session lists"):
-        machine.wait_until_succeeds("test -e /run/hinteros/apps/hinteros/share/hinteros/apps.json")
+        machine.wait_until_succeeds("test -e /run/hinteros/apps/hinteros-p1/share/hinteros/apps.json")
         for _ in range(30):
             if {"firefox", "youtube"} <= set(app_ids()):
                 break
@@ -139,7 +160,7 @@ in
         assert m["ids"] == ["firefox", "youtube"], m
 
     with subtest("install Moonlight: a new generation of p1's profile, no new system generation"):
-        j = ok("system.apps.install", {"ids": ["moonlight"], "revision": mine()["revision"]})["job_id"]
+        j = job("system.apps.install", {"ids": ["moonlight"], "revision": mine()["revision"]})
         done = wait_job(j)
         assert done["state"] == "succeeded" and done["kind"] == "apps_install", done
         assert machine.succeed(f"readlink -f {P}").strip() == envs["firefox,moonlight,youtube"]["out"]
@@ -158,7 +179,7 @@ in
         g = ok("system.apps.generations")["generations"]
         assert len(g) == 2, g
         old = next(x for x in g if not x["current"])
-        done = wait_job(ok("system.apps.rollback", {"generation": old["generation"]})["job_id"])
+        done = wait_job(job("system.apps.rollback", {"generation": old["generation"]}))
         assert done["state"] == "succeeded", done
         assert machine.succeed(f"readlink -f {P}").strip() == envs["firefox,youtube"]["out"]
         for _ in range(10):
@@ -169,16 +190,16 @@ in
         assert machine.succeed("readlink -f /run/current-system").strip() == system_gen
 
     with subtest("remove with delete_data: the app's dataPaths in this home only"):
-        done = wait_job(ok("system.apps.install", {"ids": ["moonlight"], "revision": mine()["revision"]})["job_id"])
+        done = wait_job(job("system.apps.install", {"ids": ["moonlight"], "revision": mine()["revision"]}))
         assert done["state"] == "succeeded", done
         machine.succeed(f"""
           set -e
           d='{home}/.config/Moonlight Game Streaming Project'
           mkdir -p "$d" {home}/.config/other
           echo x > "$d/settings.conf"; echo keep > {home}/.config/other/keep
-          chown -R hinteros: {home}/.config
+          chown -R hinteros-p1: {home}/.config
         """)
-        done = wait_job(ok("system.apps.remove", {"ids": ["moonlight"], "revision": mine()["revision"], "delete_data": True})["job_id"])
+        done = wait_job(job("system.apps.remove", {"ids": ["moonlight"], "revision": mine()["revision"], "delete_data": True}))
         assert done["state"] == "succeeded" and done["kind"] == "apps_remove", done
         machine.fail(f"test -e '{home}/.config/Moonlight Game Streaming Project'")
         machine.succeed(f"test -e {home}/.config/other/keep")

@@ -21,21 +21,10 @@ in
       defaultText = lib.literalExpression "config.hinteros.session.enable";
       description = "Run InputPlumber so that exactly one input stream per controller exists.";
     };
-    pointerCurve = lib.mkOption {
-      type = lib.types.addCheck lib.types.float (k: k > 0.0);
-      default = 2.5;
-      description = ''
-        Response curve exponent k of the right-stick pointer: mouse speed is speed_pps * m^k, with m
-        the stick deflection past the deadzone, rescaled to 0..1. Larger k means slower small
-        movements; full deflection is always full speed, and 1.0 is linear. Set as
-        INPUTPLUMBER_POINTER_CURVE in the InputPlumber service (read at startup).
-      '';
-    };
   };
 
   config = lib.mkIf cfg.enable {
     services.inputplumber.enable = true;
-    systemd.services.inputplumber.environment.INPUTPLUMBER_POINTER_CURVE = toString cfg.pointerCurve;
     # InputPlumber hides the physical pads it took over (a udev rule that runs chmod and
     # `setfacl -b` on their device nodes) so games see only its virtual pad. It looks up setfacl
     # on PATH; without it the hiding fails ("Unable to determine setfacl command location") and
@@ -63,8 +52,8 @@ in
 
     # Autologin: InputPlumber's shipped polkit rule grants its actions to this group (or wheel).
     # With the greeter no account is in it: the active local session of a profile (or the
-    # greeter) gets the actions instead (profiles.md, "Device access per seat"; spike 7: polkit
-    # sees the profile's user service as active and local, a system service as that user not).
+    # greeter) gets the actions instead (polkit sees the profile's user service as active and
+    # local, a system service as that user not).
     users.groups.inputplumber = { };
     users.users.${config.hinteros.session.user}.extraGroups = lib.optionals (!greeterOn) [
       "inputplumber"

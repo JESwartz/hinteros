@@ -1,5 +1,10 @@
 # Generic Intel iGPU mini PC bits, until the facter report and a hardware profile exist (M1).
-{ pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 {
   networking.hostName = "hinteros-devbox";
   system.stateVersion = "25.11";
@@ -32,14 +37,16 @@
     efi.canTouchEfiVariables = true;
   };
 
-  # TODO(M1): placeholder disks. Replace with the real partition layout (or let the
-  # installer/facter report decide); this only has to evaluate and build for now.
-  fileSystems."/" = {
-    device = "/dev/disk/by-label/nixos";
-    fsType = "ext4";
-  };
-  fileSystems."/boot" = {
-    device = "/dev/disk/by-label/BOOT";
-    fsType = "vfat";
+  # Placeholder disks for the checked-in state.json, which has no `disk` (default.nix). A state
+  # with one (an installed box's, through the snapshot) gets the installer's layout instead.
+  fileSystems = lib.mkIf (!config.hinteros.disk.enable) {
+    "/" = {
+      device = "/dev/disk/by-label/nixos";
+      fsType = "ext4";
+    };
+    "/boot" = {
+      device = "/dev/disk/by-label/BOOT";
+      fsType = "vfat";
+    };
   };
 }

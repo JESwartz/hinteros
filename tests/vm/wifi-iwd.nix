@@ -1,33 +1,20 @@
-# Wi-Fi after the update from wpa_supplicant to iwd (network-hardware.nix), on simulated radios
-# (mac80211_hwsim): phy0 is the access point (hostapd in netns "ap", WPA2-PSK), NetworkManager
-# uses the other. The profile is a keyfile with the PSK in it, as the boxes have it.
-#   - Boot on wpa_supplicant: it connects, so NetworkManager records the profile's last use.
-#   - Switch at runtime to iwd (as an update does): it connects again. Without
-#     hinteros-nm-iwd-migrate NetworkManager asks a secret agent for a new passphrase (there is
-#     none) and never connects.
-#   - iwd keeps the passphrase; after a restart of iwd and NetworkManager it connects without
-#     the migration (which ran once: its marker is there and the last-use times come back).
+# Wi-Fi on iwd (network-hardware.nix), on simulated radios (mac80211_hwsim): phy0 is the access
+# point (hostapd in netns "ap", WPA2-PSK), NetworkManager uses the other. The profile is a keyfile
+# with the PSK in it, as an install writes it.
+#   - It connects at boot, and iwd keeps the passphrase.
+#   - After a restart of iwd and NetworkManager it connects again, with the last-use time known.
 { pkgs, ... }:
 pkgs.testers.runNixOSTest {
-  name = "hinteros-wifi-iwd-migration";
+  name = "hinteros-wifi-iwd";
   nodes.machine =
-    { lib, pkgs, ... }:
+    { pkgs, ... }:
     {
       imports = [ ../../nixos/modules/network-hardware.nix ];
       boot.kernelModules = [ "mac80211_hwsim" ];
       boot.extraModprobeConfig = "options mac80211_hwsim radios=2";
       networking.networkmanager = {
         enable = true;
-        # The box before the update. qemu-vm.nix turns Wi-Fi off (mkVMOverride); NetworkManager's
-        # wpa_supplicant needs it.
-        wifi.backend = lib.mkForce "wpa_supplicant";
         unmanaged = [ "interface-name:eth*" ];
-      };
-      networking.wireless.enable = lib.mkOverride 1 true;
-      # After the update: the module's default (iwd).
-      specialisation.iwd.configuration = {
-        networking.networkmanager.wifi.backend = lib.mkOverride 40 "iwd";
-        networking.wireless.enable = lib.mkOverride 0 false;
       };
 
       # The access point's radio leaves the root namespace before NetworkManager starts.
@@ -112,28 +99,17 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("hostapd-ap.service")
     machine.wait_for_unit("NetworkManager.service")
 
-    with subtest("wpa_supplicant: connects, and NetworkManager records the last use"):
+    with subtest("iwd: connects, and keeps the passphrase"):
         connected()
-        machine.succeed("systemctl is-active wpa_supplicant.service")
-        machine.wait_until_succeeds("grep -q 4616e7c8-fdb6-4c51-b112-763f816c11b8 /var/lib/NetworkManager/timestamps")
-
-    with subtest("the update to iwd at runtime: it connects again"):
-        machine.succeed("/run/booted-system/specialisation/iwd/bin/switch-to-configuration test")
         machine.succeed("systemctl is-active iwd.service")
         machine.fail("systemctl is-active wpa_supplicant.service")
-        connected()
-        machine.succeed("test -e /var/lib/NetworkManager/hinteros-iwd-migrated")
         machine.succeed("test -e /var/lib/iwd/testnet.psk")
         machine.fail("journalctl -u NetworkManager | grep -q 'No agents were available'")
+        machine.wait_until_succeeds("grep -q 4616e7c8-fdb6-4c51-b112-763f816c11b8 /var/lib/NetworkManager/timestamps")
 
-    with subtest("iwd keeps the passphrase: a restart connects, the migration ran once"):
+    with subtest("a restart connects, with the last use recorded"):
         machine.succeed("systemctl restart iwd.service NetworkManager.service")
         connected()
-        machine.wait_until_succeeds("grep -q 4616e7c8-fdb6-4c51-b112-763f816c11b8 /var/lib/NetworkManager/timestamps")
-        machine.succeed("systemctl stop hinteros-nm-iwd-migrate.service NetworkManager.service")
-        machine.succeed("systemctl start NetworkManager.service")
-        connected()
-        runs = machine.succeed("journalctl -u hinteros-nm-iwd-migrate.service -o cat | grep -c '^Starting HinterOS: prepare' || true").strip()
-        assert runs == "1", runs
+        machine.fail("journalctl -u NetworkManager | grep -q 'No agents were available'")
   '';
 }

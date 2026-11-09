@@ -1,6 +1,5 @@
-# Creating, renaming and removing profiles (profiles.md "Declarative accounts", "Creating a
-# profile", "Removing a profile", "Authority"; VM `profiles-lifecycle`). Greeter mode; p1 =
-# `hinteros` (James, admin, unlocked, PIN 2468), p2 = `hinteros-p2` (Sam, unlocked, PIN 1357);
+# Creating, renaming and removing profiles (VM `profiles-lifecycle`). Greeter mode; p1 =
+# `hinteros-p1` (James, admin, unlocked, PIN 2468), p2 = `hinteros-p2` (Sam, unlocked, PIN 1357);
 # the starter env is Firefox + YouTube.
 #   - profiles.create from p1's session is a job whose apply flow adds the account (a rebuild:
 #     the stub "builds" the specialisation with it): `hinteros-p3` has uid 20003, home 0700,
@@ -54,7 +53,7 @@ profiles.mkTest {
     "youtube"
   ];
   appProfiles = {
-    hinteros = "starter";
+    hinteros-p1 = "starter";
     hinteros-p2 = "starter";
   };
   starter = "starter";
@@ -80,14 +79,14 @@ profiles.mkTest {
     systems = boot_box()
     APPS = "/nix/var/nix/profiles/hinteros/apps"
 
-    def rev(user="hinteros"):
+    def rev(user="hinteros-p1"):
         return sys_ok(user, "settings.get")["revision"]
 
     def ids_in_state():
         return [p["id"] for p in state_json()["profiles"]]
 
     def listed():
-        return {p["id"]: p for p in sys_ok("hinteros", "profiles.list")["profiles"]}
+        return {p["id"]: p for p in sys_ok("hinteros-p1", "profiles.list")["profiles"]}
 
     def create(user, name, pin, system, **extra):
         stub_build(systems[system])
@@ -117,15 +116,15 @@ profiles.mkTest {
         reg = json.loads(machine.succeed("cat /var/lib/hinteros/apps/registry.json"))
         assert pid not in reg["owners"], reg
 
-    enter("p1", "hinteros")
-    jobs_idle("hinteros")
+    enter("p1", "hinteros-p1")
+    jobs_idle("hinteros-p1")
     starter = env_path("starter")
     assert machine.succeed("readlink -f /nix/var/nix/profiles/hinteros/starter").strip() == starter
 
     with subtest("create a profile from a session: a rebuild, the session stays"):
-        cage = machine.succeed("pgrep -u hinteros -o -f '/bin/cage '").strip()
-        launcher = machine.succeed("pgrep -u hinteros -o -f hinteros-launcher").strip()
-        new = create("hinteros", "Alex", "4444", "with-p3", color="purple")
+        cage = machine.succeed("pgrep -u hinteros-p1 -o -f '/bin/cage '").strip()
+        launcher = machine.succeed("pgrep -u hinteros-p1 -o -f hinteros-launcher").strip()
+        new = create("hinteros-p1", "Alex", "4444", "with-p3", color="purple")
         assert new == "p3", new
         assert current_system() == systems["with-p3"]
         assert ids_in_state() == ["p1", "p2", "p3"], state_json()
@@ -134,34 +133,34 @@ profiles.mkTest {
         assert machine.succeed("stat -c '%a %U' /home/hinteros-p3").strip() == "700 hinteros-p3"
         meta = profiles_file()["profiles"]["p3"]
         assert meta["name"] == "Alex" and meta["color"] == "purple" and not meta["admin"] and not meta["locked"], meta
-        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p3").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p3").strip() == "600 hinteros-system"
         assert machine.succeed(f"readlink -f {APPS}/hinteros-p3").strip() == starter
         machine.wait_until_succeeds("test -L /run/hinteros/apps/hinteros-p3")
         assert "p3" in [p["id"] for p in public()["profiles"]]
         assert listed()["p3"]["user"] == "hinteros-p3"
         # Not a session restart: the same compositor and launcher.
-        assert machine.succeed("pgrep -u hinteros -o -f '/bin/cage '").strip() == cage
-        assert machine.succeed("pgrep -u hinteros -o -f hinteros-launcher").strip() == launcher
+        assert machine.succeed("pgrep -u hinteros-p1 -o -f '/bin/cage '").strip() == cage
+        assert machine.succeed("pgrep -u hinteros-p1 -o -f hinteros-launcher").strip() == launcher
 
     with subtest("rename: another profile needs the admin PIN, yourself not"):
-        r = sess("hinteros", "system.profiles.rename", {"id": "p2", "name": "Samantha"})
+        r = sess("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha"})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "admin"}, r
-        r = sess("hinteros", "system.profiles.rename", {"id": "p2", "name": "Samantha", "pin": "1357"})
+        r = sess("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha", "admin_pin": "1357"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         assert listed()["p2"]["name"] == "Sam"
-        assert sess_ok("hinteros", "system.profiles.rename", {"id": "p2", "name": "Samantha", "pin": "2468"}) == {}
-        assert sess_ok("hinteros", "system.profiles.rename", {"id": "p1", "name": "Jim"}) == {}
+        assert sess_ok("hinteros-p1", "system.profiles.rename", {"id": "p2", "name": "Samantha", "admin_pin": "2468"}) == {}
+        assert sess_ok("hinteros-p1", "system.profiles.rename", {"id": "p1", "name": "Jim"}) == {}
         names = {p["id"]: p["name"] for p in public()["profiles"]}
         assert names["p1"] == "Jim" and names["p2"] == "Samantha", names
         # Display names are checked (no control characters, not empty).
-        r = sess("hinteros", "system.profiles.rename", {"id": "p1", "name": "   "})
+        r = sess("hinteros-p1", "system.profiles.rename", {"id": "p1", "name": "   "})
         assert r["error"]["code"] == -32602, r
 
     with subtest("the admin profile cannot be removed"):
         for pin in ["2468", "0000"]:
-            r = sess("hinteros", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "pin": pin, "revision": rev()})
+            r = sess("hinteros-p1", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "pin": pin, "revision": rev()})
             assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "admin", r
-        machine.succeed("id hinteros")
+        machine.succeed("id hinteros-p1")
         assert profiles_file()["profiles"]["p1"]["admin"] is True
 
     with subtest("remove p3 with the admin PIN: its processes, account and data are gone, /etc is not"):
@@ -170,13 +169,13 @@ profiles.mkTest {
         machine.wait_until_succeeds("pgrep -u hinteros-p3 -f 'sleep 1000'")
         # A file of p3's in /etc: deleting the home must not follow ~/link to it.
         machine.succeed("echo keep > /etc/p3-owned && chown hinteros-p3 /etc/p3-owned")
-        r = sess("hinteros", "system.profiles.remove", {"id": "p3", "confirm_id": "p2", "pin": "2468", "revision": rev()})
+        r = sess("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p2", "admin_pin": "2468", "revision": rev()})
         assert r["error"]["code"] == -32602, r
-        r = sess("hinteros", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "pin": "4444", "revision": rev()})
+        r = sess("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "admin_pin": "4444", "revision": rev()})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         stub_build(systems[""])
-        r = sess_ok("hinteros", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "pin": "2468", "revision": rev()})
-        done = wait_job("hinteros", r["job_id"])
+        r = sess_ok("hinteros-p1", "system.profiles.remove", {"id": "p3", "confirm_id": "p3", "admin_pin": "2468", "revision": rev()})
+        done = wait_job("hinteros-p1", r["job_id"])
         assert done["state"] == "succeeded" and done["kind"] == "profiles_remove", done
         assert current_system() == systems[""]
         machine.fail("pgrep -u 20003")
@@ -187,7 +186,7 @@ profiles.mkTest {
         assert set(listed()) == {"p1", "p2"}
 
     with subtest("ids are never reused: the next profile is p4"):
-        assert create("hinteros", "Bea", "5555", "with-p4") == "p4"
+        assert create("hinteros-p1", "Bea", "5555", "with-p4") == "p4"
         assert machine.succeed("id -u hinteros-p4").strip() == "20004"
         assert profiles_file()["next"] == 5, profiles_file()
 
@@ -195,11 +194,11 @@ profiles.mkTest {
         machine.succeed("cp /etc/hinteros/state.json /root/state.json")
         machine.succeed(
             "jq -c '.profiles = ([\"p1\",\"p2\",\"p4\",\"p5\",\"p6\",\"p7\",\"p8\",\"p9\"] "
-            "| map({id: ., user: (if . == \"p1\" then \"hinteros\" else \"hinteros-\" + . end)}))' "
+            "| map({id: .}))' "
             "/root/state.json > /etc/hinteros/state.json"
         )
         assert len(ids_in_state()) == 8
-        r = sysrpc("hinteros", "profiles.create", {"name": "Nine", "pin": "9999", "locked": False, "revision": rev()})
+        r = sysrpc("hinteros-p1", "profiles.create", {"name": "Nine", "pin": "9999", "locked": False, "revision": rev()})
         assert r["error"]["code"] == 3015 and r["error"]["data"] == {"max": 8}, r
         machine.succeed("cp /root/state.json /etc/hinteros/state.json")
         assert ids_in_state() == ["p1", "p2", "p4"]
@@ -207,13 +206,22 @@ profiles.mkTest {
         assert profiles_file()["next"] == 5, profiles_file()
 
     with subtest("a profile removes itself with its own PIN; the picker comes back without it"):
-        switch("hinteros", "p4", "hinteros-p4")
+        switch("hinteros-p1", "p4", "hinteros-p4")
         r = sess("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "pin": "2468", "revision": rev("hinteros-p4")})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "self"}, r
+        r = sess("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "revision": rev("hinteros-p4")})
+        assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "self"}, r
         stub_build(systems[""])
-        r = sess_ok("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "pin": "5555", "revision": rev("hinteros-p4")})
+        # p4's launcher runs its update check at session start: wait it out, as create() does.
+        for _ in range(5):
+            resp = sess("hinteros-p4", "system.profiles.remove", {"id": "p4", "confirm_id": "p4", "pin": "5555", "revision": rev("hinteros-p4")})
+            if resp.get("error", {}).get("code") != 3005:
+                break
+            jobs_idle("hinteros-p4")
+        assert "result" in resp, resp
+        r = resp["result"]
         # The job ends the session first (as a switch does); follow it as p1 (read-only).
-        done = wait_job("hinteros", r["job_id"])
+        done = wait_job("hinteros-p1", r["job_id"])
         assert done["state"] == "succeeded", done
         assert_gone("p4", "hinteros-p4", "/home/hinteros-p4")
         picker_up()
@@ -223,7 +231,7 @@ profiles.mkTest {
         stub_build(systems["with-p5"])
         r = greeter_call("greeter.create", {"name": "Cat", "color": "green", "pin": "6666", "locked": True})
         assert "result" in r and r["result"]["id"] == "p5", r
-        done = wait_job("hinteros", r["result"]["job_id"])
+        done = wait_job("hinteros-p1", r["result"]["job_id"])
         assert done["state"] == "succeeded" and done["kind"] == "profiles_create", done
         assert machine.succeed("id -u hinteros-p5").strip() == "20005"
         assert public()["next"]["target"] == "p5" and public()["next"]["fast"] is True, public()

@@ -3,25 +3,11 @@
 let
   inherit (pkgs) lib;
 
+  # No state: the box-wide apps of the test VMs, the three on the ISO on.
   mk =
     extra:
     self.lib.mkDevice {
-      state = {
-        schemaVersion = 1;
-        # A state selects its default apps; this test wants the three on the ISO.
-        apps = [
-          "jellyfin"
-          "youtube"
-          "firefox"
-        ];
-        profiles = [
-          {
-            id = "p1";
-            name = "T";
-            user = "tester";
-          }
-        ];
-      };
+      state = null;
       extraModules = [
         { system.stateVersion = "25.11"; }
         extra
@@ -56,39 +42,37 @@ let
   # Another box: other compositor and session settings.
   otherBox = cage;
   envFails = c: ids: !(builtins.tryEval (drv (env c ids))).success;
+  # Exactly these box-wide apps.
   mkApps =
     ids: extra:
     self.lib.mkDevice {
-      state = {
-        schemaVersion = 1;
-        apps = ids;
-        disk.layout = "gpt-esp-ext4";
-        profiles = [
-          {
-            id = "p1";
-            name = "T";
-            user = "tester";
-          }
-        ];
-      };
+      state = null;
       extraModules = [
-        { system.stateVersion = "25.11"; }
+        {
+          system.stateVersion = "25.11";
+          hinteros = {
+            disk = {
+              enable = true;
+              rootUuid = "11111111-2222-3333-4444-555555555555";
+              espUuid = "ABCD-1234";
+            };
+            apps = lib.genAttrs liveIds (id: {
+              enable = lib.mkOverride 900 (lib.elem id ids);
+            });
+          };
+        }
         extra
       ];
     };
   c2 = self.lib.mkDevice {
     state = {
       schemaVersion = 2;
-      profiles = [
-        {
-          id = "p1";
-          user = "hinteros";
-        }
-      ];
+      base = "unstable";
+      stateVersion = "25.11";
+      profiles = [ { id = "p1"; } ];
       requirements = [ ];
       services = [ ];
     };
-    extraModules = [ { system.stateVersion = "25.11"; } ];
   };
   # A device with every catalog entry enabled (nothing built: the drv paths below force evaluation).
   every = mkApps liveIds { };
@@ -158,7 +142,7 @@ let
           (env base [
             "youtube"
             "steam"
-            "jellyfin"
+            "jellyfin-desktop"
             "youtube"
           ]).manifest;
       in
@@ -170,19 +154,19 @@ let
           m.box
           (lib.hasSuffix "/bin/steam" m.steam.path)
           (lib.findFirst (a: a.id == "youtube") null m.apps == entry base "youtube")
-          (lib.findFirst (a: a.id == "jellyfin") null m.apps == entry base "jellyfin")
+          (lib.findFirst (a: a.id == "jellyfin-desktop") null m.apps == entry base "jellyfin-desktop")
           (env base [ "youtube" ]).manifest.steam
           (env base [ "youtube" ]).manifest.box
         ];
         expected = [
           1
           [
-            "jellyfin"
+            "jellyfin-desktop"
             "steam"
             "youtube"
           ]
           [
-            "jellyfin"
+            "jellyfin-desktop"
             "youtube"
           ]
           [
@@ -197,18 +181,18 @@ let
         ];
       };
     # Same ids, same system: same store path, whatever the order, duplicates or unrelated box
-    # settings; Steam is stock pkgs.steam, so it does not depend on the box's graphics (spike 8).
+    # settings; Steam is stock pkgs.steam, so it does not depend on the box's graphics.
     testEnvDeterministic = {
       expr = [
         (
           drv (
             env base [
               "firefox"
-              "jellyfin"
+              "jellyfin-desktop"
             ]
           ) == drv (
             env base [
-              "jellyfin"
+              "jellyfin-desktop"
               "firefox"
               "firefox"
             ]
@@ -218,7 +202,7 @@ let
         (drv (env base [ "steam" ]) == drv (env otherBox [ "steam" ]))
         (drv (env base [ "steam" ]) == drv (env cacheJob [ "steam" ]))
         (drv (env base [ "firefox" ]) == drv (env c2 [ "firefox" ]))
-        (drv (env base [ "firefox" ]) != drv (env base [ "jellyfin" ]))
+        (drv (env base [ "firefox" ]) != drv (env base [ "jellyfin-desktop" ]))
       ];
       expected = [
         true
@@ -230,7 +214,7 @@ let
       ];
     };
     # Unfree per env: the cache job's envs may hold Steam, never Plex; the system's own allowlist
-    # lists no app on schema 2, and the env still evaluates (its own nixpkgs instance).
+    # lists no app on a device, and the env still evaluates (its own nixpkgs instance).
     testEnvUnfree = {
       expr = [
         (envFails cacheJob [ "plex-htpc" ])
@@ -249,10 +233,28 @@ let
         true
       ];
     };
+    # buildAll (one nixpkgs per distinct unfree set) gives each owner the env build gives it.
+    testBuildAllSameEnvs =
+      let
+        owners = {
+          p1 = [ "steam" ];
+          p2 = [
+            "steam"
+            "youtube"
+          ];
+          p3 = [ "plex-htpc" ];
+          starter = [ "youtube" ];
+        };
+        all = base.config.hinteros.appEnv.buildAll owners;
+      in
+      {
+        expr = lib.mapAttrs (o: ids: drv all.${o} == drv (env base ids)) owners;
+        expected = lib.mapAttrs (_: _: true) owners;
+      };
     testDefaultApps = {
       expr = appsOf base;
       expected = [
-        "jellyfin"
+        "jellyfin-desktop"
         "youtube"
         "firefox"
       ];
@@ -279,7 +281,7 @@ let
         }
       );
       expected = [
-        "jellyfin"
+        "jellyfin-desktop"
         "youtube"
         "firefox"
       ];
@@ -292,7 +294,7 @@ let
       expr = [
         (entry base "youtube").input
         (entry base "youtube").back_key
-        (entry base "jellyfin" ? input)
+        (entry base "jellyfin-desktop" ? input)
       ];
       expected = [
         "keyboard"
@@ -355,7 +357,7 @@ let
       );
       expected = false;
     };
-    # design/sandbox.md: every app entry says whether it is sandboxed and carries the catalog's
+    # Every app entry says whether it is sandboxed and carries the catalog's
     # permissions; session.toml turns the sandbox on with bwrap by store path.
     testSandboxSettings = {
       expr = {
@@ -408,7 +410,7 @@ let
         protectTunables = false;
       };
     };
-    # design/sandbox.md `lan`: the daemon owns its cgroup subtree, session.toml turns the filter
+    # `lan`: the daemon owns its cgroup subtree, session.toml turns the filter
     # on, hinteros-system takes lan_filter.* and the oneshot unit (the only one with
     # CAP_NET_ADMIN) loads the table; the path unit follows /etc/resolv.conf. Off: none of it.
     testLanFilter =
@@ -465,13 +467,17 @@ let
             unit = false;
             path = false;
           };
-          caps = [ "CAP_NET_ADMIN" ];
+          # CAP_DAC_READ_SEARCH: lan-filter.json is the service's (0600; the service is not root).
+          caps = [
+            "CAP_NET_ADMIN"
+            "CAP_DAC_READ_SEARCH"
+          ];
           families = [
             "AF_NETLINK"
             "AF_UNIX"
           ];
-          # hinteros-system itself still has no network and no CAP_NET_ADMIN.
-          systemCaps = [ "CAP_SYS_PTRACE" ];
+          # hinteros-system itself has no network and no capabilities at all.
+          systemCaps = [ "" ];
           systemFamilies = [ "AF_UNIX" ];
           exec = true;
           resolv = "/etc/resolv.conf";
@@ -482,7 +488,7 @@ let
       expr = [
         (entry base "firefox").address_bar or false
         (entry base "youtube").address_bar or false
-        (entry base "jellyfin").address_bar or false
+        (entry base "jellyfin-desktop").address_bar or false
         (entry crunchy "crunchyroll").address_bar or false
       ];
       expected = [
@@ -556,7 +562,7 @@ let
       ];
       expected = [
         [
-          "jellyfin"
+          "jellyfin-desktop"
           "plex-htpc"
           "youtube"
           "firefox"
@@ -567,7 +573,7 @@ let
     # Icons: the catalog's fields reach session.toml; no generated icon files.
     testIconFields = {
       expr = [
-        (entry base "jellyfin").desktop_id
+        (entry base "jellyfin-desktop").desktop_id
         (entry base "youtube").firefox_profile
         (entry base "youtube").site_url
         (lib.hasPrefix "https://" (entry base "youtube").icon_url)
@@ -614,10 +620,12 @@ let
         true
       ];
     };
-    # Unfree for the cache job: only the catalog's cacheable names (Steam), never Plex.
-    testCacheableIsSteamOnly = {
+    # Unfree for the cache job: only the catalog's cacheable names (Steam, Modrinth), never Plex.
+    testCacheableIsSteamAndModrinth = {
       expr = cacheable;
       expected = [
+        "modrinth-app"
+        "modrinth-app-unwrapped"
         "steam"
         "steam-unwrapped"
       ];
@@ -795,8 +803,8 @@ let
         "unset"
       ];
     };
-    # gamescope: each app on an Xwayland of its own from the third on, patched
-    # (design/sandbox.md step 3), their number read before gamescope starts; cage: one display.
+    # gamescope: each app on an Xwayland of its own from the third on, patched, their number
+    # read before gamescope starts; cage: one display.
     testGamescopeAppsDisplay = {
       expr = [
         (settings gs).gamescope.apps_display
@@ -808,9 +816,12 @@ let
         (lib.all
           (p: lib.elem p (map baseNameOf (gs.config.hinteros.session.gamescope.package.patches or [ ])))
           [
+            "keep-output-on-exit.patch"
             "xwayland-no-abstract-socket.patch"
             "xwayland-size-all.patch"
             "xwayland-apps-no-input-emulation.patch"
+            "xwayland-apps-no-control.patch"
+            "xwayland-apps-no-selection.patch"
           ]
         )
       ];
@@ -839,12 +850,24 @@ let
         base.config.hinteros.firefoxKiosk.oskExtension
         (lib.hasSuffix "esr" (fx base).finalPackage.version)
         ((fx base).policies.ExtensionSettings ? "${extId}")
+        # Every other add-on is blocked: ESR checks no signatures.
+        (fx base).policies.ExtensionSettings."*".installation_mode
+        (fx oskOff).policies.ExtensionSettings."*".installation_mode
       ];
       expected = [
         "esr-unsigned"
         true
         true
+        "blocked"
+        "blocked"
       ];
+    };
+    # about:home has no search box: no extension runs there, so it would get no OSK.
+    testFirefoxHomeNoSearch = {
+      expr = (fx base).policies.FirefoxHome;
+      expected = {
+        Search = false;
+      };
     };
     testOskExtensionOff = {
       expr = [
@@ -870,7 +893,7 @@ let
       expr = [
         (lib.hasSuffix "esr" (fx oskEsr).finalPackage.version)
         (hasSub (fx oskEsr).autoConfig ''lockPref("xpinstall.signatures.required", false);'')
-        # Spike 8: the signature pref is box-wide in the policies too, so any env's Firefox gets it.
+        # The signature pref is box-wide in the policies too, so any env's Firefox gets it.
         (fx oskEsr).policies.Preferences."xpinstall.signatures.required"
         (fx oskEsr).hasNativeHost
         (fx oskEsr).policies.ExtensionSettings.${extId}.installation_mode
@@ -943,7 +966,7 @@ pkgs.runCommand "hinteros-apps-eval"
     # Evaluation only: every catalog entry in one device config, and the ISO (which throws on any
     # unfree package, as it allows none).
     everyDrv = builtins.unsafeDiscardStringContext every.config.system.build.toplevel.drvPath;
-    # Every app in one env (schema 2, as hinteros-system builds them).
+    # Every app in one env (as hinteros-system builds them).
     envDrv = drv (env base liveIds);
     cacheDrv = builtins.unsafeDiscardStringContext cacheJob.config.system.build.toplevel.drvPath;
     isoDrv = builtins.unsafeDiscardStringContext iso.config.system.build.isoImage.drvPath;

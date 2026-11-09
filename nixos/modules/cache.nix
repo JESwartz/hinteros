@@ -1,7 +1,6 @@
-# The HinterOS binary cache as a substituter (hinteros-docs/design/distribution.md, "Substituters
-# on boxes"): cache.nixos.org first, the HinterOS cache second, so the home lab only serves what
-# cache.nixos.org lacks. OFF until the cache exists (Phase 2); the keys come from
-# `release/cache-keys` through release.nix.
+# The HinterOS binary cache as a substituter: cache.nixos.org first, the HinterOS cache second,
+# so the home lab only serves what cache.nixos.org lacks. OFF until the cache exists (Phase 2);
+# the keys come from `release/cache-keys` through release.nix.
 { config, lib, ... }:
 let
   cfg = config.hinteros.cache;
@@ -16,14 +15,14 @@ in
 
     url = lib.mkOption {
       type = lib.types.str;
-      default = "https://cache.justsomeshed.com";
+      default = "https://cache.hinteros.org";
       description = "The HinterOS binary cache.";
     };
 
     publicKeys = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      example = [ "cache.justsomeshed.com-1:AAAA..." ];
+      example = [ "cache.hinteros.org-1:AAAA..." ];
       description = ''
         Keys whose narinfo signatures are trusted for the HinterOS cache (`<name>:<base64>`).
         Empty by default; `nixosModules.default` sets the vendor's from `release/cache-keys`.

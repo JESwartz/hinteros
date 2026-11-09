@@ -1,12 +1,16 @@
 # hinteros-install refuses bad plans and unsuitable machines before touching the disk: missing
 # admin password (or one shorter than 8 characters), an app that needs a network while offline, a
 # disk that does not exist, is in use, is the system disk or is too small, a BIOS-booted machine,
-# malformed fields, a `rev` that is malformed or needs a network (the installer's own revision
+# malformed fields, a plan for a newer installer (`version`), a `rev` that is malformed or needs a
+# network (the installer's own revision
 # validates offline), a plan whose diskSeq is missing or not the disk's, and a disk replaced
 # (unplugged and plugged in again, so it gets a new disk sequence number under the same name) after
-# the plan was made or after the plan was checked, just before erasing. Every refusal exits 2 with
-# an error line; a marker file system on the target disk survives them all.
-# Also `--info` (the installer's revision, version and channel; offline, no root).
+# the plan was made or after the plan was checked, just before erasing (also a second disk with
+# HinterOS partition labels plugged in then). Every refusal exits 2 with an error line; a marker
+# file system on the target disk survives them all. Leftover mounts of an earlier run under /mnt
+# do not count as in use.
+# A keepData plan is refused on a disk without an install. Also `--info` (the installer's revision,
+# version and channel; offline, no root) and `--list-disks` (a disk without an install, one in use).
 { self, pkgs }:
 let
   plan =
@@ -36,6 +40,15 @@ let
 
   cases = {
     ok = plan { };
+    keep-no-install = pkgs.writeText "plan.json" (
+      builtins.toJSON {
+        disk = "/dev/vdb";
+        keepData = true;
+        channel = "stable";
+      }
+    );
+    # Hostname, admin and ssh are taken; the apps are not.
+    keep-with-apps = plan { keepData = true; };
     no-password = plan {
       admin.user = "james";
     };
@@ -99,6 +112,13 @@ let
     };
     bad-channel = plan { channel = "nightly"; };
     unknown-field = plan { wallpaper = "blue"; };
+    # The plan format: this installer reads version 1; a newer plan is refused as a whole.
+    plan-v1 = plan { version = 1; };
+    plan-newer = plan {
+      version = 2;
+      wallpaper = "blue";
+    };
+    plan-version-invalid = plan { version = "1"; };
     bad-rev = plan { rev = "HEAD"; };
     # The installer's own revision installs offline as without `rev`; another one needs a network.
     iso-rev = plan { rev = isoRev; };
@@ -200,8 +220,8 @@ in
           installer.succeed("umount /tmp/target")
 
       with subtest("another disk with HinterOS partition labels is refused"):
-          # The system finds its disks by partition label; a second disk with the same labels (an old
-          # install, a USB stick) would be ambiguous, also for the partitioning script.
+          # The partitioning script finds the new partitions by label; a second disk with the same
+          # labels (an old install, a USB stick) would be ambiguous.
           installer.succeed("parted -s /dev/vdc mklabel gpt mkpart hinteros-root ext4 1MiB 100%")
           installer.succeed("udevadm settle")
           refused("ok", "other-hinteros-disk")
@@ -212,6 +232,47 @@ in
           # Every line says which phase it is in; validation is the system stage.
           assert all(l.get("phase") == "system" for l in lines), lines
           assert lines[-1]["failed_apps"] == [], lines[-1]
+          # Plugged in after the plan was checked, just before erasing (the test hook runs then):
+          # refused before the target is touched.
+          status, lines = run(
+              "ok",
+              "HINTEROS_INSTALL_ALLOW_BIOS=1 HINTEROS_INSTALL_BEFORE_WIPE="
+              "'parted -s /dev/vdc mklabel gpt mkpart hinteros-root ext4 1MiB 100% && udevadm settle'",
+              validate_only=False,
+          )
+          print("labels plugged in before erasing", status, lines)
+          assert status == 2 and lines[-1]["code"] == "other-hinteros-disk", lines[-1]
+          assert any(l["stage"] == "validate" and l["percent"] == 8 for l in lines), lines
+          assert not any(l["stage"] in ("partition", "packages", "build", "bootloader", "done") for l in lines), lines
+          assert 'LABEL="marker"' in installer.succeed("blkid /dev/vdb")
+          installer.succeed("test -z \"$(lsblk -nro NAME /dev/vdb | tail -n +2)\"")
+          installer.fail("mountpoint -q /mnt")
+          installer.succeed("wipefs -a /dev/vdc && udevadm settle")
+
+      with subtest("keepData: an install to keep, and no apps in the plan"):
+          refused("keep-no-install", "keep-no-install")
+          refused("keep-no-install", "keep-no-install", validate_only=False)
+          refused("keep-with-apps", "keep-data-field")
+
+      with subtest("--list-disks: lsblk's JSON, with `existing` on every disk"):
+          disks = json.loads(installer.succeed("hinteros-install --list-disks"))["blockdevices"]
+          byname = {d["name"]: d for d in disks}
+          assert byname["vdb"]["type"] == "disk" and byname["vdb"]["existing"] is None, byname
+          assert byname["vda"]["existing"] is None and byname["vda"]["mountpoints"], byname
+          assert byname["vdb"]["disk-seq"] == int(installer.succeed("cat /sys/class/block/vdb/diskseq")), byname
+          # A btrfs file system that cannot be mounted does not fail the listing, nor does a caller
+          # that cannot mount.
+          installer.succeed("parted -s /dev/vdc mklabel gpt mkpart hinteros-esp fat32 1MiB 100MiB mkpart hinteros-root btrfs 100MiB 100%")
+          installer.succeed("udevadm settle")
+          installer.succeed("mkfs.btrfs -q -f /dev/vdc2 && dd if=/dev/zero of=/dev/vdc2 bs=1M seek=1 count=300 conv=notrunc")
+          assert installer.succeed("blkid -p -o value -s TYPE /dev/vdc2").strip() == "btrfs"
+          installer.fail("mount -o ro /dev/vdc2 /mnt")
+          disks = json.loads(installer.succeed("hinteros-install --list-disks"))["blockdevices"]
+          assert {d["name"]: d for d in disks}["vdc"]["existing"] is None, disks
+          disks = json.loads(installer.succeed("runuser -u nobody -- hinteros-install --list-disks"))["blockdevices"]
+          assert {d["name"]: d for d in disks}["vdc"]["existing"] is None, disks
+          installer.fail("findmnt -rn | grep -q vdc")
+          installer.succeed("wipefs -a /dev/vdc2 /dev/vdc1 /dev/vdc && udevadm settle")
 
       with subtest("malformed fields"):
           refused("bad-hostname", "hostname-invalid")
@@ -219,6 +280,10 @@ in
           refused("unknown-app", "app-unknown")
           refused("bad-channel", "channel-invalid")
           refused("unknown-field", "unknown-field")
+          refused("plan-newer", "plan-newer")
+          refused("plan-version-invalid", "plan-version-invalid")
+          status, lines = run("plan-v1", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+          assert status == 0 and lines[-1]["stage"] == "done", lines
           refused("bad-rev", "rev-invalid")
 
       with subtest("plan.rev: the installer's own revision, or a newer one (online only)"):
@@ -285,5 +350,21 @@ in
           assert status == 2, status
           assert 'LABEL="marker"' in installer.succeed("blkid /dev/vdb")
           installer.fail("mountpoint -q /mnt")
+
+      with subtest("leftover mounts of an earlier run under /mnt do not make the disk in use"):
+          # Last: this replaces the marker. One file system mounted twice under /mnt, as the btrfs
+          # root of a failed run is (/mnt, /mnt/nix, ...): lsblk lists both on one device.
+          installer.succeed(
+              "parted -s /dev/vdb mklabel gpt mkpart leftover ext4 1MiB 100% && udevadm settle",
+              "mkfs.ext4 -q /dev/vdb1 && mkdir -p /mnt && mount /dev/vdb1 /mnt && mkdir -p /mnt/nix && mount /dev/vdb1 /mnt/nix",
+          )
+          status, lines = run("ok", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+          assert status == 0 and lines[-1]["stage"] == "done", lines
+          # Mounted anywhere else, it is in use.
+          installer.succeed("mkdir -p /tmp/target && mount /dev/vdb1 /tmp/target")
+          status, lines = run("ok", "HINTEROS_INSTALL_ALLOW_BIOS=1")
+          assert status == 2 and lines[-1]["code"] == "disk-in-use", lines
+          assert "/tmp/target" in lines[-1]["message"], lines[-1]
+          installer.succeed("umount /tmp/target && umount -R /mnt")
     '';
 }

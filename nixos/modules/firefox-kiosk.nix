@@ -1,15 +1,15 @@
-# Firefox for the TV apps (apps.md, "Firefox kiosk apps"; spike 8 item 3):
+# Firefox for the TV apps:
 #   - box-wide: the enterprise policies at /etc/firefox/policies/policies.json (telemetry off,
-#     DRM and VA-API prefs, the force-installed OSK extension, and on ESR the locked
-#     `xpinstall.signatures.required = false`). Firefox reads that file whichever binary runs, so
-#     a Firefox from a profile's app env gets them. No Firefox package is in the system for it
+#     DRM and VA-API prefs, the force-installed OSK extension and no other add-on, and on ESR the
+#     locked `xpinstall.signatures.required = false`). Firefox reads that file whichever binary runs,
+#     so a Firefox from a profile's app env gets them. No Firefox package is in the system for it
 #     (no `programs.firefox`); the OSK .xpi it names is a store path in the system closure.
 #   - per app env: `mkFirefox pkgs`, Firefox (ESR by default) wrapped with the autoConfig (the
 #     OSK's privileged address-bar reporter) and the `hinteros-session` native-messaging host
 #     (the nixpkgs wrapper points Firefox at its own lib/mozilla only), and `mkWrapper pkgs`, the
 #     `hinteros-firefox-kiosk` wrapper around it (a profile per app, see
 #     nixos/pkgs/firefox-kiosk.nix). app-env.nix passes `mkWrapper <env pkgs>` to the catalog as
-#     `box.firefoxKiosk`; box-wide (schema 1) apps use `wrapper` (= `mkWrapper pkgs`).
+#     `box.firefoxKiosk`; box-wide apps (test VMs) use `wrapper` (= `mkWrapper pkgs`).
 {
   config,
   lib,
@@ -63,7 +63,7 @@ let
       extraPrefsFiles = (old.extraPrefsFiles or [ ]) ++ [
         (p.writeText "firefox-autoconfig.js" autoConfig)
       ];
-      # The OSK extension's host manifest, in Firefox's own MOZ_SYSTEM_DIR (spike 8: the only
+      # The OSK extension's host manifest, in Firefox's own MOZ_SYSTEM_DIR (the only
       # system place the wrapped Firefox looks).
       nativeMessagingHosts = (old.nativeMessagingHosts or [ ]) ++ [ p.hinteros-session ];
     });
@@ -191,6 +191,10 @@ in
         SkipOnboarding = true;
         MoreFromMozilla = false;
       };
+      # No search box on about:home / about:newtab (the catalog's Firefox app starts there).
+      # Firefox runs no extension in its about: pages, so the OSK never opens for that box; the
+      # address bar (View: Ctrl+L and the on-screen keyboard) is the one place to type.
+      FirefoxHome = lib.mkDefault { Search = false; };
       # No "save password?" prompts (the controller cannot dismiss them reliably).
       PasswordManagerEnabled = lib.mkDefault false;
       OfferToSaveLogins = lib.mkDefault false;
@@ -218,13 +222,20 @@ in
           # Autoplay without a mouse click, for TV UIs.
           "media.autoplay.default" = lock 0;
         }
-        # Spike 8: on ESR this locked policy pref is enough for the unsigned OSK extension, so a
+        # On ESR this locked policy pref is enough for the unsigned OSK extension, so a
         # Firefox from any env gets it from this box-wide file.
         // lib.optionalAttrs (cfg.oskExtension == "esr-unsigned") {
           "xpinstall.signatures.required" = lock false;
         }
       );
-      ExtensionSettings = lib.mkIf (cfg.oskExtension != "off") {
+      # No add-on but the OSK: on ESR signatures are not checked (above), so a page must not be
+      # able to offer one.
+      ExtensionSettings = {
+        "*" = {
+          installation_mode = "blocked";
+        };
+      }
+      // lib.optionalAttrs (cfg.oskExtension != "off") {
         ${ext} = {
           installation_mode = "force_installed";
           install_url = "file://${oskXpi}";

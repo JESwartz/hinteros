@@ -18,7 +18,7 @@ rec {
 
   # Everything else the installer offers is downloaded during the install, so it needs a network.
   # Unfree apps are never on the ISO: Plex is built on the box, Steam is fetched from the cache
-  # (`cache = true`).
+  # (`delivery = "download"`).
   onlineOnly = filter (id: starter id != null && !entries.${id}.onIso) available;
 
   all = onIso ++ onlineOnly;

@@ -1,5 +1,4 @@
 # hinteros.lib.mkDevice: builds a device's nixosSystem from its state.json contents.
-# See hinteros-docs/design/device-config.md.
 { self, nixpkgs }:
 {
   # Decoded state.json (an attrset).
@@ -13,26 +12,25 @@
   # A checked-in device (`self.lib.devices.<selfFlake>`, the dev box) without a config dir: the
   # snapshot gets a generated device flake naming this repo by store path, whose
   # `nixosConfigurations.hinteros` is `self.lib.devices.<selfFlake> { state = <its state.json>; }`
-  # (spike 8 item 6). So /etc/hinteros on the box evaluates like any box's, app envs included, and
-  # a state.json that hinteros-system rewrites there (the v1 -> v2 migration) takes effect.
+  # So /etc/hinteros on the box evaluates like any box's, app envs included, and
+  # a state.json that hinteros-system rewrites there takes effect.
   selfFlake ? null,
   # Extra NixOS modules (hardware profiles, the dev box's extras).
   extraModules ? [ ],
-  # nixpkgs base: "unstable" or "stable".
+  # nixpkgs base: "unstable", the only one (HinterOS has no stable base).
   base ? state.base or "unstable",
 }:
 let
   inherit (nixpkgs) lib;
 
-  # TODO(stable-base): add a second nixpkgs input (the current NixOS release) and select it
-  # here. CI must then build `stable` on both bases.
+  # One base by design: unstable nixpkgs. state.json `base` stays, so any other value fails here.
   nixpkgsFor = {
     unstable = nixpkgs;
   };
 
   # This repo's source and every flake input below it. Kept with the system
   # (system.extraDependencies), so a GC never leaves the box unable to evaluate an app env
-  # offline (spike 8: otherwise only nixpkgs' source survives).
+  # offline (otherwise only nixpkgs' source survives).
   flakeSources = map (x: x.flake.outPath) (
     builtins.genericClosure {
       startSet = [

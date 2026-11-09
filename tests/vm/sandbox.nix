@@ -1,14 +1,18 @@
-# The app sandbox under cage (design/sandbox.md): apps.launch starts an app in the session
+# The app sandbox under cage: apps.launch starts an app in the session
 # daemon's bwrap sandbox. A probe app records from inside what it can reach: none of the
 # HinterOS sockets, the D-Bus buses, uinput, the compositor's Wayland socket or the real home;
 # the X display, pulse/native and a writable home of its own work. ~/Downloads is there only with
 # the `downloads` grant, /dev/input only with `gamepad`. An apps.set_permission opt-out applies on
 # the next launch, and a required permission cannot be denied. Sound: every app can play; only
 # an app with `mic` can record (the others get the play-only socket, pulse/play).
-# System calls (seccomp filter): keyrings, io_uring, TIOCSTI/TIOCLINUX, userfaultfd, perf, the new
-# mount API, ADDR_NO_RANDOMIZE, x32 and AF_PACKET fail with the filter's errno; i386 kills; a
-# user namespace with a mount and a nested bwrap still work. The same probe outside the sandbox
-# shows the kernel alone allows them. GPU: the render node (vgem) is there, the card nodes not.
+# System calls (seccomp filter): keyrings, io_uring, TIOCSTI/TIOCLINUX, userfaultfd, perf, the
+# new mount API, ADDR_NO_RANDOMIZE and AF_PACKET fail with the filter's errno; i386 kills; a user
+# namespace with a mount and a nested bwrap still work. The same probe outside the sandbox shows
+# the kernel alone allows them (this VM imports no hardening module: kernel.io_uring_disabled is
+# 0). x32 fails too, but this kernel has no x32 ABI and gives the same errno without the filter,
+# so the probe cannot tell the filter's rule for it apart: the daemon's unit tests
+# (sandbox/seccomp.rs) check that one.
+# GPU: the render node (vgem) is there, the card nodes not.
 { self, pkgs }:
 let
   # System call checks, `<check>=yes|no` (see the source).
@@ -56,7 +60,7 @@ let
         check run_hinteros other_in_run_hinteros
         check uinput test -e /dev/uinput
         check real_home test -e "$HOME/real-home-marker"
-        check other_app test -e /home/hinteros/.local/share/hinteros/sandbox/plain
+        check other_app test -e /home/hinteros-p1/.local/share/hinteros/sandbox/plain
         check bus test -e "$rt/bus"
         check system_bus test -e /run/dbus/system_bus_socket
         check wayland test -e "$rt/wayland-0"
@@ -95,7 +99,7 @@ in
     ];
 
     hinteros.apps = {
-      jellyfin.enable = false;
+      jellyfin-desktop.enable = false;
       youtube.enable = false;
       firefox.enable = false;
       probe = {
@@ -154,27 +158,27 @@ in
     import shlex
 
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
+    uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
     machine.wait_until_succeeds(f"test -S /run/user/{uid}/pulse/native")
     machine.wait_until_succeeds(f"test -S /run/user/{uid}/pulse/play")
-    home = "/home/hinteros"
+    home = "/home/hinteros-p1"
     sandboxes = f"{home}/.local/share/hinteros/sandbox"
 
     # What the probe must not find in its own home, and what only grants give it.
-    machine.succeed(f"runuser -u hinteros -- touch {home}/real-home-marker")
-    machine.succeed(f"runuser -u hinteros -- mkdir -p {home}/Downloads")
-    machine.succeed(f"runuser -u hinteros -- touch {home}/Downloads/marker")
+    machine.succeed(f"runuser -u hinteros-p1 -- touch {home}/real-home-marker")
+    machine.succeed(f"runuser -u hinteros-p1 -- mkdir -p {home}/Downloads")
+    machine.succeed(f"runuser -u hinteros-p1 -- touch {home}/Downloads/marker")
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "sandbox-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "sandbox-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
-        out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
         assert "error" not in replies[0], replies[0]
         return replies
@@ -196,7 +200,7 @@ in
         res = dict(line.split("=", 1) for line in machine.succeed(f"cat {out}").split())
         print(app, res)
         ok("apps.close", {"id": app})
-        machine.wait_until_fails("pgrep -u hinteros -f [h]interos-sandbox-probe", timeout=30)
+        machine.wait_until_fails("pgrep -u hinteros-p1 -f [h]interos-sandbox-probe", timeout=30)
         return res
 
     hidden = ["session_sock", "system_sock", "run_hinteros", "uinput", "real_home", "other_app",
@@ -218,14 +222,17 @@ in
             assert res[k] == ("yes" if v else "no"), (k, res)
 
     # The host has card and render nodes; outside the sandbox the kernel alone allows what the
-    # filter blocks (io_uring and x32 are off without it too).
+    # filter blocks, except x32: the kernel gives the same errno without it, so inside the
+    # sandbox that one proves nothing about the filter (see the header).
     machine.succeed("ls /dev/dri/card* && ls /dev/dri/renderD128")
     outside = dict(line.split("=", 1) for line in machine.succeed(
-        "runuser -u hinteros -- hinteros-seccomp-probe < /dev/null").split())
+        "runuser -u hinteros-p1 -- hinteros-seccomp-probe < /dev/null").split())
     print("outside the sandbox", outside)
+    kernel_off = ("x32_blocked",)
     for k in blocked:
-        if k not in ("io_uring_blocked", "x32_blocked"):
-            assert outside[k] == "no", (k, outside)
+        # A kernel with x32 again: the sandbox check proves the filter again, so drop it from
+        # kernel_off. (io_uring: the hardening module turns it off box-wide; this VM has none.)
+        assert outside[k] == ("yes" if k in kernel_off else "no"), (k, outside)
     assert outside["userns"] == "yes", outside
 
     # The plain app first: no permissions, so no Downloads, no /dev/input and no recording.
@@ -262,7 +269,7 @@ in
     expect(run("probe"), downloads=True, input=True, udev=True, record=True)
 
     # Outside the sandbox the play-only socket refuses recording and module loading too.
-    play = f"runuser -u hinteros -- env XDG_RUNTIME_DIR=/run/user/{uid} PULSE_SERVER=unix:/run/user/{uid}/pulse/play"
+    play = f"runuser -u hinteros-p1 -- env XDG_RUNTIME_DIR=/run/user/{uid} PULSE_SERVER=unix:/run/user/{uid}/pulse/play"
     machine.succeed(f"head -c 19200 /dev/zero | {play} pacat --playback --raw")
     machine.succeed(
         f"rm -f /tmp/rec.raw; {play} PULSE_PROP='pulse.server.type=x pipewire.client.access=unrestricted' "

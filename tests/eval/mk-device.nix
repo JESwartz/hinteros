@@ -3,32 +3,32 @@
 {
   self,
   pkgs,
-  nixpkgs ? self.inputs.nixpkgs,
 }:
 let
   inherit (pkgs) lib;
 
   good = {
-    schemaVersion = 1;
+    schemaVersion = 2;
+    base = "unstable";
+    stateVersion = "25.11";
     settings.ssh.enable = true;
-    apps = [ "steam" ];
-    profiles = [
-      {
-        id = "p1";
-        name = "T";
-        user = "tester";
-      }
-    ];
+    profiles = [ { id = "p1"; } ];
+    requirements = [ ];
+    services = [ ];
   };
 
   mk =
     state:
     self.lib.mkDevice {
       inherit state;
-      extraModules = [ { system.stateVersion = "25.11"; } ];
     };
 
   # Evaluates the failing assertion messages (as one string) of a state, or the eval error.
+  disk = {
+    layout = "gpt-esp-btrfs";
+    rootUuid = "11111111-2222-3333-4444-555555555555";
+    espUuid = "ABCD-1234";
+  };
   failures =
     state:
     let
@@ -43,26 +43,31 @@ let
   report = builtins.toFile "facter.json" "{}";
 
   c = (mk good).config;
-  good2 = {
-    schemaVersion = 2;
-    settings.ssh.enable = false;
-    settings.guest.enable = true;
+  good2 = good // {
+    settings = {
+      ssh.enable = false;
+      guest.enable = true;
+    };
     profiles = [
-      {
-        id = "p1";
-        user = "hinteros";
-      }
-      {
-        id = "p3";
-        user = "hinteros-p3";
-      }
+      { id = "p1"; }
+      { id = "p3"; }
     ];
     requirements = [ "graphics32" ];
-    services = [ ];
   };
   c2 = (mk good2).config;
   c2nog = (mk (good2 // { settings.guest.enable = false; })).config;
-  minimal = (mk { schemaVersion = 1; }).config;
+  minimal = (mk (removeAttrs good [ "settings" ])).config;
+  # A test VM's device: no state, box-wide apps.
+  boxSteam =
+    (self.lib.mkDevice {
+      state = null;
+      extraModules = [
+        {
+          system.stateVersion = "25.11";
+          hinteros.apps.steam.enable = true;
+        }
+      ];
+    }).config;
 
   # A device with a real hardware report: facter must not add a second DHCP client.
   withFixture =
@@ -70,7 +75,6 @@ let
     (self.lib.mkDevice {
       state = good;
       facterReport = f;
-      extraModules = [ { system.stateVersion = "25.11"; } ];
     }).config;
   noDhcp =
     f:
@@ -93,6 +97,30 @@ let
   ];
 
   results = lib.runTests {
+    # The fake Steam is for test VMs only (no state.json), never for a real device.
+    testFakeSteamNotOnDevices =
+      let
+        fakeFails =
+          state:
+          lib.any (a: !a.assertion && lib.hasPrefix "hinteros.fakeSteam" a.message)
+            (self.lib.mkDevice {
+              inherit state;
+              extraModules = [
+                { hinteros.fakeSteam.enable = true; }
+              ]
+              ++ lib.optional (state == null) { system.stateVersion = "25.11"; };
+            }).config.assertions;
+      in
+      {
+        expr = map fakeFails [
+          good
+          null
+        ];
+        expected = [
+          true
+          false
+        ];
+      };
     testSchema2Good = {
       expr = failures good2;
       expected = "";
@@ -100,86 +128,151 @@ let
     testSchema2Bad = {
       expr = map (s: lib.hasInfix s.msg (failures (good2 // s.patch))) [
         {
-          msg = "unknown field(s) in state: apps";
-          patch.apps = [ "youtube" ];
-        }
-        {
-          msg = "p3 must be user hinteros-p3";
-          patch.profiles = [
-            {
-              id = "p1";
-              user = "hinteros";
-            }
-            {
-              id = "p3";
-              user = "sam";
-            }
-          ];
-        }
-        {
           msg = "bad id";
-          patch.profiles = [
-            {
-              id = "admin";
-              user = "hinteros-admin";
-            }
-          ];
+          patch.profiles = [ { id = "admin"; } ];
         }
         {
           msg = "duplicate ids";
           patch.profiles = [
-            {
-              id = "p1";
-              user = "hinteros";
-            }
-            {
-              id = "p1";
-              user = "hinteros";
-            }
+            { id = "p1"; }
+            { id = "p1"; }
           ];
         }
         {
           msg = "1 to 8 accounts";
-          patch.profiles = map (n: {
-            id = "p${toString n}";
-            user = if n == 1 then "hinteros" else "hinteros-p${toString n}";
-          }) (lib.range 1 9);
+          patch.profiles = map (n: { id = "p${toString n}"; }) (lib.range 1 9);
         }
         {
           msg = "1 to 8 accounts";
           patch.profiles = [ ];
         }
+        # Each reported as a state problem, not a raw evaluation error.
         {
-          msg = "unknown field(s) in profiles[]: name";
-          patch.profiles = [
+          msg = "settings.admin.user deploy is reserved";
+          patch.settings.admin.user = "deploy";
+        }
+        {
+          msg = "settings.admin.user hinteros-p2 is reserved";
+          patch.settings.admin.user = "hinteros-p2";
+        }
+        {
+          msg = "settings.admin.user hinteros-system is reserved";
+          patch.settings.admin.user = "hinteros-system";
+        }
+        {
+          msg = "settings.admin.user must be 1 to 32 lowercase letters";
+          patch.settings.admin.user = "Bad Name";
+        }
+        {
+          msg = "settings.admin.user must be 1 to 32 lowercase letters";
+          patch.settings.admin.user = 5;
+        }
+        {
+          msg = "settings.ssh must be an object";
+          patch.settings.ssh = true;
+        }
+        {
+          msg = "settings.ssh.enable must be a bool";
+          patch.settings.ssh.enable = "yes";
+        }
+        {
+          msg = "settings must be an object";
+          patch.settings = [ ];
+        }
+        {
+          msg = "requirements must be strings";
+          patch.requirements = [ 1 ];
+        }
+        {
+          msg = "services must be strings";
+          patch.services = [ { id = "x"; } ];
+        }
+        {
+          msg = "settings.hostname must be 1 to 63 lowercase letters";
+          patch.settings.hostname = "Living Room";
+        }
+      ];
+      expected = lib.genList (_: true) 15;
+    };
+    # Ids a later release may add: left out with a warning (a box on an older channel evaluates
+    # the newer state.json), not refused.
+    testUnknownIdsWarn =
+      let
+        newer = good2 // {
+          requirements = [
+            "graphics32"
+            "opengl"
+          ];
+          services = [ "youtube" ];
+        };
+        cfg = (mk newer).config;
+      in
+      {
+        expr = [
+          (failures newer)
+          (lib.any (lib.hasInfix "unknown box feature(s) in requirements, left out: opengl") cfg.warnings)
+          (lib.any (lib.hasInfix "unknown service id(s), left out: youtube") cfg.warnings)
+          (lib.elem "opengl" cfg.hinteros.boxFeatures)
+          (lib.elem "youtube" cfg.hinteros.catalog.services)
+        ];
+        expected = [
+          ""
+          true
+          true
+          false
+          false
+        ];
+      };
+    testRequiredFields = {
+      expr = map (f: lib.hasInfix "${f} must be" (failures (removeAttrs good2 [ f ]))) [
+        "base"
+        "stateVersion"
+        "requirements"
+        "services"
+      ];
+      expected = [
+        true
+        true
+        true
+        true
+      ];
+    };
+    # Unknown fields are ignored (a box on an older channel evaluates a newer state.json).
+    testUnknownFieldsIgnored =
+      let
+        newer = good2 // {
+          apps = [ "youtube" ];
+          wifi = { };
+          settings = good2.settings // {
+            bluetooth = { };
+            guest.pin = "1234";
+            cleanup.future = true;
+          };
+          profiles = [
             {
               id = "p1";
-              user = "hinteros";
+              user = "sam";
               name = "Dev";
             }
           ];
-        }
-        {
-          msg = "unknown box feature(s) in requirements: opengl";
-          patch.requirements = [ "opengl" ];
-        }
-        {
-          msg = "unknown service id(s): youtube";
-          patch.services = [ "youtube" ];
-        }
-        {
-          msg = "unknown field(s) in settings.guest: pin";
-          patch.settings.guest.pin = "1234";
-        }
-      ];
-      expected = lib.genList (_: true) 10;
-    };
-    # Schema 2: accounts, the guest, box features from `requirements`, apps per profile.
+        };
+      in
+      {
+        expr = [
+          (failures newer)
+          (mk newer).config.hinteros.session.user
+        ];
+        expected = [
+          ""
+          "hinteros-p1"
+        ];
+      };
+    # Accounts, the guest, box features from `requirements`, apps per profile.
     testSchema2Accounts = {
       expr = [
-        (map (a: a.user) c2.hinteros.profiles.accounts)
+        (map (a: a.id) c2.hinteros.profiles.accounts)
         c2.users.users.hinteros-p3.uid
-        (c2.users.users.hinteros.uid or null)
+        c2.users.users.hinteros-p1.uid
         c2.users.users.hinteros-p3.extraGroups
         c2.users.users.hinteros-p3.homeMode
         c2.users.users.hinteros-guest.uid
@@ -190,27 +283,26 @@ let
       ];
       expected = [
         [
-          "hinteros"
-          "hinteros-p3"
+          "p1"
+          "p3"
         ]
         20003
-        null
+        20001
         [ "hinteros" ]
         "700"
         20000
         [
-          "hinteros"
+          "hinteros-p1"
           "hinteros-p3"
           "hinteros-guest"
         ]
-        "hinteros"
+        "hinteros-p1"
         true
         false
       ];
     };
     testSchema2Apps = {
       expr = [
-        c2.hinteros.appEnv.perProfile
         c2.hinteros.daemon.session.settings.apps
         (c2.hinteros.daemon.session.settings ? steam && c2.hinteros.daemon.session.settings.steam ? path)
         c2.hinteros.boxFeatures
@@ -236,7 +328,6 @@ let
         c2.programs.firefox.enable
       ];
       expected = [
-        true
         { profile = "/run/hinteros/apps/%u"; }
         false
         [ "graphics32" ]
@@ -247,24 +338,6 @@ let
         false
         false
         true
-        false
-      ];
-    };
-    # Schema 1 with `profiles: []` (the installer, every pre-M7 box) is p1 = hinteros.
-    testSchema1EmptyProfiles = {
-      expr = [
-        minimal.hinteros.profiles.accounts
-        minimal.hinteros.session.user
-        minimal.hinteros.appEnv.perProfile
-      ];
-      expected = [
-        [
-          {
-            id = "p1";
-            user = "hinteros";
-          }
-        ]
-        "hinteros"
         false
       ];
     };
@@ -334,7 +407,6 @@ let
         generic =
           (self.lib.mkDevice {
             state = good;
-            extraModules = [ { system.stateVersion = "25.11"; } ];
           }).config;
       in
       {
@@ -349,20 +421,24 @@ let
           [ ]
         ];
       };
+    testNoBoxWideAppsWithState = {
+      expr = lib.attrNames (lib.filterAttrs (_: a: a.enable) c2.hinteros.apps);
+      expected = [ ];
+    };
     testGoodHasNoFailures = {
       expr = failures good;
       expected = "";
     };
-    # Schema 1, box-wide Steam: stock pkgs.steam installed, its box features on, no programs.steam.
+    # Box-wide Steam: stock pkgs.steam installed, its box features on, no programs.steam.
     testSteamEnabled = {
       expr = [
-        c.programs.steam.enable
-        c.hinteros.boxFeatures
-        c.hardware.graphics.enable32Bit
-        c.hardware.steam-hardware.enable
-        c.services.pipewire.alsa.support32Bit
-        (lib.any (p: lib.getName p == "steam") c.environment.systemPackages)
-        (lib.hasSuffix "/bin/steam" c.hinteros.daemon.session.settings.steam.path)
+        boxSteam.programs.steam.enable
+        boxSteam.hinteros.boxFeatures
+        boxSteam.hardware.graphics.enable32Bit
+        boxSteam.hardware.steam-hardware.enable
+        boxSteam.services.pipewire.alsa.support32Bit
+        (lib.any (p: lib.getName p == "steam") boxSteam.environment.systemPackages)
+        (lib.hasSuffix "/bin/steam" boxSteam.hinteros.daemon.session.settings.steam.path)
       ];
       expected = [
         false
@@ -379,7 +455,7 @@ let
     };
     testSessionUser = {
       expr = c.hinteros.session.user;
-      expected = "tester";
+      expected = "hinteros-p1";
     };
     testSshEnabled = {
       expr = [
@@ -402,80 +478,29 @@ let
       expected = [
         false
         false
-        "hinteros"
+        "hinteros-p1"
       ];
     };
     testBadSchemaVersion = {
-      expr = lib.hasInfix "unsupported schemaVersion 3" (failures (good // { schemaVersion = 3; }));
-      expected = true;
+      expr =
+        map
+          (
+            v:
+            lib.hasInfix "unsupported schemaVersion ${toString v}" (failures (good // { schemaVersion = v; }))
+          )
+          [
+            1
+            3
+          ];
+      expected = [
+        true
+        true
+      ];
     };
     testMissingSchemaVersion = {
       expr = lib.hasInfix "unsupported schemaVersion null" (
         failures (removeAttrs good [ "schemaVersion" ])
       );
-      expected = true;
-    };
-    testUnknownTopLevel = {
-      expr = lib.hasInfix "unknown field(s) in state: wifi" (failures (good // { wifi = { }; }));
-      expected = true;
-    };
-    testUnknownSetting = {
-      expr = lib.hasInfix "unknown field(s) in settings: bluetooth" (
-        failures (
-          good
-          // {
-            settings = good.settings // {
-              bluetooth = { };
-            };
-          }
-        )
-      );
-      expected = true;
-    };
-    # A tombstoned catalog id is known: a state may still list it and it does nothing.
-    testTombstoneAccepted = {
-      expr =
-        let
-          cat = {
-            gone = {
-              status = "removed";
-              name = "Gone";
-            };
-          };
-          sys = nixpkgs.lib.nixosSystem {
-            system = "x86_64-linux";
-            modules = [
-              (self + "/nixos/modules")
-              self.nixosModules.overlay
-              (import (self + "/nixos/modules/catalog.nix") {
-                entries = cat;
-                cacheableUnfree = [ ];
-                index = pkgs.hello;
-              })
-              {
-                hinteros.state = {
-                  schemaVersion = 1;
-                  apps = [ "gone" ];
-                };
-                system.stateVersion = "25.11";
-              }
-            ];
-          };
-          msgs = map (a: a.message) (
-            builtins.filter (a: !a.assertion && lib.hasPrefix "hinteros state:" a.message) sys.config.assertions
-          );
-        in
-        [
-          msgs
-          (sys.config.hinteros.apps ? gone)
-        ];
-      expected = [
-        [ ]
-        false
-      ];
-    };
-    testUnknownApp = {
-      expr = lib.hasInfix "unknown app id(s): bogus" (failures (good // { apps = [ "bogus" ]; }));
       expected = true;
     };
     testUnavailableBase = {
@@ -490,58 +515,6 @@ let
         )).success;
       expected = false;
     };
-    # Default apps are exactly the selected ones once a state exists; the rest stay off.
-    testDefaultAppsFollowState = {
-      expr =
-        let
-          a =
-            (mk (
-              good
-              // {
-                apps = [
-                  "youtube"
-                  "firefox"
-                ];
-              }
-            )).config.hinteros.apps;
-        in
-        lib.mapAttrs (_: x: x.enable) (
-          lib.getAttrs [ "jellyfin" "youtube" "crunchyroll" "firefox" "plex-htpc" "moonlight" ] a
-        );
-      expected = {
-        jellyfin = false;
-        youtube = true;
-        crunchyroll = false;
-        firefox = true;
-        plex-htpc = false;
-        moonlight = false;
-      };
-    };
-    testOnlineOnlyApps = {
-      expr =
-        let
-          a =
-            (mk (
-              good
-              // {
-                apps = [
-                  "plex-htpc"
-                  "moonlight"
-                ];
-              }
-            )).config;
-        in
-        [
-          a.hinteros.apps.plex-htpc.enable
-          a.hinteros.apps.moonlight.enable
-          a.hinteros.unfreeAllowlist
-        ];
-      expected = [
-        true
-        true
-        [ "plex-htpc" ]
-      ];
-    };
     testInstallerFields =
       let
         c2 =
@@ -553,7 +526,7 @@ let
                 hostname = "livingroom";
                 admin.user = "james";
               };
-              disk.layout = "gpt-esp-ext4";
+              inherit disk;
             }
           )).config;
       in
@@ -564,6 +537,8 @@ let
           c2.hinteros.admin.enable
           c2.hinteros.admin.user
           c2.hinteros.admin.hashedPasswordFile
+          # Root never takes a hash from the service's directory (it could write one there).
+          (c2.system.activationScripts ? hinteros-admin-hash)
           c2.users.users.james.isNormalUser
           c2.fileSystems."/".device
           c2.boot.loader.systemd-boot.enable
@@ -573,9 +548,10 @@ let
           "livingroom"
           true
           "james"
-          "/var/lib/hinteros/admin-password-hash"
+          "/var/lib/hinteros-root/admin-password-hash"
+          false
           true
-          "/dev/disk/by-partlabel/hinteros-root"
+          "/dev/disk/by-uuid/11111111-2222-3333-4444-555555555555"
           true
         ];
       };
@@ -583,7 +559,7 @@ let
     # systemd-boot (the disk layout) turns it on, with the boot-health gate.
     testInstalledBoxBootCounting =
       let
-        i = (mk (good // { disk.layout = "gpt-esp-ext4"; })).config;
+        i = (mk (good // { inherit disk; })).config;
         v = (mk good).config;
       in
       {
@@ -603,25 +579,107 @@ let
         ];
       };
     testUnknownDiskLayout = {
-      expr = lib.hasInfix "unsupported disk.layout" (failures (good // { disk.layout = "zfs"; }));
-      expected = true;
-    };
-    testUnknownAdminField = {
-      expr = lib.hasInfix "unknown field(s) in settings.admin: password" (
+      expr = lib.hasInfix "unsupported disk.layout" (
         failures (
           good
           // {
-            settings = good.settings // {
-              admin = {
-                user = "a";
-                password = "x";
-              };
+            disk = disk // {
+              layout = "zfs";
             };
           }
         )
       );
       expected = true;
     };
+    testDiskUuidsRequired = {
+      expr = [
+        (lib.hasInfix "disk.rootUuid must be a string" (
+          failures (good // { disk = removeAttrs disk [ "rootUuid" ]; })
+        ))
+        (lib.hasInfix "disk.espUuid must be a string" (
+          failures (
+            good
+            // {
+              disk = disk // {
+                espUuid = 5;
+              };
+            }
+          )
+        ))
+      ];
+      expected = [
+        true
+        true
+      ];
+    };
+    # The subvolumes, by UUID, with the options the installer's disko config mounts them with.
+    testDiskLayout =
+      let
+        fs = (mk (good // { inherit disk; })).config.fileSystems;
+        subvol = name: {
+          device = "/dev/disk/by-uuid/${disk.rootUuid}";
+          fsType = "btrfs";
+          options = [
+            "subvol=${name}"
+            "compress=zstd:1"
+            "noatime"
+          ];
+        };
+        # NixOS adds x-initrd.mount to what the initrd mounts.
+        shape = f: {
+          inherit (f) device fsType;
+          options = lib.remove "x-initrd.mount" f.options;
+        };
+      in
+      {
+        expr = [
+          (shape fs."/")
+          (shape fs."/nix")
+          (shape fs."/home")
+          (shape fs."/srv")
+          (shape fs."/boot")
+        ];
+        expected = [
+          (subvol "root")
+          (subvol "nix")
+          (subvol "home")
+          (subvol "srv")
+          {
+            device = "/dev/disk/by-uuid/${disk.espUuid}";
+            fsType = "vfat";
+            options = [ "umask=0077" ];
+          }
+        ];
+      };
+    # The device flake's outputs (nixos/lib/device-outputs.nix): the report unless deferred, an
+    # optional extra.nix, the config dir as the snapshot.
+    testDeviceOutputs =
+      let
+        out = d: (self.lib.deviceOutputs d).nixosConfigurations.hinteros.config;
+        full = ./fixtures/device-outputs;
+        deferred = ./fixtures/device-outputs-deferred;
+        bare = ../vm/fixtures/config-sync;
+      in
+      {
+        expr = [
+          (out full).networking.hostName
+          ((out full).hardware.facter.reportPath == full + "/facter.json")
+          (out full).hinteros.deviceConfig.configDir
+          (out full).hinteros.maintenance.keepGenerations
+          (out deferred).hardware.facter.reportPath
+          (out bare).hardware.facter.reportPath
+          (out bare).hinteros.maintenance.keepGenerations
+        ];
+        expected = [
+          "fixture"
+          true
+          full
+          3
+          null
+          null
+          5
+        ];
+      };
     testFacterReportPath = {
       expr =
         (self.lib.mkDevice {

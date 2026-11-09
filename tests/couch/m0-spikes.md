@@ -3,24 +3,29 @@
 Run on the dev box (mini PC #1) on the TV, with no keyboard attached once the session is up.
 For every item record **pass/fail + notes** (and the TV, resolution and pad used).
 Covers spike 1 (Flutter under gamescope), spike 3 (Steam and the launcher together),
-spike 4 (InputPlumber) and spike 5 (on-screen keyboard). Background: `hinteros-docs/spikes/`.
+spike 4 (InputPlumber) and spike 5 (on-screen keyboard).
 
 ## 0. Deploy to the dev box
 
+This is the M0 setup: NixOS installed by hand, ext4 mounted by label (`devices/devbox/hardware.nix`).
+Never deploy `.#devbox` to a box the HinterOS installer made (btrfs subvolumes mounted by UUID,
+`state.json` with `disk`): that generation does not boot there. Such a box updates from its
+channel.
+
 1. Put your SSH public key in `hinteros.dev.deployKeys` in `devices/devbox/default.nix` (the `deploy`
-   user; empty by default). The session user `hinteros` has no SSH login and no sudo. Never commit keys that are not yours.
+   user; empty by default). The session user `hinteros-p1` has no SSH login and no sudo. Never commit keys that are not yours.
 2. First install: NixOS from any ISO on the box, then copy its
    `hardware-configuration.nix` ideas into `devices/devbox/hardware.nix`
    (the `fileSystems` entries there are placeholders). Generate the facter report on the box
    with `nixos-facter -o facter.json` and pass it as `facterReport` in `devices/devbox/default.nix` (M1).
 3. Deploy from the desktop as the separate `deploy` user (key-only SSH, wheel, passwordless sudo, nix
-   trusted; the session user `hinteros` has no sudo, not even here):
+   trusted; the session user `hinteros-p1` has no sudo, not even here):
    `nixos-rebuild switch --flake .#devbox --target-host deploy@<box> --sudo`
    (older nixos-rebuild: `--use-remote-sudo`). Undo a bad deploy with
    `ssh deploy@<box> sudo nixos-rebuild switch --rollback` or pick the previous generation at boot.
 4. Debug env for the launcher: `hinteros.session.environment.HINTEROS_FPS = "1";` in
    `devices/devbox/hardware.nix` (frame-rate overlay) and redeploy, or for one run
-   `ssh` in and start the session by hand. `GDK_BACKEND=wayland` is already the default on gamescope.
+   `ssh` in and start the session by hand. The session sets `GDK_BACKEND=x11` under gamescope (see `nixos/README.md`).
 5. The session daemon starts Steam with `-silent` (`steam.autostart` in `devices/devbox/hardware.nix`; never under a reaper). Log in to Steam once (pad-driven terminal or Remote Play) and install 2 small games (one native, one Proton). Daemon log: `journalctl --user -u hinteros-session` as the session user; its config is the store path in the unit's `ExecStart` (`--config`).
 
 ## 1. Spike 1: launcher under gamescope (HINTEROS_FPS=1)
@@ -61,5 +66,5 @@ Needs `steam -silent` running, and the launcher as the home app.
 
 ## Result
 
-Record the verdicts back in the spike notes (`hinteros-docs/spikes/`), including the decisions
+Record the verdicts in the spike notes, including the decisions
 (Flutter vs. fallback, input layer, Guide-chord policy).

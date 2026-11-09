@@ -12,7 +12,7 @@
     # Component repos. Their packages come in through their overlays (see overlays.default).
     # scripts/dev-override picks these up by input name.
     hinteros-launcher = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-launcher.git";
+      url = "git+https://git.hinteros.org/hinteros-launcher.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -21,16 +21,16 @@
       };
     };
     hinteros-daemon = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-daemon.git";
+      url = "git+https://git.hinteros.org/hinteros-daemon.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
-    # The App Store catalog (design/catalog.md): app entries, Store index and vendor terms, locked
+    # The App Store catalog: app entries, Store index and vendor terms, locked
     # per release like the other inputs.
     hinteros-catalog = {
-      url = "git+https://justsomeshed.com/JSwartz/HinterOS/hinteros-catalog.git";
+      url = "git+https://git.hinteros.org/hinteros-catalog.git";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
@@ -53,7 +53,7 @@
 
       overlayModule = import ./nixos/modules/overlay.nix { inherit self; };
 
-      # The catalog (design/catalog.md) as a keyed module: importing it twice is harmless.
+      # The catalog as a keyed module: importing it twice is harmless.
       catalogModule = {
         key = "hinteros:catalog";
         imports = [
@@ -93,16 +93,43 @@
 
       lib = {
         # The catalog's ids with the little the update check needs to say which apps a new
-        # revision adds or retires: `{ <id> = { name; kind; status; statusReason; }; }`.
-        # hinteros-system evaluates it against a target revision (`nix eval --json --option
-        # allow-import-from-derivation false "<input url>&rev=<rev>#lib.catalogIds"`), so it must
-        # stay a plain attribute set that needs no build.
+        # revision adds or retires: `{ <id> = { name; kind; status; statusReason; }; }` (the
+        # catalog's own output). hinteros-system evaluates it against a target revision (`nix eval
+        # --json --option allow-import-from-derivation false "<input url>&rev=<rev>#lib.catalogIds"`),
+        # so it must stay a plain attribute set that needs no build. After 1.0 a 1.0 daemon reads it
+        # from every later revision: keep these fields, only add new ones (readers ignore unknown
+        # fields and treat an unknown `kind` as not an app).
+        # Derived here from the catalog's entries (the catalog flake keeps no views of its own).
         catalogIds = nixpkgs.lib.mapAttrs (_: e: {
-          inherit (e) name status statusReason;
+          inherit (e)
+            name
+            kind
+            status
+            statusReason
+            ;
         }) hinteros-catalog.catalog;
+
+        # What the installer reads from a newer revision it installs (hinteros-install, a plan's
+        # `rev`): per catalog entry the id, whether the installer offers it, its box features and
+        # its vendor terms. An installer installs revisions newer than itself for years, so this
+        # is a compatibility interface: fields may be added (installers ignore them); `version`
+        # changes only when an older installer would misread the entries, and it refuses then.
+        # Plain data that needs no build, as catalogIds.
+        installerCatalog = {
+          version = 1;
+          entries = nixpkgs.lib.mapAttrsToList (id: e: {
+            inherit id;
+            boxFeatures = e.boxFeatures or [ ];
+            offered = (e.kind or "app") == "app" && e.status == "available" && (e.starter or null) != null;
+            terms = if (e.terms or null) == null then null else { inherit (e.terms) version title; };
+          }) hinteros-catalog.catalog;
+        };
 
         # mkDevice builds a device from its state.json; see nixos/lib/mk-device.nix.
         mkDevice = import ./nixos/lib/mk-device.nix { inherit self nixpkgs; };
+
+        # What a device flake outputs, given its config dir; see nixos/lib/device-outputs.nix.
+        deviceOutputs = import ./nixos/lib/device-outputs.nix { inherit self; };
 
         # Checked-in devices as functions of their state (mkDevice `selfFlake`).
         devices.devbox = import ./devices/devbox { inherit self; };
@@ -202,7 +229,7 @@
         installer-ui = import ./tests/vm/installer-ui.nix { inherit self pkgs; };
         installer-save-log = import ./tests/vm/installer-save-log.nix { inherit self pkgs; };
         hardening = import ./tests/vm/hardening.nix { inherit self pkgs; };
-        wifi-iwd-migration = import ./tests/vm/wifi-iwd-migration.nix { inherit self pkgs; };
+        wifi-iwd = import ./tests/vm/wifi-iwd.nix { inherit self pkgs; };
         tv-apps = import ./tests/vm/tv-apps.nix { inherit self pkgs; };
         sandbox = import ./tests/vm/sandbox.nix { inherit self pkgs; };
         sandbox-apps = import ./tests/vm/sandbox-apps.nix { inherit self pkgs; };
@@ -213,19 +240,19 @@
         system-escalation = import ./tests/vm/system-escalation.nix { inherit self pkgs; };
         system-authz = import ./tests/vm/system-authz.nix { inherit self pkgs; };
         system-jobs = import ./tests/vm/system-jobs.nix { inherit self pkgs; };
+        system-update = import ./tests/vm/system-update.nix { inherit self pkgs; };
+        bootstrap-channel = import ./tests/vm/bootstrap-channel.nix { inherit self pkgs; };
         polkit-agent = import ./tests/vm/polkit-agent.nix { inherit self pkgs; };
         session-restart = import ./tests/vm/session-restart.nix { inherit self pkgs; };
         store-install = import ./tests/vm/store-install.nix { inherit self pkgs; };
         profile-apps-system = import ./tests/vm/profile-apps-system.nix { inherit self pkgs; };
         profile-apps = import ./tests/vm/profile-apps.nix { inherit self pkgs; };
-        apps-migration = import ./tests/vm/apps-migration.nix { inherit self pkgs; };
         profiles-greeter = import ./tests/vm/profiles-greeter.nix { inherit self pkgs; };
         profiles-switch = import ./tests/vm/profiles-switch.nix { inherit self pkgs; };
         profiles-pin = import ./tests/vm/profiles-pin.nix { inherit self pkgs; };
         profiles-isolation = import ./tests/vm/profiles-isolation.nix { inherit self pkgs; };
         profiles-lifecycle = import ./tests/vm/profiles-lifecycle.nix { inherit self pkgs; };
         profiles-lock = import ./tests/vm/profiles-lock.nix { inherit self pkgs; };
-        profiles-migration = import ./tests/vm/profiles-migration.nix { inherit self pkgs; };
         apps-box-features = import ./tests/vm/apps-box-features.nix { inherit self pkgs; };
         guest = import ./tests/vm/guest.nix { inherit self pkgs; };
         install-offline = import ./tests/vm/install-offline.nix { inherit self pkgs; };
@@ -252,10 +279,16 @@
         time-zone = import ./tests/vm/time-zone.nix { inherit self pkgs; };
         install-validation = import ./tests/vm/install-validation.nix { inherit self pkgs; };
         install-newer = import ./tests/vm/install-newer.nix { inherit self pkgs; };
+        install-keep-data = import ./tests/vm/install-keep-data.nix { inherit self pkgs; };
         apps = import ./tests/eval/apps.nix { inherit self pkgs; };
         runtime-eval = import ./tests/eval/runtime.nix { inherit self pkgs; };
         mk-device = import ./tests/eval/mk-device.nix { inherit self pkgs; };
         hardening-eval = import ./tests/eval/hardening.nix { inherit self pkgs; };
+        server-eval = import ./tests/eval/server.nix { inherit self pkgs; };
+        server-jellyfin = import ./tests/vm/server-jellyfin.nix { inherit self pkgs; };
+        server-network = import ./tests/vm/server-network.nix { inherit self pkgs; };
+        server-api = import ./tests/vm/server-api.nix { inherit self pkgs; };
+        server-jellyfin-signin = import ./tests/vm/server-jellyfin-signin.nix { inherit self pkgs; };
         daemon-eval = import ./tests/eval/daemon.nix { inherit self pkgs; };
         installer-iso-eval = import ./tests/eval/installer-iso.nix { inherit self pkgs; };
         offline-inputs = import ./tests/eval/offline-inputs.nix { inherit self pkgs; };

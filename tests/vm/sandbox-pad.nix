@@ -1,4 +1,4 @@
-# Controller input and the app sandbox (design/sandbox.md, step 4): while HinterOS UI is in front
+# Controller input and the app sandbox: while HinterOS UI is in front
 # (a PIN, a password), no sandboxed app may read the controller. An app with the `gamepad`
 # permission gets /dev/input; there it can open InputPlumber's virtual pads (uaccess), and the
 # physical pads are grabbed and hidden by InputPlumber. The session daemon puts every pad in
@@ -74,7 +74,7 @@ in
     ];
 
     hinteros.apps = {
-      jellyfin.enable = false;
+      jellyfin-desktop.enable = false;
       youtube.enable = false;
       firefox.enable = false;
       padreader = {
@@ -104,21 +104,23 @@ in
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("inputplumber.service")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    uid = machine.succeed("id -u hinteros-p1").strip()
+    # The user manager first: asking it before its bus is up fails, not waits.
+    machine.wait_for_unit(f"user@{uid}.service")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
-    events = "/home/hinteros/.local/share/hinteros/sandbox/padreader/events.txt"
+    events = "/home/hinteros-p1/.local/share/hinteros/sandbox/padreader/events.txt"
 
     def hello():
         return {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                "params": {"api_version": "0.18", "client": {"name": "pad-test", "version": "0"}}}
+                "params": {"api_version": "1.0", "client": {"name": "pad-test", "version": "0"}}}
 
     def ok(method, params=None):
         msgs = [hello(), {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}]
         payload = "".join(json.dumps(m) + "\n" for m in msgs)
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:{sock}"
-        out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         reply = next(json.loads(l) for l in out.splitlines() if l.strip() and json.loads(l).get("id") == 1)
         assert "error" not in reply, reply
         return reply["result"]
@@ -159,7 +161,7 @@ in
     sub = [hello(), {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"events": ["input_nav"]}}]
     payload = "".join(json.dumps(m) + "\n" for m in sub)
     cmd = f"(printf %s {shlex.quote(payload)}; sleep 600) | socat -t600 - UNIX-CONNECT:{sock} > /tmp/nav.txt"
-    machine.succeed(f"systemd-run --uid=hinteros --unit=navlog -E PATH=/run/current-system/sw/bin sh -c {shlex.quote(cmd)}")
+    machine.succeed(f"systemd-run --uid=hinteros-p1 --unit=navlog -E PATH=/run/current-system/sw/bin sh -c {shlex.quote(cmd)}")
 
     with subtest("the app in front reads the pad"):
         ok("apps.launch", {"id": "padreader"})

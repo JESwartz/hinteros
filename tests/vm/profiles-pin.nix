@@ -1,5 +1,4 @@
-# PINs (profiles.md "PINs and locking", "PAM: where the PIN and the kill are enforced",
-# "Authority"; DECISIONS D9, D14, H2, J4; VM `profiles-pin`). Greeter mode; p1 = `hinteros`
+# PINs (VM `profiles-pin`). Greeter mode; p1 = `hinteros-p1`
 # (James, the admin profile, locked, PIN 2468), p2 = `hinteros-p2` (Sam, locked, PIN 1357), p3 =
 # `hinteros-p3`, a spare account (no metadata), and the admin account `hinteros-admin`.
 #   - greetd's PAM stack, probed over greetd's IPC as root: it refuses root, the admin account,
@@ -68,7 +67,7 @@ profiles.mkTest {
         return json.loads(machine.succeed(f"python3 /etc/hinteros-test/greetd.py {user} {' '.join(answers)}"))
 
     def pin_state(pid):
-        return json.loads(machine.succeed(f"cat /var/lib/hinteros/pins/{pid}.state"))
+        return json.loads(machine.succeed(f"cat /var/lib/hinteros/pins/{pid}.state"))["data"]
 
     def try_pin(target, pin):
         g = greeter(target, pin)
@@ -106,25 +105,25 @@ profiles.mkTest {
     with subtest("the picker: three free tries, then a doubling wait"):
         for _ in range(3):
             o = try_pin("p2", "0000")
-            assert o["ok"] is False and not o.get("locked_seconds"), o
+            assert o["ok"] is False and not o.get("locked_s"), o
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o.get("locked_seconds") == 1, o
+        assert o["ok"] is False and o.get("locked_s") == 1, o
         wait_unlocked("p2")
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 2, o
+        assert o["ok"] is False and o["locked_s"] == 2, o
         wait_unlocked("p2")
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 4, o
+        assert o["ok"] is False and o["locked_s"] == 4, o
         wait_unlocked("p2")
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 8, o
+        assert o["ok"] is False and o["locked_s"] == 8, o
         # During the lock even the right PIN is refused, with the time left.
         o = try_pin("p2", "1357")
-        assert o["ok"] is False and 0 < o["locked_seconds"] <= 8, o
+        assert o["ok"] is False and 0 < o["locked_s"] <= 8, o
         # profiles.list shows the wait; the admin profile never has one. (The public view, which
         # the picker reads, is not republished after a failure in PAM: a daemon gap, see the
         # M7 VM test report. The picker has the wait from greeter_result.)
-        p = {x["id"]: x for x in sys_ok("hinteros", "profiles.list")["profiles"]}
+        p = {x["id"]: x for x in sys_ok("hinteros-p1", "profiles.list")["profiles"]}
         assert p["p2"]["locked_until"], p
         assert not p["p1"]["locked_until"], p
         assert pin_state("p2")["failures"] == 7, pin_state("p2")
@@ -138,7 +137,7 @@ profiles.mkTest {
         wait_unlocked("p2")
         # The eighth failure doubles again (16 s), it does not start over at 1 s.
         o = try_pin("p2", "0000")
-        assert o["ok"] is False and o["locked_seconds"] == 16, o
+        assert o["ok"] is False and o["locked_s"] == 16, o
         wait_unlocked("p2")
         g = greeter("p2", "1357")
         assert g["outcomes"][-1]["ok"] is True, g
@@ -147,10 +146,10 @@ profiles.mkTest {
 
     with subtest("the admin PIN: no wait, but 10 wrong tries a boot, then only a reboot helps"):
         def rename_p1(pin):
-            return sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": pin})
+            return sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "admin_pin": pin})
 
         def pam_verify(pin):
-            return machine.succeed(f"printf '{pin}\\0' | env PAM_USER=hinteros hinteros-system pin verify || true").strip()
+            return machine.succeed(f"printf '{pin}\\0' | env PAM_USER=hinteros-p1 hinteros-system pin verify || true").strip()
 
         locked_out = {"pin": "admin", "reboot_required": True}
         # API (any profile's session) and the greeter's PAM helper share one count; no wait.
@@ -160,7 +159,7 @@ profiles.mkTest {
         for _ in range(3):
             assert pam_verify("0000") == "hinteros:wrong"
         assert not {x["id"]: x for x in public()["profiles"]}["p1"]["locked_until"]
-        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p1.tries").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /var/lib/hinteros/pins/p1.tries").strip() == "600 hinteros-system"
         # The tenth: refused until a reboot, even the right PIN, on every path.
         r = rename_p1("0000")
         assert r["error"]["code"] == 3016 and r["error"]["data"] == locked_out, r
@@ -188,17 +187,17 @@ profiles.mkTest {
         machine.wait_for_unit("hinteros-system.service")
         assert pam_verify("0000") == "hinteros:wrong"
         enter("p2", "hinteros-p2", "1357")
-        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "James", "pin": "2468"}) == {}
-        assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p1.tries"))["failures"] == 0
+        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "James", "admin_pin": "2468"}) == {}
+        assert json.loads(machine.succeed("cat /var/lib/hinteros/pins/p1.tries"))["data"]["failures"] == 0
 
     with subtest("admin actions need the admin PIN, from any profile"):
         # Rename another profile: no PIN, its own PIN, the admin PIN.
         r = sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim"})
         assert r["error"]["code"] == 3016 and r["error"]["data"] == {"pin": "admin"}, r
-        r = sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": "1357"})
+        r = sess("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "admin_pin": "1357"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         assert profiles_file()["profiles"]["p1"]["name"] == "James"
-        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "pin": "2468"}) == {}
+        assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p1", "name": "Jim", "admin_pin": "2468"}) == {}
         assert profiles_file()["profiles"]["p1"]["name"] == "Jim"
         # Renaming yourself needs nothing.
         assert sess_ok("hinteros-p2", "system.profiles.rename", {"id": "p2", "name": "Sammy"}) == {}
@@ -211,11 +210,11 @@ profiles.mkTest {
         # Guest on/off and the starter set: the admin PIN (no job without it).
         r = sess("hinteros-p2", "system.guest.set", {"enabled": True, "admin_pin": "9753"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
-        r = sess("hinteros-p2", "system.starter_set.set", {"ids": [], "pin": "9753"})
+        r = sess("hinteros-p2", "system.starter_set.set", {"ids": [], "admin_pin": "9753"})
         assert r["error"]["code"] == 3016 and r["error"]["data"]["pin"] == "admin", r
         # Removing the admin profile: never.
         rev = sys_ok("hinteros-p2", "settings.get")["revision"]
-        r = sess("hinteros-p2", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "pin": "2468", "revision": rev})
+        r = sess("hinteros-p2", "system.profiles.remove", {"id": "p1", "confirm_id": "p1", "admin_pin": "2468", "revision": rev})
         assert r["error"]["code"] == -32602 and r["error"]["data"]["reason"] == "admin", r
         assert [j for j in sys_ok("hinteros-p2", "jobs.list")["jobs"] if j["state"] == "running"] == []
 
@@ -240,16 +239,16 @@ profiles.mkTest {
         unlocked = "env PAM_USER=hinteros-p2 hinteros-system pin unlocked"
         # Locked, with a PIN, no token: not without the PIN.
         machine.fail(unlocked)
-        assert sess_ok("hinteros-p2", "system.profiles.switch", {"id": "p2"}) == {}
+        assert sys_ok("hinteros-p2", "profiles.switch", {"id": "p2"}) == {}
         hint = json.loads(machine.succeed("cat /run/hinteros/switch.json"))
         assert hint["token"]["user"] == "hinteros-p2", hint
-        assert machine.succeed("stat -c '%a %U' /run/hinteros/switch.json").strip() == "600 root"
+        assert machine.succeed("stat -c '%a %U' /run/hinteros/switch.json").strip() == "600 hinteros-system"
         # A token is bound to its user.
-        machine.fail("env PAM_USER=hinteros hinteros-system pin unlocked")
+        machine.fail("env PAM_USER=hinteros-p1 hinteros-system pin unlocked")
         machine.succeed(unlocked)
         machine.fail(unlocked)
         # Another one, expired.
-        assert sess_ok("hinteros-p2", "system.profiles.switch", {"id": "p2"}) == {}
+        assert sys_ok("hinteros-p2", "profiles.switch", {"id": "p2"}) == {}
         machine.succeed(
             "t=$(($(date +%s) - 1)); jq -c --argjson t $t '.expires = $t | .token.expires = $t' "
             "/run/hinteros/switch.json > /run/hinteros/switch.new && mv /run/hinteros/switch.new /run/hinteros/switch.json"

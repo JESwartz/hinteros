@@ -46,6 +46,16 @@ fi
 EOF
 chmod +x "$work/status"
 export PROMOTE_STATUS_CMD=$work/status
+# The ISO build stub (PROMOTE_ISO_CMD <repo> <rev>): a store-like directory with iso/*.iso.
+printf '#!%s\n' "$BASH" >"$work/iso-build"
+cat >>"$work/iso-build" <<'EOF'
+d=$(dirname "$0")/iso-out/$2
+mkdir -p "$d/iso"
+printf 'fake iso of %s\n' "$2" >"$d/iso/hinteros-installer.iso"
+printf '%s\n' "$d"
+EOF
+chmod +x "$work/iso-build"
+export PROMOTE_ISO_CMD=$work/iso-build
 export PROMOTE_REPO_URL=$work/origin.git
 
 git init -q --bare "$work/origin.git"
@@ -171,8 +181,8 @@ echo none >"$work/ci"
 expect_refused "use --skip-ci" beta --bootstrap --key "$work/k1" --security none
 pass "no CI statuses: refused, pointing at --skip-ci"
 echo pending >"$work/ci"
-expect_refused "CI is 'pending'" beta --bootstrap --key "$work/k1" --security none
-pass "pending CI: refused"
+expect_refused "CI is still running" beta --bootstrap --key "$work/k1" --security none
+pass "pending CI (still running): refused, no skip offered"
 echo failure >"$work/ci"
 expect_refused "CI is 'failure'" beta --bootstrap --key "$work/k1" --security none
 pass "red CI: refused"
@@ -382,6 +392,24 @@ o merge-base --is-ancestor "$stable1" "$stable2" || die "not a fast-forward"
 box_verifies "$stable2" "$stable1" || die "stable 0.7.0 does not verify against the old stable's signers"
 pass "stable --bump minor: beta 0.6.3 -> 0.7.0, fast-forward, verifies against the old stable's signers"
 
+# --- the release ISO and its signed tag ---------------------------------------------------------
+expect_refused "do not apply to a tag" tag --security none --yes --key "$work/k1"
+pass "tag with --security: refused"
+expect_ok tag --dry-run --key "$work/k1"
+grep -q "would run: git push .* refs/tags/v0.7.0" "$work/out" || die "tag dry run: no push shown"
+[ -z "$(o tag -l v0.7.0)" ] || die "the dry run made a tag"
+pass "tag --dry-run: the ISO and its checksums shown, nothing tagged"
+expect_ok tag --yes --key "$work/k1"
+[ "$(o rev-parse 'v0.7.0^{commit}')" = "$stable2" ] || die "v0.7.0 does not name stable 0.7.0"
+o show "$stable2:release/allowed_signers" \
+  | grep -v '^#' | sed 's/^\([^ ]*\) /\1 namespaces="git" /' >"$work/tag.signers"
+o -c gpg.ssh.allowedSignersFile="$work/tag.signers" verify-tag v0.7.0 2>/dev/null || die "v0.7.0 does not verify"
+o tag -l --format='%(contents:body)' v0.7.0 >"$work/SHA256SUMS"
+(cd "$work/iso-out/$stable2/iso" && sha256sum -c --strict "$work/SHA256SUMS" >/dev/null) || die "the tag's SHA256SUMS do not match the ISO"
+pass "tag: v0.7.0 on stable 0.7.0, signed by a release key, its body is the ISO's SHA256SUMS"
+expect_refused "already has the tag v0.7.0" tag --yes --key "$work/k1"
+pass "tag again: refused"
+
 # --- hotfix --------------------------------------------------------------------------------
 dev fetch -q origin
 dev checkout -q -b hotfix/bad "$stable2"
@@ -578,6 +606,15 @@ mo show "$mstable:release/notes.md" | grep -qx "## 0.1.0" || die "menus: the old
 [ -z "$(mo diff --name-only "$mbeta" "$mstable" | grep -vx -e release/version -e release/notes.md)" ] \
   || die "menus: stable changes more than the version and notes"
 pass "menus: release beta to stable, notes edited before signing, the beta's 0.7.1 kept"
+
+# The stable release has no tag: the menus offer its ISO and tag (the only choice), then yes.
+run_menus '1\ny\n' --skip-ci --key "$work/k1"
+grep -q "1) Build the ISO of stable 0.7.1 and sign its tag v0.7.1" "$work/out" || {
+  cat "$work/out"
+  die "menus: the tag is not offered"
+}
+[ "$(mo rev-parse 'v0.7.1^{commit}')" = "$mstable" ] || die "menus: v0.7.1 does not name stable 0.7.1"
+pass "menus: the ISO and signed tag of the stable release"
 
 run_menus '' --skip-ci --key "$work/k1"
 grep -q "nothing to release" "$work/out" || die "menus: nothing to release is not said"

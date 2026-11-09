@@ -128,7 +128,7 @@ let
   # runs through it too, so both see the same files. A wrapper, not fixed paths: the uid is only
   # known at login.
   #
-  # The display mode is the box's, not the user's (profiles.md "Per profile vs. shared"):
+  # The display mode is the box's, not the user's:
   # `display.keep` saves it for every profile (hinteros-system writes /run/hinteros/gamescope-modes
   # from runtime.json, also at boot), and every session (a profile, a fresh one, the guest whose
   # home is new at every boot, the picker) starts gamescope with it, so a switch never makes the
@@ -235,16 +235,27 @@ let
     [ sessionStart ] ++ compositorPrefix ++ compositorCommand.${cfg.compositor} ++ homeCommand
   );
 
-  # The greeter (profiles.md, "The pieces"). greetd runs `greeterLink` as `hinteros-greeter` at
+  # The greeter. greetd runs `greeterLink` as `hinteros-greeter` at
   # boot and whenever a profile's session ends. `hinteros-session greet` takes the fast path
   # into a profile (greetd IPC, no UI) or execs `pickerLink`: the compositor with the launcher in
   # greeter mode, and the session daemon in greeter mode as a child of the greeter session (so it
   # inherits GREETD_SOCK). The profile session it starts is always `sessionLink`.
   daemonExe = lib.getExe config.hinteros.daemon.session.package;
+  # No unit supervises the greeter's daemon, so this does (as Restart=on-failure, RestartSec=2 for
+  # a profile's): it starts again after a failure while the compositor, this script's PID after
+  # the exec, runs. Without it a crash would leave the picker on screen with no input and no login,
+  # and the greeter session would never end for greetd to start a new one.
   greeterDaemon = pkgs.writeShellScript "hinteros-greeter-daemon" ''
-    ${
-      lib.optionalString (cfg.compositor == "cage") "DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 "
-    }${daemonExe} --greeter --config ${config.hinteros.daemon.sessionConfigFile} &
+    compositor=$$
+    (
+      while :; do
+        ${
+          lib.optionalString (cfg.compositor == "cage") "DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 "
+        }${daemonExe} --greeter --config ${config.hinteros.daemon.sessionConfigFile} && exit 0
+        sleep 2
+        kill -0 "$compositor" 2>/dev/null || exit 0
+      done
+    ) &
     exec "$@"
   '';
   pickerCommand = lib.escapeShellArgs (
@@ -283,7 +294,7 @@ in
 
     user = lib.mkOption {
       type = lib.types.str;
-      default = "hinteros";
+      default = "hinteros-p1";
       description = "User that is logged in automatically and owns the session.";
     };
 

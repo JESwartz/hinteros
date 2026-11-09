@@ -1,4 +1,4 @@
-# The vendor's release data (hinteros-docs/design/distribution.md, "What boxes trust"), read from
+# The vendor's release data, read from
 # the repo's `release/` directory: the version, the keys that sign release commits and the
 # binary cache keys. Part of `nixosModules.default` only (flake.nix), not of `./default.nix` or
 # the individual modules, so a config that picks modules one by one does not inherit this

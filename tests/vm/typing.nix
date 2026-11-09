@@ -6,7 +6,7 @@
 # keys.action enter, then checks that the page received exactly those values. Also checks that
 # the daemon started the on-screen keyboard process (hinteros-osk, a second launcher
 # entrypoint), that osk.show / osk.hide answer, and that the OSK Firefox extension is active in
-# the kiosk profile and a focused text field makes the daemon show the keyboard (osk_visibility).
+# the kiosk profile and a focused text field makes the daemon show the keyboard (osk_changed).
 # Not covered here (the daemon's own tests do): keyboard-profile arrow keys from a fake
 # InputPlumber, gamescope's input method, the overlay (cage has neither).
 { self, pkgs }:
@@ -62,7 +62,7 @@ in
 
       # Only Firefox: it is the keyboard-profile app whose window the typing goes to.
       hinteros.apps = {
-        jellyfin.enable = false;
+        jellyfin-desktop.enable = false;
         youtube.enable = false;
         crunchyroll.enable = false;
         firefox.kiosk.url = "http://127.0.0.1:8000/";
@@ -90,18 +90,18 @@ in
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("typing-page.service")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
+    uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
 
     def rpc(*msgs, wait=2):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.18", "client": {"name": "typing-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "typing-test", "version": "0"}}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, *msgs))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
-        out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
         assert "error" not in replies[0], replies[0]
         return replies
@@ -116,10 +116,10 @@ in
 
     # The daemon started the on-screen keyboard (a second entrypoint of the launcher).
     # Its argv is the launcher binary with --osk, its process name hinteros-osk.
-    machine.wait_until_succeeds("pgrep -u hinteros -x hinteros-osk || pgrep -u hinteros -f -- ' --osk'", timeout=60)
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -x hinteros-osk || pgrep -u hinteros-p1 -f -- ' --osk'", timeout=60)
     machine.wait_until_succeeds(
         "journalctl _SYSTEMD_USER_UNIT=hinteros-session.service --no-pager "
-        "| grep -E 'handshake done client=hinteros-osk .*api_version=0.18'",
+        "| grep -E 'handshake done client=hinteros-osk .*api_version=1.0'",
         timeout=120,
     )
     # It is summoned over the API (the controller chord needs a pad). cage has no overlay, so
@@ -127,31 +127,31 @@ in
     assert call("osk.show") == {"visible": True}
     assert call("osk.hide") == {"visible": False}
 
-    # A subscriber for osk_visibility, to see the automatic keyboard (Firefox extension -> native
+    # A subscriber for osk_changed, to see the automatic keyboard (Firefox extension -> native
     # host -> osk.sock -> daemon; Firefox ESR with the extension force-installed by policy).
     sub = [
         {"jsonrpc": "2.0", "id": 0, "method": "hello",
-         "params": {"api_version": "0.18", "client": {"name": "typing-test-events", "version": "0"}}},
-        {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"events": ["osk_visibility"]}},
+         "params": {"api_version": "1.0", "client": {"name": "typing-test-events", "version": "0"}}},
+        {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"events": ["osk_changed"]}},
     ]
     sub_payload = "".join(json.dumps(m) + "\n" for m in sub)
     machine.succeed(
-        f"runuser -u hinteros -- sh -c {shlex.quote(f'(printf %s {shlex.quote(sub_payload)}; sleep 3000) | socat - UNIX-CONNECT:{sock} > /tmp/osk-events.log 2>&1 &')}"
+        f"runuser -u hinteros-p1 -- sh -c {shlex.quote(f'(printf %s {shlex.quote(sub_payload)}; sleep 3000) | socat - UNIX-CONNECT:{sock} > /tmp/osk-events.log 2>&1 &')}"
         " ; sleep 1"
     )
 
     # Firefox on the test page (the firefox app: kiosk profile, fullscreen by the compositor), text field focused.
     call("apps.launch", {"id": "firefox"})
-    machine.wait_until_succeeds("pgrep -u hinteros -f -- '--profile'", timeout=60)
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f -- '--profile'", timeout=60)
     machine.wait_for_text("typing test", timeout=timedelta(seconds=180))
     machine.wait_until_succeeds("grep -F '\"focus\"' /tmp/posted.log | grep -F '\"t\"'", timeout=60)
     machine.screenshot("typing-before")
 
     # The extension is installed and active in the kiosk profile (policy force-install on ESR),
-    # which is in the app's sandbox home (design/sandbox.md)...
+    # which is in the app's sandbox home...
     machine.wait_until_succeeds(
         "jq -e '.addons[] | select(.id == \"hinteros-osk@hinteros\" and .active == true)' "
-        "/home/hinteros/.local/share/hinteros/sandbox/firefox/.local/share/hinteros/firefox/firefox/extensions.json",
+        "/home/hinteros-p1/.local/share/hinteros/sandbox/firefox/.local/share/hinteros/firefox/firefox/extensions.json",
         timeout=120,
     )
     # ...and the text field's focus reached the daemon, which showed the keyboard by itself.

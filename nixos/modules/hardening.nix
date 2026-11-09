@@ -1,5 +1,4 @@
-# Hardening baseline (hinteros-docs/design/threat-model.md, "What must change ... before a box is
-# given out"; system-api.md, "Required changes elsewhere"). On with the session. Anything that
+# Hardening baseline: what a box needs before it is given out. On with the session. Anything that
 # would make the session user (so: any game or web page) root, or let it reach the nix daemon
 # as a trusted user, is a build error unless `hinteros.dev.enable` is set, and that option only
 # ever adds a separate `deploy` user, never privileges for the session user.
@@ -46,15 +45,34 @@ let
   inDeviceGroups = lib.filter (u: lib.intersectLists deviceGroups (groupsOf u) != [ ]) (
     lib.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users)
   );
+  # The only groups a profile account may have (an allowlist: disk, kvm, tty and the like are
+  # root for every game). `input` never (asserted on its own); device groups only without the
+  # greeter (or in dev, where the device-group check is off too).
+  profileGroupsOk = [
+    cfg.daemon.group
+  ]
+  ++ lib.optionals (dev || !greeterOn) (lib.remove "input" deviceGroups);
+  extraProfileGroups = lib.unique (
+    lib.concatMap (u: lib.subtractLists ([ "input" ] ++ profileGroupsOk) (groupsOf u)) profileUsers
+  );
 
-  # The networks that may reach sshd (hinteros.ssh.allowFrom), split by family.
-  sshFrom6 = lib.filter (lib.hasInfix ":") cfg.ssh.allowFrom;
-  sshFrom4 = lib.filter (s: !lib.hasInfix ":" s) cfg.ssh.allowFrom;
-  sshPorts = map toString config.services.openssh.ports;
-  isCidr =
-    s:
-    builtins.match "[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}" s != null
-    || builtins.match "[0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3}" s != null;
+  # The networks that may reach sshd (hinteros.ssh.allowFrom).
+  localNets = import ../lib/local-networks.nix { inherit lib; };
+  sshRule = {
+    from = cfg.ssh.allowFrom;
+    proto = "tcp";
+    ports = config.services.openssh.ports;
+    comment = "hinteros-ssh";
+  };
+  # sshd ports the firewall opens to every source on every interface (a port opened on one
+  # interface, such as tailscale0 by server.nix, is that interface's choice).
+  sshOpenToAll =
+    let
+      fw = config.networking.firewall;
+    in
+    lib.filter (
+      p: lib.elem p fw.allowedTCPPorts || lib.any (r: r.from <= p && p <= r.to) fw.allowedTCPPortRanges
+    ) config.services.openssh.ports;
 
   # sudo-rs, and classic sudo should a device module turn it back on.
   sudoRuleOptions = lib.concatMap (r: lib.concatMap (c: c.options or [ ]) r.commands) (
@@ -65,7 +83,7 @@ in
 {
   options.hinteros = {
     admin = {
-      enable = lib.mkEnableOption "an optional admin account (wheel, sudo always asks for its password, never NOPASSWD). Off by default; the first-boot wizard sets the password (M9)";
+      enable = lib.mkEnableOption "an optional admin account (wheel, sudo always asks for its password, never NOPASSWD). Off by default; the installer writes the password hash";
 
       user = lib.mkOption {
         type = lib.types.str;
@@ -76,7 +94,7 @@ in
       hashedPasswordFile = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        description = "File holding the admin's hashed password (mkpasswd output). Never commit a password; required when the admin is enabled.";
+        description = "File holding the admin's hashed password (mkpasswd output), applied at every activation (users are immutable with the admin). Never commit a password; required when the admin is enabled.";
       };
 
     };
@@ -102,8 +120,11 @@ in
         "::/0"
       ];
       description = ''
-        Source networks (IPv4 and IPv6 CIDR) the firewall lets reach sshd. Default: the local
-        networks only (RFC 1918, IPv4 link-local, IPv6 ULA and link-local). sshd's own
+        Source networks (IPv4 and IPv6 CIDR) the firewall lets reach sshd, and the servers'
+        `lan` ports (server.nix). Default: the local networks only (RFC 1918, IPv4 link-local,
+        IPv6 ULA and link-local). Static: unlike the `lan` app filter (daemon.nix), it does not
+        follow the on-link networks, so a home network on public IPv4 or a client on a global
+        IPv6 address is not let in until its prefix is added here. sshd's own
         `openFirewall` stays off, so nothing else opens its port. `[ "0.0.0.0/0" "::/0" ]` opens
         it to all networks.
       '';
@@ -181,6 +202,10 @@ in
           {
             assertion = lib.all (u: !(lib.elem "input" (groupsOf u))) profileUsers;
             message = "hinteros hardening: no profile account may be in group input, even in dev: it reads every keyboard (the admin password). Ctrl+Super+D is the hinteros-keyboard unit's.";
+          }
+          {
+            assertion = extraProfileGroups == [ ];
+            message = "hinteros hardening: profile accounts in groups they must not have (${lib.concatStringsSep ", " extraProfileGroups}), even in dev; allowed: ${lib.concatStringsSep ", " profileGroupsOk}.";
           }
           {
             assertion = dev || !greeterOn || inDeviceGroups == [ ];
@@ -304,39 +329,24 @@ in
       (lib.mkIf config.services.openssh.enable {
         assertions = [
           {
-            assertion = lib.all isCidr cfg.ssh.allowFrom;
+            assertion = lib.all localNets.isCidr cfg.ssh.allowFrom;
             message = "hinteros hardening: hinteros.ssh.allowFrom: every entry must be an IPv4 or IPv6 CIDR (e.g. 192.168.0.0/16, fe80::/10).";
+          }
+          {
+            assertion = !config.services.openssh.openFirewall && sshOpenToAll == [ ];
+            message = "hinteros hardening: the SSH port is open to all sources (services.openssh.openFirewall or networking.firewall allowed ports${
+              lib.optionalString (sshOpenToAll != [ ]) ": ${lib.concatMapStringsSep ", " toString sshOpenToAll}"
+            }); set hinteros.ssh.allowFrom instead.";
           }
         ];
 
         # The port is open only to hinteros.ssh.allowFrom, never to all sources.
         networking.firewall = lib.mkMerge [
           (lib.mkIf config.networking.nftables.enable {
-            extraInputRules = lib.concatStrings [
-              (lib.optionalString (sshFrom4 != [ ]) ''
-                ip saddr { ${lib.concatStringsSep ", " sshFrom4} } tcp dport { ${lib.concatStringsSep ", " sshPorts} } accept comment "hinteros-ssh"
-              '')
-              (lib.optionalString (sshFrom6 != [ ]) ''
-                ip6 saddr { ${lib.concatStringsSep ", " sshFrom6} } tcp dport { ${lib.concatStringsSep ", " sshPorts} } accept comment "hinteros-ssh"
-              '')
-            ];
+            extraInputRules = localNets.nftRules sshRule;
           })
           (lib.mkIf (!config.networking.nftables.enable) {
-            extraCommands = lib.concatStrings (
-              lib.concatMap (
-                port:
-                map (
-                  src:
-                  "iptables -w -A nixos-fw -p tcp --dport ${port} -s ${src} -m comment --comment hinteros-ssh -j nixos-fw-accept\n"
-                ) sshFrom4
-                ++ lib.optionals config.networking.enableIPv6 (
-                  map (
-                    src:
-                    "ip6tables -w -A nixos-fw -p tcp --dport ${port} -s ${src} -m comment --comment hinteros-ssh -j nixos-fw-accept\n"
-                  ) sshFrom6
-                )
-              ) sshPorts
-            );
+            extraCommands = localNets.iptablesRules (sshRule // { ipv6 = config.networking.enableIPv6; });
           })
         ];
 
@@ -364,6 +374,10 @@ in
           extraGroups = [ "wheel" ];
           inherit (adminCfg) hashedPasswordFile;
         };
+        # Every account is declared. With mutable users NixOS applies hashedPasswordFile only when
+        # it creates the account, so a new hash in the file would never reach /etc/shadow. (Not
+        # without the admin: NixOS then refuses a system where no wheel user can log in.)
+        users.mutableUsers = lib.mkDefault false;
         security.sudo-rs.enable = true;
       })
 

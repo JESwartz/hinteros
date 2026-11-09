@@ -1,7 +1,7 @@
 # Runtime settings services (NetworkManager, BlueZ, PipeWire, logind/polkit) and maintenance:
 # the services are up, the session user may manage the network and sleep/restart/power off but
-# not do anything privileged, boot-complete.target is gated on the launcher and daemon, and the
-# low-disk warning fires.
+# not do anything privileged, boot-complete.target is gated on the launcher and daemon and starts
+# every boot (so the clean-up may run), and the low-disk warning fires.
 { self, pkgs }:
 (pkgs.extend self.overlays.default).testers.runNixOSTest {
   name = "hinteros-runtime";
@@ -23,7 +23,7 @@
 
   testScript = ''
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher")
 
     machine.wait_for_unit("NetworkManager.service")
     # bluetoothd only starts with a controller present (ConditionPathIsDirectory=/sys/class/bluetooth),
@@ -32,7 +32,7 @@
     machine.succeed("test -e /etc/systemd/system/bluetooth.target.wants/bluetooth.service || systemctl is-enabled bluetooth.service")
     machine.succeed("grep -q '^Experimental *= *true' /etc/bluetooth/main.conf")
     machine.succeed("grep -q '^UserspaceHID *= *true' /etc/bluetooth/input.conf")
-    machine.wait_for_unit("pipewire.socket", "hinteros")  # socket-activated
+    machine.wait_for_unit("pipewire.socket", "hinteros-p1")  # socket-activated
     machine.succeed("systemctl cat wireplumber.service | grep -q wireplumber")
 
     # logind: power button sleeps, lid ignored.
@@ -40,7 +40,7 @@
     assert "HandlePowerKey=suspend" in out and "HandleLidSwitch=ignore" in out, out
 
     # polkit, as seen from a process of the active console session.
-    pid = machine.succeed("pgrep -u hinteros -f hinteros-launcher | head -n1").strip()
+    pid = machine.succeed("pgrep -u hinteros-p1 -f hinteros-launcher | head -n1").strip()
     def check(action, pid=pid):
         return machine.execute(f"pkcheck --action-id {action} --process {pid}")[0]
 
@@ -76,9 +76,17 @@
     ):
         assert check(action, other) != 0, f"other users must not be allowed {action}"
 
-    # Boot counting gate: launcher and daemon are up, so the boot is good.
-    machine.succeed("systemctl start boot-complete.target")
+    # Boot counting gate: launcher and daemon are up, so the boot is good. The target is part of
+    # every boot (no systemd-bless-boot here, as on a blessed entry or firmware without
+    # LoaderBootCountPath).
+    machine.wait_for_unit("boot-complete.target")
     machine.succeed("systemctl is-active hinteros-boot-health.service")
+    # So the clean-up runs (it is Requisite= on the target): its ExecStart ran when the start time
+    # changed. The result does not matter (nix-collect-garbage may fail on the VM's host store).
+    started = "systemctl show -p ExecMainStartTimestampMonotonic --value nix-gc.service"
+    before = machine.succeed(started).strip()
+    machine.execute("systemctl start nix-gc.service")
+    assert machine.succeed(started).strip() != before, "nix-gc did not run"
 
     # Maintenance: low-disk warning at priority 4, GC trims to N generations first.
     machine.succeed("systemctl start hinteros-disk-check.service")

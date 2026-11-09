@@ -77,6 +77,10 @@ let
       hostname ? "hinteros",
       user ? "admin",
       ssh ? false,
+      # hinteros-install reads them with blkid. The representative device has placeholders; an
+      # install builds what depends on them (fstab, the initrd), see isoVariants.
+      rootUuid ? "00000000-0000-0000-0000-000000000000",
+      espUuid ? "0000-0000",
       apps,
     }:
     self.lib.mkDevice {
@@ -92,15 +96,13 @@ let
           admin.user = user;
           guest.enable = true;
         };
-        disk.layout = "gpt-esp-ext4";
-        profiles = [
-          {
-            id = "p1";
-            user = "hinteros";
-          }
-        ];
+        disk = {
+          layout = "gpt-esp-btrfs";
+          inherit rootUuid espUuid;
+        };
+        profiles = [ { id = "p1"; } ];
         requirements = lib.sort lib.lessThan (
-          lib.unique (lib.concatMap (id: config.hinteros.catalog.entries.${id}.box or [ ]) apps)
+          lib.unique (lib.concatMap (id: config.hinteros.catalog.entries.${id}.boxFeatures or [ ]) apps)
         );
         services = [ ];
       };
@@ -126,11 +128,17 @@ let
   # only in small configuration derivations.
   defaultDevice = mkVariant { apps = appIds.onIso; };
 
-  # Devices an offline install can produce, with and without ssh.
+  # Devices an offline install can produce, with and without ssh. Their UUIDs differ from the
+  # default device's, as a real disk's do: the file system list is in /etc and in the initrd, so an
+  # install rebuilds both.
   # The build-time inputs of what they build are put on the ISO (nixos/lib/offline-inputs.nix).
   offlineInputs = import ../lib/offline-inputs.nix { inherit lib pkgs; };
   toplevelOf = d: d.config.system.build.toplevel;
-  isoVariants = map (v: toplevelOf (mkVariant v)) (
+  otherDisk = {
+    rootUuid = "11111111-1111-1111-1111-111111111111";
+    espUuid = "1111-1111";
+  };
+  isoVariants = map (v: toplevelOf (mkVariant (v // otherDisk))) (
     [
       { apps = [ ]; }
       {
@@ -156,6 +164,8 @@ let
       {
         hostname = "livingroom";
         user = "james";
+        rootUuid = "22222222-2222-2222-2222-222222222222";
+        espUuid = "2222-2222";
         apps = [ ];
       }
       {
@@ -264,10 +274,24 @@ let
             label = "hinteros-root";
             size = "100%";
             content = {
-              type = "filesystem";
-              format = "ext4";
-              mountpoint = "/";
-              mountOptions = [ "noatime" ];
+              type = "btrfs";
+              extraArgs = [ "-f" ];
+              # The same options as nixos/modules/disk.nix.
+              subvolumes =
+                lib.mapAttrs
+                  (_: mountpoint: {
+                    inherit mountpoint;
+                    mountOptions = [
+                      "compress=zstd:1"
+                      "noatime"
+                    ];
+                  })
+                  {
+                    root = "/";
+                    nix = "/nix";
+                    home = "/home";
+                    srv = "/srv";
+                  };
             };
           };
         };
@@ -357,7 +381,8 @@ let
         if [ -n "$src" ] && [ -b "$src" ]; then refuse_disks="$refuse_disks $(disk_of "$src")"; fi
       done
       if [ -e /dev/hinteros-target ]; then refuse_disks="$refuse_disks $(readlink -f /dev/hinteros-target)"; fi
-      for src in $(findmnt -rno SOURCE | grep '^/dev/' || true); do
+      # -v: a btrfs subvolume's source without its [/subvolume] part.
+      for src in $(findmnt -rnvo SOURCE | grep '^/dev/' || true); do
         mp=$(findmnt -rno TARGET "$src" | head -n1 || true)
         case "$mp" in /mnt|/mnt/*) refuse_disks="$refuse_disks $(disk_of "$src")" ;; esac
       done
@@ -474,16 +499,19 @@ let
   # `back` (alias `installer`): from the tty2 console back to the installer screens on tty1. If the
   # UI is not running (it exited, or crashed) it is started again first; if tty1 does not come to
   # the front (cage holds the VT in graphics mode and the switch request was lost) the UI is
-  # restarted, which takes the VT.
+  # restarted, which takes the VT. Never while hinteros-install runs: the UI starts it in the UI's
+  # own unit, so a restart would kill the install part-way (the lock is the one each install holds).
   backCommand = pkgs.writeShellApplication {
     name = "back";
     runtimeInputs = [
       pkgs.kbd
       pkgs.systemd
       pkgs.coreutils
+      pkgs.util-linux
     ];
     text = ''
       active() { [ "$(cat /sys/class/tty/tty0/active)" = tty1 ]; }
+      installing() { ! flock -n -s /run/hinteros-install.lock true 2>/dev/null; }
       if ${
         lib.boolToString (cfg.ui.command != null)
       } && ! systemctl is-active --quiet cage-tty1.service; then
@@ -495,6 +523,11 @@ let
         sleep 0.5
       done
       if ${lib.boolToString (cfg.ui.command != null)}; then
+        if installing; then
+          echo "An install runs. The installer screens do not restart during an install."
+          echo "Press Ctrl+Alt+F1 to go to them."
+          exit 1
+        fi
         systemctl restart cage-tty1.service
         sleep 1
       fi
@@ -519,6 +552,7 @@ let
 
   examplePlan = pkgs.writeText "plan.example.json" (
     builtins.toJSON {
+      version = 1;
       disk = "/dev/nvme0n1";
       # The disk sequence number of that disk in this boot: lsblk -o PATH,DISK-SEQ.
       diskSeq = 1;
@@ -635,9 +669,11 @@ in
       fi
     '';
 
-    # Mounting a second stick to save logs: FAT32 (vfat) is always there; exFAT and NTFS (the
-    # kernel ntfs3 driver, plus ntfs-3g tools) are what Windows-formatted sticks use.
+    # btrfs: the target's file system. Mounting a second stick to save logs: FAT32 (vfat) is always
+    # there; exFAT and NTFS (the kernel ntfs3 driver, plus ntfs-3g tools) are what Windows-formatted
+    # sticks use.
     boot.supportedFilesystems = {
+      btrfs = true;
       exfat = true;
       ntfs = true;
     };
@@ -730,7 +766,8 @@ in
 
         hinteros-install --plan plan.json
 
-      The disk named in the plan is erased. The log is /var/log/hinteros-install.log.
+      The disk named in the plan is erased, unless the plan has "keepData": true.
+      The log is /var/log/hinteros-install.log.
 
     '';
 
@@ -744,8 +781,13 @@ in
         user = "root";
         program = lib.escapeShellArgs cfg.ui.command;
         # -s: Ctrl+Alt+F2 etc. switch VTs (cage has a logind session on seat0), so a root console on
-        # tty2 is reachable while the UI runs.
-        extraArguments = [ "-s" ];
+        # tty2 is reachable while the UI runs. -m last: the UI on one display only (the default,
+        # extend, stretches it across all of them).
+        extraArguments = [
+          "-s"
+          "-m"
+          "last"
+        ];
         environment = {
           # The launcher runs on native Wayland (as on the box); software GL is allowed for machines
           # whose GPU cage cannot use. The fonts are bundled in the launcher.

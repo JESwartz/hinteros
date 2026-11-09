@@ -45,23 +45,23 @@
     import shlex
 
     machine.wait_for_unit("multi-user.target")
-    machine.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-    machine.wait_for_unit("hinteros-session.service", "hinteros")
-    uid = machine.succeed("id -u hinteros").strip()
+    machine.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+    machine.wait_for_unit("hinteros-session.service", "hinteros-p1")
+    uid = machine.succeed("id -u hinteros-p1").strip()
     sock = f"/run/user/{uid}/hinteros/session.sock"
     machine.wait_until_succeeds(f"test -S {sock}")
 
     def rpc(method, params=None, wait=3):
         msgs = [
             {"jsonrpc": "2.0", "id": 0, "method": "hello",
-             "params": {"api_version": "0.18", "client": {"name": "runtime-settings-test", "version": "0"}}},
+             "params": {"api_version": "1.0", "client": {"name": "runtime-settings-test", "version": "0"}}},
             {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}},
         ]
         payload = "".join(json.dumps(m) + "\n" for m in msgs)
         cmd = f"(printf %s {shlex.quote(payload)}; sleep {wait}) | socat -t{wait} - UNIX-CONNECT:{sock}"
-        out = machine.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = machine.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         replies = [json.loads(line) for line in out.splitlines() if line.strip()]
-        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "0.18", replies[0]
+        assert "error" not in replies[0] and replies[0]["result"]["api_version"] == "1.0", replies[0]
         return next(r for r in replies if r.get("id") == 1)
 
     def poll(method, good, params=None, timeout=60):
@@ -87,7 +87,7 @@
         "${pkgs.bluez}/libexec/bluetooth/bluetoothd -n"
     )
     machine.wait_until_succeeds("busctl --system status org.bluez")
-    machine.succeed("runuser -u hinteros -- busctl --system introspect org.bluez /org/bluez | grep -q org.bluez.AgentManager1")
+    machine.succeed("runuser -u hinteros-p1 -- busctl --system introspect org.bluez /org/bluez | grep -q org.bluez.AgentManager1")
     # The policy is narrow: another user may not call org.bluez.
     machine.succeed("id other || useradd -m other")
     machine.fail("runuser -u other -- busctl --system introspect org.bluez /org/bluez")
@@ -99,7 +99,7 @@
         assert bt["result"]["available"] is False, bt
 
     # Audio: pactl reaches the real PipeWire (pipewire-pulse is socket activated).
-    machine.wait_for_unit("pipewire.socket", "hinteros")
+    machine.wait_for_unit("pipewire.socket", "hinteros-p1")
     audio = poll(
         "audio.outputs",
         lambda r: "result" in r and any(o["id"] == "hinteros_test_sink" for o in r["result"]["outputs"]),

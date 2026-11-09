@@ -1,4 +1,4 @@
-# The App Store catalog (design/catalog.md, repo hinteros-catalog; entry format 3) in the system.
+# The App Store catalog (repo hinteros-catalog; entry format 3) in the system.
 # The flake supplies the data (`hinteros.catalog.*`, see flake.nix); this module
 #   - turns every `kind = "app"` entry into a box-wide `hinteros.apps.<id>` with the entry's `app`
 #     settings (as defaults) and its name and icon fields. `app` is called with `{ pkgs, lib,
@@ -6,15 +6,16 @@
 #     pkgs.steam with our sockets hidden, lib/steam.nix). Per-profile envs call it with their own
 #     pkgs (app-env.nix);
 #   - derives, from the box-wide apps that are on, the unfree packages they need
-#     (`hinteros.unfreeAllowlist`) and the box features they name (`hinteros.boxFeatures`);
+#     (`hinteros.unfreeAllowlist`, the enabled services' too) and the box features they name
+#     (`hinteros.boxFeatures`);
 #   - enables the restricted `service` module of every service in `hinteros.catalog.services`
 #     (state.json `services`, M10);
 #   - installs the generated index and vendor terms at `share/hinteros/catalog.json` and
 #     `share/hinteros/terms/` (the Store reads /run/current-system/sw/share/hinteros/).
 #
-# Which box-wide apps are on is decided elsewhere: the installer's `onIso` apps (app-ids.nix: on
-# the ISO and offered by the installer, so jellyfin, youtube and firefox) are on with the session
-# (no state), state.nix sets exactly the ids of a schema-1 state's `apps` and none on schema 2.
+# Box-wide apps are for test VMs: without a state the installer's `onIso` apps (app-ids.nix: on the
+# ISO and offered by the installer, so jellyfin-desktop, youtube and firefox) are on with the
+# session. With a state none is: apps are per profile.
 # A function of the catalog data, not a plain module: which entries exist decides the shape of
 # this module's config (one `service` module per entry), so it must not be read from `config`.
 # flake.nix passes it in; `hinteros.catalog.*` re-exports it for other modules to read.
@@ -44,7 +45,7 @@ let
   liveServices = lib.filterAttrs (_: e: (e.kind or "app") == "service") live;
   enabled = lib.filterAttrs (id: _: config.hinteros.apps.${id}.enable) liveApps;
 
-  # The box's inputs to the box-wide apps (catalog.md, format 3).
+  # The box's inputs to the box-wide apps (catalog entry format 3).
   box = {
     firefoxKiosk = config.hinteros.firefoxKiosk.wrapper;
     steam = import ../lib/steam.nix pkgs.steam;
@@ -82,7 +83,7 @@ in
       readOnly = true;
       description = ''
         Unfree package names (`lib.getName`) the binary cache may hold: those of entries with
-        `cache = true` (hinteros-catalog's `lib.cacheableUnfree`). A cache build sets
+        `delivery = "download"` (hinteros-catalog's `lib.cacheableUnfree`). A cache build sets
         `hinteros.forbidUnfree = true` and `hinteros.unfreeExceptions` to this list.
       '';
     };
@@ -117,7 +118,7 @@ in
         id: e:
         entriesLib.defaultLeaves (
           {
-            enable = sessionEnabled && lib.elem id appIds.onIso;
+            enable = sessionEnabled && (config.hinteros.state or null) == null && lib.elem id appIds.onIso;
           }
           // entriesLib.catalogSettings {
             inherit pkgs lib box;
@@ -133,17 +134,22 @@ in
       };
     }
 
-    # The unfree packages the box-wide apps need, by name (nixpkgs.config must not depend on pkgs).
-    # App envs allow their own in a separate nixpkgs instance (app-env.nix).
+    # The unfree packages the box-wide apps and the enabled services need, by name (nixpkgs.config
+    # must not depend on pkgs): Plex Media Server is allowed only while it is on. App envs allow
+    # their own in a separate nixpkgs instance (app-env.nix).
     {
       hinteros.unfreeAllowlist = lib.unique (
-        lib.concatMap (e: e.license.unfreePackages) (lib.attrValues enabled)
+        lib.concatMap (e: e.license.unfreePackages or [ ]) (
+          lib.attrValues enabled ++ map (id: liveServices.${id}) cfg.services
+        )
       );
     }
 
-    # Box features the box-wide apps name (schema 1; on schema 2 state.json `requirements`).
+    # Box features the box-wide apps name (a device: state.json `requirements`).
     {
-      hinteros.boxFeatures = lib.unique (lib.concatMap (e: e.box or [ ]) (lib.attrValues enabled));
+      hinteros.boxFeatures = lib.unique (
+        lib.concatMap (e: e.boxFeatures or [ ]) (lib.attrValues enabled)
+      );
     }
 
     # Each enabled service's restricted NixOS module.

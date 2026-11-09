@@ -2,8 +2,7 @@
 # (Wi-Fi), BlueZ (controller pairing), PipeWire (audio output and volume) and logind/polkit
 # (sleep, restart, shutdown). The session daemon talks to them over DBus as the profile's user,
 # so the polkit rules here are scoped to the active local session of a profile: a member of the
-# `hinteros` group (profiles.md, "Device access per seat"; spike 7: polkit treats the profile's
-# user service as active and local).
+# `hinteros` group (polkit treats the profile's user service as active and local).
 {
   config,
   lib,
@@ -37,7 +36,7 @@ let
   rule = ruleFor scoped;
 
   # What the Wi-Fi settings screen needs: scan, toggle, connect, and per-user connections.
-  # ACCEPTED (threat-model.md, B3): settings.modify.system is granted. The session user can
+  # ACCEPTED: settings.modify.system is granted. The session user can
   # therefore add system-wide connections and read their secrets, Wi-Fi passwords included.
   # Accepted so Wi-Fi works before login and for every profile; the PSK is not treated as
   # secret from a game. Other users and non-local/inactive sessions keep the stock policy.
@@ -101,7 +100,7 @@ in
       (lib.mkIf cfg.network.enable {
         networking.networkmanager = {
           enable = true;
-          # No VPN plugins: the session user may create connections (threat-model.md B3).
+          # No VPN plugins: the session user may create connections.
           plugins = lib.mkForce [ ];
         };
         # NetworkManager turns ModemManager on: a root daemon that probes USB and serial devices

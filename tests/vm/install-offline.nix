@@ -127,6 +127,7 @@ in
 
     ${builtins.readFile ./install/system-steps.py}
     ${builtins.readFile ./install/copy-plan.py}
+    ${builtins.readFile ./install/disk.py}
     installer.start()
     installer.wait_for_unit("multi-user.target")
     installer.succeed("udevadm settle")
@@ -144,14 +145,15 @@ in
         ''
           with subtest("an old HinterOS install is on the target disk"):
               installer.succeed(
-                  "parted -s /dev/vdc mklabel gpt mkpart hinteros-esp fat32 1MiB 1GiB set 1 esp on mkpart hinteros-root ext4 1GiB 100%",
+                  "parted -s /dev/vdc mklabel gpt mkpart hinteros-esp fat32 1MiB 1GiB set 1 esp on mkpart hinteros-root btrfs 1GiB 100%",
                   "udevadm settle",
                   "mkfs.vfat -n HINTEROSESP /dev/vdc1",
-                  "mkfs.ext4 -q -L oldroot /dev/vdc2",
+                  "mkfs.btrfs -q -L oldroot /dev/vdc2",
                   "mkdir -p /tmp/old && mount /dev/vdc2 /tmp/old",
-                  "mkdir -p /tmp/old/etc/hinteros /tmp/old/nix/store/stale-path",
-                  "echo old-box > /tmp/old/etc/hostname; echo stale > /tmp/old/stale-marker",
-                  "echo '{\"stale\": true}' > /tmp/old/etc/hinteros/state.json",
+                  "btrfs -q subvolume create /tmp/old/root /tmp/old/nix",
+                  "mkdir -p /tmp/old/root/etc/hinteros /tmp/old/nix/store/stale-path",
+                  "echo old-box > /tmp/old/root/etc/hostname; echo stale > /tmp/old/root/stale-marker",
+                  "echo '{\"stale\": true}' > /tmp/old/root/etc/hinteros/state.json",
                   "umount /tmp/old",
               )
         ''
@@ -231,7 +233,7 @@ in
               # Package builds, as opposed to the small file and environment assemblies any install builds.
               heavy = [b for b in built if re.match(r"^(bash|glibc|gcc|binutils|coreutils|perl|python3|systemd|linux|linux-firmware|microcode-[a-z]+|wireless-regdb|mesa|nix|openssh|util-linux|kmod|intel-[a-z-]+|libva[a-z-]*|firefox[a-z-]*|hinteros-[a-z-]+)-[0-9][0-9a-z._]*$", b)]
               assert not heavy, heavy
-              installer.succeed("mountpoint -q /mnt || mount /dev/disk/by-partlabel/hinteros-root /mnt")
+              mount_target()
               installer.succeed("cmp ${facterFixture} /mnt/etc/hinteros/facter.json")
               installer.succeed("test -e /mnt/etc/hinteros/facter.deferred")
               installer.succeed("rm -rf /tmp/cfg && cp -r /mnt/etc/hinteros /tmp/cfg && umount -R /mnt")
@@ -279,12 +281,12 @@ in
 
     with subtest("the session comes up"):
         target.wait_for_unit("greetd.service")
-        target.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros")
-        target.wait_until_succeeds("pgrep -u hinteros -f '/bin/cage '")
-        target.wait_until_succeeds("pgrep -u hinteros -f hinteros-launcher")
+        target.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w hinteros-p1")
+        target.wait_until_succeeds("pgrep -u hinteros-p1 -f '/bin/cage '")
+        target.wait_until_succeeds("pgrep -u hinteros-p1 -f hinteros-launcher")
         target.wait_for_unit("hinteros-system.service")
         target.sleep(duration=timedelta(seconds=5))
-        target.succeed("pgrep -u hinteros -f hinteros-launcher")
+        target.succeed("pgrep -u hinteros-p1 -f hinteros-launcher")
         target.screenshot("installed-session")
 
     ${
@@ -299,8 +301,8 @@ in
         ""
     }
     with subtest("accepted terms are recorded (none for these apps)"):
-        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 root"
-        assert json.loads(target.succeed("cat /var/lib/hinteros/terms-accepted.json")) == {}
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/terms-accepted.json").strip() == "600 hinteros-system"
+        assert json.loads(target.succeed("cat /var/lib/hinteros/terms-accepted.json")) == {"version": 1, "accepted": {}}
 
     with subtest("/etc/hinteros and its snapshot"):
         files = target.succeed("ls /etc/hinteros").split()
@@ -313,16 +315,16 @@ in
             "pass"
         }
         state = json.loads(target.succeed("cat /etc/hinteros/state.json"))
-        # Schema 2: the spare p1 and no apps (the picks are the starter set, below).
+        # The spare p1 and no apps (the picks are the starter set, below).
         assert state["schemaVersion"] == 2 and "apps" not in state, state
-        assert state["profiles"] == [{"id": "p1", "user": "hinteros"}], state
+        assert state["profiles"] == [{"id": "p1"}], state
         assert state["services"] == [] and state["settings"]["guest"] == {"enable": True}, state
         # Offline: only the box features of apps on the medium (none; not Steam's graphics32).
         assert state["requirements"] == [], state
         assert state["settings"]["ssh"]["enable"] is True, state
         assert state["settings"]["admin"] == {"user": "james"}, state
         assert state["settings"]["hostname"] == "livingroom", state
-        assert state["disk"] == {"layout": "gpt-esp-ext4"}, state
+        check_layout(target, state)
         assert "password" not in json.dumps(state).lower(), state
         for f in ("flake.nix", "flake.lock", "state.json"):
             target.succeed(f"cmp /run/current-system/hinteros/{f} /etc/hinteros/{f}")
@@ -330,7 +332,7 @@ in
         assert target.succeed("hostname").strip() == "livingroom"
         # The flake: the channel ref and the repo; hinteros is pinned to the ISO's revision.
         flake = target.succeed("cat /etc/hinteros/flake.nix")
-        assert 'git+https://justsomeshed.com/JSwartz/HinterOS/hinteros.git?ref=stable' in flake, flake
+        assert 'git+https://git.hinteros.org/hinteros.git?ref=stable' in flake, flake
         # The input line is exactly what channels.json says (channel.set rewrites that one string).
         channels = json.loads(target.succeed("cat /run/current-system/sw/share/hinteros/update/channels.json"))
         assert f'inputs.hinteros.url = "git+{channels["repo"]}?ref={channels["branches"]["stable"]}";' in flake, (flake, channels)
@@ -341,34 +343,30 @@ in
         assert node["original"]["ref"] == "stable", node
         assert lock["nodes"]["root"]["inputs"] == {"hinteros": "hinteros"}, lock["nodes"]["root"]
         assert target.succeed("stat -c '%a %U' /etc/hinteros/state.json").strip() == "644 root"
-        # Files of the disk layout: ESP and root by partition label.
-        target.succeed("test -e /dev/disk/by-partlabel/hinteros-esp && test -e /dev/disk/by-partlabel/hinteros-root")
-        target.succeed("findmnt -no FSTYPE / | grep -qx ext4")
-        target.succeed("findmnt -no FSTYPE /boot | grep -qx vfat")
 
     with subtest("the privileged service answers (system API 0.10) and knows its channel"):
         hello = {"jsonrpc": "2.0", "id": 0, "method": "hello",
-                 "params": {"api_version": "0.10", "client": {"name": "install-test", "version": "0"}}}
+                 "params": {"api_version": "1.0", "client": {"name": "install-test", "version": "0"}}}
         info = {"jsonrpc": "2.0", "id": 1, "method": "system.info", "params": {}}
         payload = "".join(json.dumps(m) + "\n" for m in (hello, info))
         cmd = f"(printf %s {shlex.quote(payload)}; sleep 2) | socat -t2 - UNIX-CONNECT:/run/hinteros/system.sock"
-        out = target.succeed(f"runuser -u hinteros -- sh -c {shlex.quote(cmd)}")
+        out = target.succeed(f"runuser -u hinteros-p1 -- sh -c {shlex.quote(cmd)}")
         res = next(json.loads(l) for l in out.splitlines() if '"id":1' in l.replace(" ", ""))
         print(res)
         assert res["result"]["channel"] == "stable" and res["result"]["dev"] is False, res
 
     with subtest("accounts: admin with a password, the session user and root without"):
-        assert target.succeed("passwd -S hinteros").split()[1] == "L", "session user has a password"
+        assert target.succeed("passwd -S hinteros-p1").split()[1] == "L", "session user has a password"
         assert target.succeed("passwd -S root").split()[1] == "L", "root has a password"
         assert target.succeed("getent shadow james").split(":")[1].startswith("$6$")
-        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/admin-password-hash").strip() == "600 root"
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros-root/admin-password-hash").strip() == "600 root"
         target.succeed("test \"$(id -nG james | tr ' ' '\\n' | grep -cx wheel)\" = 1")
-        target.fail("id -nG hinteros | tr ' ' '\\n' | grep -qx wheel")
-        target.fail("runuser -u hinteros -- sudo -n true")
+        target.fail("id -nG hinteros-p1 | tr ' ' '\\n' | grep -qx wheel")
+        target.fail("runuser -u hinteros-p1 -- sudo -n true")
         target.succeed("printf 'hunter22\\n' | runuser -u james -- sudo -S -k true")
         target.fail("printf 'wrong\\n' | runuser -u james -- sudo -S -k true")
         # The hash is not in the config the generation embeds.
-        h = target.succeed("cat /var/lib/hinteros/admin-password-hash").strip()
+        h = target.succeed("cat /var/lib/hinteros-root/admin-password-hash").strip()
         target.fail(f"grep -rFq {shlex.quote(h)} /etc/hinteros /run/current-system/hinteros /etc/static")
 
     with subtest("sshd: password login for the admin only"):
@@ -379,7 +377,7 @@ in
             return f"sshpass -p {password} ssh {opts} {user}@localhost {cmd}"
         target.succeed(pw("james", cmd="id -un"))
         target.fail(pw("james", "wrong"))
-        target.fail(pw("hinteros"))
+        target.fail(pw("hinteros-p1"))
         target.fail(pw("root"))
 
     with subtest("the starter set: the installed apps, as the starter env"):
@@ -387,7 +385,7 @@ in
         starter = json.loads(target.succeed("cat /var/lib/hinteros/starter.json"))
         assert starter["version"] == 1 and starter["by"] == "installer", starter
         assert sorted(starter["ids"]) == sorted(installed), starter
-        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/starter.json").strip() == "600 root"
+        assert target.succeed("stat -c '%a %U' /var/lib/hinteros/starter.json").strip() == "600 hinteros-system"
         m = json.loads(target.succeed("cat /nix/var/nix/profiles/hinteros/starter/share/hinteros/apps.json"))
         assert m["ids"] == sorted(installed), m
         assert target.succeed("stat -c '%U %a' /nix/var/nix/profiles/hinteros/apps").strip() == "root 755"

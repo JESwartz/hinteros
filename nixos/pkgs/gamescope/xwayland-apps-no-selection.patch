@@ -1,0 +1,57 @@
+diff -ru c/src/steamcompmgr.cpp d/src/steamcompmgr.cpp
+--- c/src/steamcompmgr.cpp
++++ d/src/steamcompmgr.cpp
+@@ -6644,7 +6644,9 @@
+ 	{
+ 		xwayland_ctx_t *ctx = server->ctx.get();
+ 
+-		if (ctx)
++		// HinterOS: never on an app display (#2 and later): what the home app, the OSK, Steam or
++		// another app display copied is not for the apps there.
++		if (ctx && !xwayland_ctx_is_apps(ctx))
+ 			x11_set_selection_owner(ctx, contents, eSelection);
+ 	}
+ }
+@@ -6675,6 +6677,15 @@
+ 	response.xselection.property = None;
+ 	response.xselection.target = None;
+ 
++	// HinterOS: gamescope holds no selection on an app display; refuse, never answer with the
++	// text of another display.
++	if ( xwayland_ctx_is_apps( ctx ) )
++	{
++		XSendEvent(ctx->dpy, ev->requestor, False, NoEventMask, &response);
++		XFlush(ctx->dpy);
++		return;
++	}
++
+ 	if (ev->requestor == ctx->ourWindow)
+ 	{
+ 		return;
+@@ -6722,6 +6733,13 @@
+ 	unsigned long bytes_after;
+ 	unsigned char *data = NULL;
+ 
++	// HinterOS: nothing from an app display reaches the other displays, and only the answer to
++	// gamescope's own request counts (any client can send a SelectionNotify).
++	if ( xwayland_ctx_is_apps( ctx ) || ev->requestor != ctx->ourWindow )
++	{
++		return;
++	}
++
+ 	XGetWindowProperty(ctx->dpy, ev->requestor, ev->property, 0, 0, False, AnyPropertyType,
+ 			&actual_type, &actual_format, &nitems, &bytes_after, &data);
+ 	if (data) {
+@@ -8649,6 +8667,12 @@
+ 	{
+ 		return;
+ 	}
++
++	// HinterOS: what an app on an app display copies stays on that display.
++	if ( xwayland_ctx_is_apps( ctx ) )
++	{
++		return;
++	}
+ 
+ 	XConvertSelection(ctx->dpy, event->selection, ctx->atoms.utf8StringAtom, event->selection, ctx->ourWindow, CurrentTime);
+ 	XFlush(ctx->dpy);

@@ -40,35 +40,10 @@
           };
       # NetworkManager starts the connections, not iwd. With iwd's autoconnect (the default)
       # NetworkManager never connects by itself, and it copies a profile to iwd only when the
-      # profile is new or changed: a box updated from wpa_supplicant kept its Wi-Fi profile but
-      # never connected (seen on the dev box). This also keeps autoconnect-priority working.
+      # profile is new or changed. This also keeps autoconnect-priority working.
       networking.networkmanager.settings.device."wifi.iwd.autoconnect" = lib.mkIf (
         config.networking.networkmanager.wifi.backend == "iwd"
       ) false;
-
-      # Once, on the first start with iwd: NetworkManager forgets when each profile last
-      # connected. For a profile that connected before (under wpa_supplicant) NetworkManager
-      # takes iwd's request for the passphrase as "the stored one is wrong" and asks a secret
-      # agent for a new one; there is none, so the box never connects (dev box, and the
-      # wifi-iwd-migration test). Without the time it sends the stored passphrase; iwd keeps it
-      # (/var/lib/iwd) and asks no more. The times only order autoconnect between profiles.
-      systemd.services.hinteros-nm-iwd-migrate =
-        lib.mkIf (config.networking.networkmanager.wifi.backend == "iwd")
-          {
-            description = "HinterOS: prepare NetworkManager's state for iwd (once)";
-            wantedBy = [ "NetworkManager.service" ];
-            before = [ "NetworkManager.service" ];
-            unitConfig.ConditionPathExists = "!/var/lib/NetworkManager/hinteros-iwd-migrated";
-            serviceConfig = {
-              Type = "oneshot";
-              RemainAfterExit = true;
-            };
-            script = ''
-              mkdir -p /var/lib/NetworkManager
-              rm -f /var/lib/NetworkManager/timestamps
-              touch /var/lib/NetworkManager/hinteros-iwd-migrated
-            '';
-          };
 
       networking.networkmanager = {
         wifi.backend = lib.mkDefault "iwd";
