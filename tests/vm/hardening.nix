@@ -16,7 +16,8 @@
 # no profile has an ACL on a keyboard, can read one or can write to keyboard.sock (only the
 # hinteros-keyboard unit reads keyboards); lingering is denied. A profile whose session is not in
 # front (`chvt 2`) is frozen: a process of it that holds /dev/uinput from before the switch makes
-# no progress, also across a restart of hinteros-system; back on its VT it is thawed.
+# no progress, also across a restart of hinteros-system and a system switch (thawed while the
+# switch runs, which waits for every user manager); back on its VT it is thawed.
 { self, pkgs }:
 let
   inherit (pkgs) lib;
@@ -106,6 +107,8 @@ in
         hinteros-p1 = "empty";
         hinteros-p2 = "empty";
       };
+      # A system switch while p1 is frozen (test nodes have no switch-to-configuration).
+      extraModule.system.switch.enable = true;
     };
   };
 
@@ -368,6 +371,12 @@ in
           machine.succeed(f"ls -l /proc/{holder}/fd | grep -q /dev/uinput")
           still("while frozen")
           machine.wait_until_succeeds("journalctl -b -u hinteros-system | grep -q 'frozen: its session is not the active one'")
+          # A system switch (an SSH or update job started from a text console) reloads every user
+          # manager and waits for each: p1 is thawed while it runs, so it ends, and frozen after.
+          machine.succeed("timeout 300 /run/current-system/bin/switch-to-configuration test")
+          machine.succeed("journalctl -b -u hinteros-system | grep -q 'system switch: thawing every profile'")
+          machine.wait_until_succeeds(f"systemctl show -p FreezerState --value {slice} | grep -qx frozen", timeout=10)
+          still("after a system switch")
           # A restart of the service thaws on the way out and freezes again at start.
           machine.succeed("systemctl restart hinteros-system")
           machine.wait_until_succeeds(f"systemctl show -p FreezerState --value {slice} | grep -qx frozen", timeout=10)
