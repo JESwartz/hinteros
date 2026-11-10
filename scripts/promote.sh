@@ -8,7 +8,7 @@
 # and pushed. The same steps without questions, for scripts and tests:
 #
 #   nix run .#promote -- beta   [--rev <main commit>] [--bootstrap] [--security <sev>] [--bump <b> | --version <v>]
-#   nix run .#promote -- stable [--rev <beta release commit>] [--expedite] [--bump <b> | --version <v>]
+#   nix run .#promote -- stable [--rev <beta release commit>] [--bump <b> | --version <v>]
 #   nix run .#promote -- hotfix <branch> [--rev <commit>] [--security <sev>]
 #   nix run .#promote -- tag    [--rev <stable release commit>]
 #   common: [--dry-run] [--skip-ci] [--key <path>] [--yes]
@@ -52,7 +52,7 @@ usage() {
   cat <<'USAGE'
 usage: promote [--dry-run] [--skip-ci] [--key <path>]   (menus ask for all values)
        promote beta   [--rev <sha>] [--bootstrap] [--security <sev>] [--bump <bump> | --version <v>] [options]
-       promote stable [--rev <sha>] [--expedite] [--bump <bump> | --version <v>] [options]
+       promote stable [--rev <sha>] [--bump <bump> | --version <v>] [options]
        promote hotfix <branch> [--rev <sha>] [--security <sev>] [options]
        promote tag    [--rev <stable release>] [options]   (the release ISO and its signed tag v<version>)
 options: --dry-run  --skip-ci  --key <path>  --yes
@@ -64,7 +64,6 @@ options: --dry-run  --skip-ci  --key <path>  --yes
   --key        the signing key file (default: $HINTEROS_RELEASE_KEY or ~/.ssh/hinteros/release_ed25519)
   --security   none, low, medium, high or critical (if not given, the script asks)
   --bootstrap  the first beta release (the beta branch does not exist)
-  --expedite   stable only: a high or critical release after 1 hour on box #2
   --yes        answer yes to all questions, also at the review (for scripts)
 USAGE
 }
@@ -91,7 +90,6 @@ hotfix_branch=
 want_rev=
 dry_run=0
 bootstrap=0
-expedite=0
 skip_ci=0
 assume_yes=0
 security=
@@ -157,7 +155,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --dry-run) dry_run=1 ;;
     --bootstrap) bootstrap=1 ;;
-    --expedite) expedite=1 ;;
     --skip-ci) skip_ci=1 ;;
     --yes) assume_yes=1 ;;
     -h | --help)
@@ -169,11 +166,10 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 if [ "$interactive" = 1 ]; then
-  [ -z "$want_rev$security$want_bump$want_version" ] && [ "$bootstrap$expedite$assume_yes" = 000 ] \
+  [ -z "$want_rev$security$want_bump$want_version" ] && [ "$bootstrap$assume_yes" = 00 ] \
     || die "the menus ask for the commit, severity, version and confirmations: only --dry-run, --skip-ci and --key go with them"
 fi
 [ "$bootstrap" = 0 ] || [ "$mode" = beta ] || die "--bootstrap only applies to promote beta"
-[ "$expedite" = 0 ] || [ "$mode" = stable ] || die "--expedite only applies to promote stable"
 [ "$mode" != tag ] || [ -z "$security$want_bump$want_version" ] \
   || die "--security, --bump and --version do not apply to a tag (it names a stable release)"
 [ -z "$want_bump$want_version" ] || [ "$mode" != hotfix ] \
@@ -990,7 +986,7 @@ promote_beta() {
   else
     ok "beta is HinterOS $(beta_name "$new"): $new"
     info "to move a box to beta one time: sudo hinteros-bootstrap-channel beta $new"
-    info "test it on box #2. Then run nix run .#promote again for stable."
+    info "test it, then run nix run .#promote again for stable."
     if [ "$notes_edited" = 1 ]; then info "for stable, put the changed notes in release/notes.md on main"; fi
   fi
 }
@@ -1091,27 +1087,6 @@ promote_stable() {
     fail "$new_version is not more than $top (the current beta). Use $bv or a version after $top."
   fi
   compose_message "$new_version"
-
-  step "Test on box #2"
-  if [ "$interactive" = 1 ]; then
-    case "$release_sev" in
-      high | critical)
-        pick "This is a $release_sev security release. Select the test on box #2:" 1 \
-          "Normal: all couch checklists passed" \
-          "Expedite: it ran for 1 hour or more with no problems"
-        [ "$picked" = 1 ] || expedite=1
-        ;;
-    esac
-  fi
-  if [ "$expedite" = 1 ]; then
-    case "$release_sev" in
-      high | critical) ok "--expedite with a $release_sev release" ;;
-      *) fail "--expedite is only for Security: high or critical releases. This release is $release_sev." ;;
-    esac
-    confirm "Did box #2 run HinterOS $(beta_name "$target") for 1 hour or more with no problems?"
-  else
-    confirm "Did box #2 run HinterOS $(beta_name "$target") and pass the couch checklists for the changes?"
-  fi
 
   step "Signers that verify the result"
   if [ -n "$stable_tip" ]; then

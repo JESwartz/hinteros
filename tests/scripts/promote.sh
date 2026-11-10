@@ -308,9 +308,7 @@ pass "stable without --bump/--version: the beta release's own version (0.6.1)"
 expect_refused "or --version, not both" stable --rev "$beta1" --bump minor --version 0.9.0
 pass "--bump and --version together: refused"
 expect_refused "needs --yes" stable --rev "$beta1" --bump keep --key "$work/k1"
-pass "stable without the dogfood confirmation: refused"
-expect_refused "only for Security: high or critical" stable --rev "$beta2" --expedite --bump keep --yes
-pass "--expedite on a medium release: refused"
+pass "stable without --yes and no terminal (the sign confirmation): refused"
 expect_refused "0.6.0 is less than 0.6.1" stable --rev "$beta1" --version 0.6.0 --yes --key "$work/k1"
 pass "a version below the beta's: refused"
 
@@ -587,9 +585,8 @@ grep -q "This release makes it" "$work/out" || die "menus: the first beta was no
 grep -q "beta is HinterOS 0.7.1.${mbeta:0:7} beta" "$work/out" || die "menus: the beta's name"
 pass "menus: release main to beta, the first one started without --bootstrap"
 
-# 1 release beta to stable, 1 newest beta, 2 edit the notes then 1 use them, 1 keep (0.7.1),
-# y box #2, y sign.
-run_menus '1\n1\n2\n1\n1\ny\ny\n' --skip-ci --key "$work/k1"
+# 1 release beta to stable, 1 newest beta, 2 edit the notes then 1 use them, 1 keep (0.7.1), y sign.
+run_menus '1\n1\n2\n1\n1\ny\n' --skip-ci --key "$work/k1"
 mstable=$(mo rev-parse -q --verify refs/heads/stable) || {
   cat "$work/out"
   die "the menus did not release stable"
