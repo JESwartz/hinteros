@@ -6,6 +6,8 @@ notes, and `promote stable` renames it to the version the promoter picks. Start 
 `## Unreleased` section after merging a stable release into `main`. Keep each section short and
 written for the person using the box.
 
+## Unreleased
+
 ## 1.0.1
 
 HinterOS 1.0, the first release for everyone: a controller-driven console and smart TV system

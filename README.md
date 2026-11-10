@@ -51,9 +51,7 @@ one consistent system.
 Boxes follow the `stable` or `beta` branch of this repo and only install a tip that is signed by
 a key listed in `release/allowed_signers` of the generation they are running. Versions are semver;
 1.0 is the first public release (0.x were internal pre-releases) and ships on the `unstable`
-nixpkgs base only. `release/version` is still 0.7.0, so the first 1.0 beta needs
-`promote -- beta --version 1.0.0` (the default is the next patch); the daemon and the launcher are
-1.0.0 already. Commits on `main` are not signed; the owner promotes them:
+nixpkgs base only. Commits on `main` are not signed; the owner promotes them:
 
 | Path or command | What it is |
 |---|---|
@@ -102,11 +100,11 @@ every update of the boxes it installs. Before you write a downloaded ISO to a st
 
 ```
 git clone https://git.hinteros.org/hinteros.git && cd hinteros
-git show v1.0.0:release/allowed_signers | grep -v '^#' \
+git show v1.0.1:release/allowed_signers | grep -v '^#' \
   | sed 's/^\([^ ]*\) /\1 namespaces="git" /' > /tmp/hinteros.signers
-git -c gpg.ssh.allowedSignersFile=/tmp/hinteros.signers verify-tag v1.0.0   # Good "git" signature
-ssh-keygen -lf <(git show v1.0.0:release/allowed_signers | grep -v '^#' | cut -d' ' -f2-3)
-git tag -l --format='%(contents:body)' v1.0.0 > SHA256SUMS
+git -c gpg.ssh.allowedSignersFile=/tmp/hinteros.signers verify-tag v1.0.1   # Good "git" signature
+ssh-keygen -lf <(git show v1.0.1:release/allowed_signers | grep -v '^#' | cut -d' ' -f2-3)
+git tag -l --format='%(contents:body)' v1.0.1 > SHA256SUMS
 sha256sum -c SHA256SUMS   # next to the downloaded hinteros-installer.iso
 ```
 
